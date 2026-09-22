@@ -20,6 +20,7 @@ TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     path = tmp_path / "cursustrace.db"
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", path)
+    monkeypatch.setattr(db, "CV_PATH", tmp_path / "cv.md")
     yield path
 
 
@@ -262,3 +263,72 @@ def test_clear_all_jobs_resets_auto_increment(db_path: Path) -> None:
     _add("https://example.com/2", "Engineer Two")
 
     assert db.get_jobs()[0]["id"] == 1
+
+
+def _profile_payload(full_name: str = "Jane Doe", cv_markdown: str = "# Jane Doe\n\nEngineer") -> db.Profile:
+    return {
+        "full_name": full_name,
+        "location": "Remote",
+        "phone": "555-0100",
+        "email": "jane@example.com",
+        "linkedin_url": "https://linkedin.com/in/jane",
+        "github_url": "https://github.com/jane",
+        "cv_markdown": cv_markdown,
+        "date_updated": None,
+    }
+
+
+def test_init_db_creates_profile_table(db_path: Path) -> None:
+    db.init_db()
+    with db.get_connection() as conn:
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'profile'"
+        ).fetchall()
+    assert len(tables) == 1
+
+
+def test_save_and_get_profile_round_trip(db_path: Path) -> None:
+    db.init_db()
+    db.save_profile(_profile_payload())
+
+    profile = db.get_profile()
+    assert profile["full_name"] == "Jane Doe"
+    assert profile["email"] == "jane@example.com"
+    assert profile["linkedin_url"] == "https://linkedin.com/in/jane"
+    assert profile["cv_markdown"] == "# Jane Doe\n\nEngineer"
+    assert profile["date_updated"] is not None
+
+
+def test_save_profile_upserts_single_row(db_path: Path) -> None:
+    db.init_db()
+    db.save_profile(_profile_payload())
+    db.save_profile(_profile_payload(full_name="Jane Smith"))
+    with db.get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM profile").fetchone()[0]
+    assert count == 1
+    assert db.get_profile()["full_name"] == "Jane Smith"
+
+
+def test_save_profile_writes_cv_markdown(db_path: Path) -> None:
+    db.init_db()
+    db.save_profile(_profile_payload(cv_markdown="# Updated CV"))
+
+    assert db.CV_PATH.read_text(encoding="utf-8") == "# Updated CV"
+
+
+def test_get_profile_seeds_cv_from_file(db_path: Path) -> None:
+    db.init_db()
+    db.CV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db.CV_PATH.write_text("# From File", encoding="utf-8")
+
+    profile = db.get_profile()
+    assert profile["full_name"] == ""
+    assert profile["cv_markdown"] == "# From File"
+    assert profile["date_updated"] is None
+
+
+def test_get_profile_without_row_or_file(db_path: Path) -> None:
+    db.init_db()
+    profile = db.get_profile()
+    assert profile["cv_markdown"] == ""
+    assert profile["full_name"] == ""

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1.element_tree import Button
+from streamlit.testing.v1.element_tree import Button, TextArea, TextInput
 
 from cursustrace import app, db, scraper
 from cursustrace.errors import ScrapeError
@@ -35,6 +35,7 @@ def _raise_scrape(url: str) -> scraper.ScrapedJob:
 @pytest.fixture
 def app_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
+    monkeypatch.setattr(db, "CV_PATH", tmp_path / "cv.md")
     monkeypatch.setattr(scraper, "scrape_job", _fake_scrape)
     return AppTest.from_file(APP_PATH)
 
@@ -288,4 +289,64 @@ def test_clear_database_removes_all_jobs(app_test: AppTest) -> None:
     assert db.get_jobs() == []
     assert any(
         message.value == "Successfully cleared 1 positions." for message in app_test.success
+    )
+
+
+def _profile_text_area(app_test: AppTest) -> TextArea:
+    return next(
+        field
+        for field in app_test.text_area
+        if field.label.startswith("Edit your CV in Markdown format")
+    )
+
+
+def _profile_input(app_test: AppTest, label: str) -> TextInput:
+    return next(field for field in app_test.text_input if field.label == label)
+
+
+def test_profile_tab_renders(app_test: AppTest) -> None:
+    app_test.run()
+    assert not app_test.exception
+    labels = {field.label for field in app_test.text_input}
+    assert {"Full Name", "Email", "LinkedIn URL", "Location", "Phone Number", "GitHub URL"} <= labels
+
+
+def test_profile_prefills_existing_values(app_test: AppTest) -> None:
+    db.init_db()
+    db.save_profile(
+        {
+            "full_name": "Jane Doe",
+            "location": "Remote",
+            "phone": "555-0100",
+            "email": "jane@example.com",
+            "linkedin_url": "https://linkedin.com/in/jane",
+            "github_url": "https://github.com/jane",
+            "cv_markdown": "# Jane",
+            "date_updated": None,
+        }
+    )
+    app_test.run()
+
+    assert _profile_input(app_test, "Full Name").value == "Jane Doe"
+    assert _profile_text_area(app_test).value == "# Jane"
+
+
+def test_profile_save_persists_and_syncs_cv(app_test: AppTest) -> None:
+    app_test.run()
+    _profile_input(app_test, "Full Name").set_value("Jane Doe").run()
+    _profile_input(app_test, "Email").set_value("jane@example.com").run()
+    _profile_text_area(app_test).set_value("# Jane Doe\n\nNew CV").run()
+
+    next(
+        button for button in app_test.button if button.label == "💾 Save Profile & CV"
+    ).click().run()
+
+    assert not app_test.exception
+    profile = db.get_profile()
+    assert profile["full_name"] == "Jane Doe"
+    assert profile["email"] == "jane@example.com"
+    assert profile["cv_markdown"] == "# Jane Doe\n\nNew CV"
+    assert db.CV_PATH.read_text(encoding="utf-8") == "# Jane Doe\n\nNew CV"
+    assert any(
+        message.value == "Profile and CV saved successfully!" for message in app_test.success
     )
