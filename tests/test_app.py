@@ -530,6 +530,13 @@ async def test_theme_defaults_to_system(user: User) -> None:
     assert dark.value is None
 
 
+async def test_settings_drawer_is_wide(user: User) -> None:
+    await user.open("/")
+
+    drawer = user.find(ui.right_drawer).elements.pop()
+    assert drawer.props["width"] == "480"
+
+
 async def test_theme_toggle_persists_dark(user: User) -> None:
     await user.open("/")
 

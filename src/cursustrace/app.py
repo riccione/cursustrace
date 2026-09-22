@@ -276,7 +276,7 @@ async def _handle_scan(
 
 def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     ui.label("Appearance").classes("text-h6")
-    theme = ui.toggle(DARK_MODE_OPTIONS, value=_dark_mode_name(dark.value))
+    theme = ui.toggle(DARK_MODE_OPTIONS, value=_dark_mode_name(dark.value)).classes("w-full")
 
     def update_theme(event: events.ValueChangeEventArguments[str | None]) -> None:
         name = event.value or "system"
@@ -292,7 +292,7 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
             "⚠️ This action cannot be undone. All tracked job postings and "
             "application history will be permanently erased."
         ).classes("text-negative")
-        confirm = ui.input("Type 'DELETE' to confirm", placeholder="DELETE")
+        confirm = ui.input("Type 'DELETE' to confirm", placeholder="DELETE").classes("w-full")
         button = ui.button(
             "Confirm & Clear All Data",
             on_click=lambda: _clear_database(refresh),
@@ -406,7 +406,7 @@ def dashboard_page() -> None:
         ui.label(APP_TITLE).classes("text-h6")
         settings_button = ui.button(icon="settings").props("flat color=white")
 
-    with ui.right_drawer(value=False) as drawer:
+    with ui.right_drawer(value=False).props("width=480") as drawer:
         settings_button.on_click(lambda: drawer.toggle())
         _render_settings(refresh, dark)
 
