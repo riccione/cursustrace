@@ -209,7 +209,7 @@ def _handle_scan(url: str) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, page_icon="📋")
+    st.set_page_config(page_title=APP_TITLE, page_icon="📋", layout="wide")
     db.init_db()
 
     st.title(APP_TITLE)
