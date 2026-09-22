@@ -8,7 +8,14 @@ from contextlib import closing
 from pathlib import Path
 from typing import TypedDict, cast
 
+from rapidfuzz import fuzz
+
+from cursustrace.utils import clean_url, generate_fingerprint
+
 DEFAULT_DB_PATH = Path("data/cursustrace.db")
+
+FUZZY_THRESHOLD = 85
+FUZZY_CANDIDATE_LIMIT = 50
 
 CREATE_JOBS_TABLE = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -20,9 +27,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     description TEXT,
     applied INTEGER DEFAULT 0,
     date_added TEXT NOT NULL,
-    date_applied TEXT
+    date_applied TEXT,
+    fingerprint TEXT UNIQUE
 )
 """
+
+CREATE_FINGERPRINT_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint)"
+)
 
 
 class Job(TypedDict):
@@ -37,10 +49,24 @@ class Job(TypedDict):
     applied: int
     date_added: str
     date_applied: str | None
+    fingerprint: str | None
 
 
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    if "fingerprint" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN fingerprint TEXT")
+        for row in conn.execute("SELECT id, company, title, location FROM jobs").fetchall():
+            conn.execute(
+                "UPDATE jobs SET fingerprint = ? WHERE id = ?",
+                (generate_fingerprint(row["company"], row["title"], row["location"]), row["id"]),
+            )
+    conn.execute(CREATE_FINGERPRINT_INDEX)
+
 
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
@@ -53,10 +79,57 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create the jobs table if it does not already exist."""
+    """Create the jobs table if needed and apply schema migrations."""
     with closing(get_connection()) as conn:
         conn.execute(CREATE_JOBS_TABLE)
+        _migrate(conn)
         conn.commit()
+
+
+def _duplicate_reason(conn: sqlite3.Connection, url: str, fingerprint: str) -> str | None:
+    cleaned = clean_url(url)
+    for row in conn.execute("SELECT job_url FROM jobs").fetchall():
+        if clean_url(row["job_url"]) == cleaned:
+            return "Duplicate position already applied/tracked"
+    if fingerprint:
+        match = conn.execute(
+            "SELECT 1 FROM jobs WHERE fingerprint = ?", (fingerprint,)
+        ).fetchone()
+        if match is not None:
+            return "Duplicate position already applied/tracked"
+    return None
+
+
+def _fuzzy_reason(conn: sqlite3.Connection, company: str | None, description: str | None) -> str | None:
+    if not company or not description:
+        return None
+    rows = conn.execute(
+        "SELECT description FROM jobs WHERE company = ? ORDER BY id DESC LIMIT ?",
+        (company, FUZZY_CANDIDATE_LIMIT),
+    ).fetchall()
+    for row in rows:
+        candidate = row["description"]
+        if candidate and fuzz.token_set_ratio(description, candidate) > FUZZY_THRESHOLD:
+            return "Duplicate position already applied/tracked"
+    return None
+
+
+def check_duplicate(
+    url: str,
+    title: str | None,
+    company: str | None,
+    location: str | None,
+    description: str | None,
+) -> tuple[bool, str]:
+    """Detect duplicates by canonical URL, fingerprint, or fuzzy description match."""
+    fingerprint = generate_fingerprint(company, title, location)
+    with closing(get_connection()) as conn:
+        reason = _duplicate_reason(conn, url, fingerprint)
+        if reason is None:
+            reason = _fuzzy_reason(conn, company, description)
+    if reason is None:
+        return (False, "")
+    return (True, "Duplicate position already applied/tracked")
 
 
 def add_job(
@@ -65,14 +138,18 @@ def add_job(
     company: str | None,
     location: str | None,
     description: str | None,
+    fingerprint: str | None = None,
 ) -> bool:
-    """Insert a job listing; return False when the URL already exists."""
+    """Insert a job listing; return False when the URL or fingerprint already exists."""
+    if fingerprint is None:
+        fingerprint = generate_fingerprint(company, title, location)
     try:
         with closing(get_connection()) as conn:
             conn.execute(
-                "INSERT INTO jobs (job_url, title, company, location, description, date_added) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (url, title, company, location, description, _now()),
+                "INSERT INTO jobs "
+                "(job_url, title, company, location, description, date_added, fingerprint) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (url, title, company, location, description, _now(), fingerprint),
             )
             conn.commit()
     except sqlite3.IntegrityError:
