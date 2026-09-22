@@ -123,6 +123,53 @@ def _render_settings() -> None:
                 st.rerun()
 
 
+def _render_profile_editor() -> None:
+    st.header("👤 Profile & CV Configuration")
+    if st.session_state.pop("profile_saved", False):
+        st.success("Profile and CV saved successfully!")
+    profile = db.get_profile()
+
+    with st.form("profile_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Full Name", value=profile["full_name"])
+            email = st.text_input("Email", value=profile["email"])
+            linkedin = st.text_input("LinkedIn URL", value=profile["linkedin_url"])
+        with col2:
+            location = st.text_input("Location", value=profile["location"])
+            phone = st.text_input("Phone Number", value=profile["phone"])
+            github = st.text_input("GitHub URL", value=profile["github_url"])
+
+        st.subheader("Markdown CV")
+        editor_col, preview_col = st.columns([1, 1])
+        with editor_col:
+            cv_text = st.text_area(
+                "Edit your CV in Markdown format:",
+                value=profile["cv_markdown"],
+                height=450,
+            )
+        with preview_col:
+            st.markdown("**Live preview**")
+            st.markdown(cv_text or "_Nothing to preview yet._")
+
+        submitted = st.form_submit_button("💾 Save Profile & CV")
+        if submitted:
+            db.save_profile(
+                {
+                    "full_name": name,
+                    "location": location,
+                    "phone": phone,
+                    "email": email,
+                    "linkedin_url": linkedin,
+                    "github_url": github,
+                    "cv_markdown": cv_text,
+                    "date_updated": None,
+                }
+            )
+            st.session_state["profile_saved"] = True
+            st.rerun()
+
+
 def _handle_scan(url: str) -> None:
     if not url.strip():
         st.warning("Please enter a job URL.")
@@ -177,17 +224,24 @@ def main() -> None:
             _render_back_button()
         return
 
-    url = st.text_input("Job URL", key="job_url")
-    if st.button("Scan & Save Position"):
-        _handle_scan(url)
+    dashboard_tab, profile_tab = st.tabs(["📋 Dashboard", "👤 Profile & CV Editor"])
+    with dashboard_tab:
+        url = st.text_input("Job URL", key="job_url")
+        if st.button("Scan & Save Position"):
+            _handle_scan(url)
 
-    unapplied_tab, applied_tab = st.tabs(["⏳ Unapplied Positions", "✅ Applied Positions"])
-    with unapplied_tab:
-        _render_job_list(db.get_jobs(applied_filter=False), "No unapplied positions yet.")
-    with applied_tab:
-        _render_job_list(db.get_jobs(applied_filter=True), "No applied positions yet.")
+        unapplied_tab, applied_tab = st.tabs(
+            ["⏳ Unapplied Positions", "✅ Applied Positions"]
+        )
+        with unapplied_tab:
+            _render_job_list(db.get_jobs(applied_filter=False), "No unapplied positions yet.")
+        with applied_tab:
+            _render_job_list(db.get_jobs(applied_filter=True), "No applied positions yet.")
 
-    _render_settings()
+        _render_settings()
+
+    with profile_tab:
+        _render_profile_editor()
 
 
 if __name__ == "__main__":
