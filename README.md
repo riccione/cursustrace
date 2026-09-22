@@ -30,10 +30,10 @@ uv run streamlit run src/cursustrace/app.py
 ```
 
 Paste a job listing URL, click **Scan & Save Position**, then use the
-**Unapplied** and **Applied** tabs to manage each position. Toggle
-**Mark as Applied** on a card to move it between tabs. Select
-**View full details** on a card to open the complete scraped description and
-metadata.
+**Unapplied**, **Applied**, **Interview**, and **Rejected** tabs to manage each
+position through the pipeline. Toggle **Mark as Applied**, **Interview**, or
+**Rejected** on a card to move it between tabs. Select **View full details** on
+a card to open the complete scraped description and metadata.
 
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
 your CV in Markdown with a live preview. Your profile and CV are stored only in

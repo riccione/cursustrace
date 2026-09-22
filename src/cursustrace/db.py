@@ -6,7 +6,7 @@ import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 from rapidfuzz import fuzz
 
@@ -26,8 +26,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     location TEXT,
     description TEXT,
     applied INTEGER DEFAULT 0,
+    interview INTEGER DEFAULT 0,
+    rejected INTEGER DEFAULT 0,
     date_added TEXT NOT NULL,
     date_applied TEXT,
+    date_interview TEXT,
+    date_rejected TEXT,
     fingerprint TEXT UNIQUE
 )
 """
@@ -61,9 +65,17 @@ class Job(TypedDict):
     location: str | None
     description: str | None
     applied: int
+    interview: int
+    rejected: int
     date_added: str
     date_applied: str | None
+    date_interview: str | None
+    date_rejected: str | None
     fingerprint: str | None
+
+
+JobStatus = Literal["unapplied", "applied", "interview", "rejected"]
+JobFlag = Literal["applied", "interview", "rejected"]
 
 
 class Profile(TypedDict):
@@ -103,6 +115,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "UPDATE jobs SET fingerprint = ? WHERE id = ?",
                 (generate_fingerprint(row["company"], row["title"], row["location"]), row["id"]),
             )
+    for column, definition in (
+        ("interview", "INTEGER DEFAULT 0"),
+        ("rejected", "INTEGER DEFAULT 0"),
+        ("date_interview", "TEXT"),
+        ("date_rejected", "TEXT"),
+    ):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
     conn.execute(CREATE_FINGERPRINT_INDEX)
 
 
@@ -203,24 +223,58 @@ def add_job(
     return True
 
 
-def update_applied_status(job_id: int, applied: bool) -> None:
-    """Mark a job as applied or not, stamping or clearing date_applied."""
-    date_applied = _now() if applied else None
+def set_job_status(job_id: int, status: JobStatus) -> None:
+    """Move a job to a pipeline stage, stamping its date and preserving earlier ones."""
     with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT date_applied, date_interview, date_rejected FROM jobs WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return
+
+        now = _now()
+        if status == "unapplied":
+            applied = interview = rejected = 0
+            date_applied = date_interview = date_rejected = None
+        else:
+            applied = 1 if status == "applied" else 0
+            interview = 1 if status == "interview" else 0
+            rejected = 1 if status == "rejected" else 0
+            date_applied = row["date_applied"] or now
+            date_interview = now if status == "interview" else None
+            date_rejected = now if status == "rejected" else None
+            if status == "rejected":
+                date_interview = row["date_interview"]
+
         conn.execute(
-            "UPDATE jobs SET applied = ?, date_applied = ? WHERE id = ?",
-            (1 if applied else 0, date_applied, job_id),
+            "UPDATE jobs SET applied = ?, interview = ?, rejected = ?, "
+            "date_applied = ?, date_interview = ?, date_rejected = ? WHERE id = ?",
+            (
+                applied,
+                interview,
+                rejected,
+                date_applied,
+                date_interview,
+                date_rejected,
+                job_id,
+            ),
         )
         conn.commit()
 
 
-def get_jobs(applied_filter: bool | None = None) -> list[Job]:
-    """Return jobs ordered by id descending, optionally filtered by applied status."""
+def get_jobs(status: JobStatus | None = None) -> list[Job]:
+    """Return jobs ordered by id descending, optionally filtered by pipeline status."""
     query = "SELECT * FROM jobs"
     params: tuple[int, ...] = ()
-    if applied_filter is not None:
-        query += " WHERE applied = ?"
-        params = (1 if applied_filter else 0,)
+    if status == "unapplied":
+        query += " WHERE applied = 0 AND interview = 0 AND rejected = 0"
+    elif status == "applied":
+        query += " WHERE applied = 1"
+    elif status == "interview":
+        query += " WHERE interview = 1"
+    elif status == "rejected":
+        query += " WHERE rejected = 1"
     query += " ORDER BY id DESC"
 
     with closing(get_connection()) as conn:

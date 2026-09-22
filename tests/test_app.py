@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1.element_tree import Button, TextArea, TextInput
+from streamlit.testing.v1.element_tree import Button, Checkbox, TextArea, TextInput
 
 from cursustrace import app, db, scraper
 from cursustrace.errors import ScrapeError
@@ -163,19 +163,86 @@ def test_scrape_error_shows_error(
     assert db.get_jobs() == []
 
 
+def _job_checkbox(app_test: AppTest, label: str) -> Checkbox:
+    return next(box for box in app_test.checkbox if box.label == label)
+
+
 def test_checkbox_marks_job_applied(app_test: AppTest) -> None:
     app_test.run()
     app_test.text_input[0].set_value(JOB_URL).run()
     app_test.button[0].click().run()
-    assert len(app_test.checkbox) == 1
+    assert len(app_test.checkbox) == 3
 
-    app_test.checkbox[0].check().run()
+    _job_checkbox(app_test, "Mark as Applied").check().run()
 
     assert not app_test.exception
-    applied = db.get_jobs(applied_filter=True)
+    applied = db.get_jobs(status="applied")
     assert len(applied) == 1
     assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", applied[0]["date_applied"] or "")
-    assert db.get_jobs(applied_filter=False) == []
+    assert db.get_jobs(status="unapplied") == []
+
+
+def test_checkbox_marks_job_interview(app_test: AppTest) -> None:
+    app_test.run()
+    app_test.text_input[0].set_value(JOB_URL).run()
+    app_test.button[0].click().run()
+
+    _job_checkbox(app_test, "Interview").check().run()
+
+    assert not app_test.exception
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
+    assert job["date_interview"] is not None
+
+
+def test_checkbox_marks_job_rejected(app_test: AppTest) -> None:
+    app_test.run()
+    app_test.text_input[0].set_value(JOB_URL).run()
+    app_test.button[0].click().run()
+
+    _job_checkbox(app_test, "Rejected").check().run()
+
+    assert not app_test.exception
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 1)
+    assert job["date_rejected"] is not None
+
+
+def test_interview_replaces_applied(app_test: AppTest) -> None:
+    app_test.run()
+    app_test.text_input[0].set_value(JOB_URL).run()
+    app_test.button[0].click().run()
+
+    _job_checkbox(app_test, "Mark as Applied").check().run()
+    _job_checkbox(app_test, "Interview").check().run()
+
+    assert not app_test.exception
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
+
+
+def test_unchecking_returns_to_unapplied(app_test: AppTest) -> None:
+    app_test.run()
+    app_test.text_input[0].set_value(JOB_URL).run()
+    app_test.button[0].click().run()
+
+    _job_checkbox(app_test, "Mark as Applied").check().run()
+    _job_checkbox(app_test, "Mark as Applied").uncheck().run()
+
+    assert not app_test.exception
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 0)
+    assert job["date_applied"] is None
+
+
+def test_dashboard_lists_status_tabs(app_test: AppTest) -> None:
+    app_test.run()
+
+    infos = [element.value for element in app_test.info]
+    assert "No unapplied positions yet." in infos
+    assert "No applied positions yet." in infos
+    assert "No interview positions yet." in infos
+    assert "No rejected positions yet." in infos
 
 
 def _seed_job(title: str = "Senior Engineer", description: str = "Body text") -> int:
@@ -208,13 +275,15 @@ def test_details_view_shows_full_description(app_test: AppTest) -> None:
 
 def test_details_view_shows_tracking_fields(app_test: AppTest) -> None:
     job_id = _seed_job()
-    db.update_applied_status(job_id, True)
+    db.set_job_status(job_id, "interview")
     app_test.query_params[app.DETAIL_PARAM] = str(job_id)
     app_test.run()
 
     assert not app_test.exception
     markdown = [element.value for element in app_test.markdown]
-    assert any(value.startswith("**Applied:** Yes") for value in markdown)
+    assert any(value == "**Status:** Interview" for value in markdown)
+    assert any(value.startswith("**Applied:**") for value in markdown)
+    assert any(value.startswith("**Interview:**") for value in markdown)
     assert any("**Added:**" in value for value in markdown)
 
 

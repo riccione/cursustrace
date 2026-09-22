@@ -15,6 +15,12 @@ from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename
 APP_TITLE = "CursusTrace — Job Application Tracker"
 DETAIL_PARAM = "job"
 
+STATUS_CHECKBOXES: tuple[tuple[db.JobFlag, str], ...] = (
+    ("applied", "Mark as Applied"),
+    ("interview", "Interview"),
+    ("rejected", "Rejected"),
+)
+
 
 @st.cache_data(show_spinner=False)
 def _cv_pdf_bytes(profile: db.Profile) -> bytes:
@@ -50,6 +56,13 @@ def run() -> None:
             sys.exit(0)
 
 
+def _on_status_change(job_id: int, status: db.JobFlag) -> None:
+    checked = bool(st.session_state.get(f"{status}_{job_id}"))
+    db.set_job_status(job_id, status if checked else "unapplied")
+    for name, _label in STATUS_CHECKBOXES:
+        st.session_state.pop(f"{name}_{job_id}", None)
+
+
 def _render_job_card(job: db.Job) -> None:
     title = job["title"] or "Untitled position"
     company = job["company"] or "Unknown company"
@@ -59,14 +72,14 @@ def _render_job_card(job: db.Job) -> None:
         st.markdown(f"[Open job posting]({job['job_url']})")
         st.markdown(f"[View full details](?{DETAIL_PARAM}={job['id']})")
 
-        checked = st.checkbox(
-            "Mark as Applied",
-            value=bool(job["applied"]),
-            key=f"applied_{job['id']}",
-        )
-        if checked != bool(job["applied"]):
-            db.update_applied_status(job["id"], checked)
-            st.rerun()
+        for status, label in STATUS_CHECKBOXES:
+            st.checkbox(
+                label,
+                value=bool(job[status]),
+                key=f"{status}_{job['id']}",
+                on_change=_on_status_change,
+                args=(job["id"], status),
+            )
 
 
 def _render_job_list(jobs: list[db.Job], empty_message: str) -> None:
@@ -75,6 +88,16 @@ def _render_job_list(jobs: list[db.Job], empty_message: str) -> None:
         return
     for job in jobs:
         _render_job_card(job)
+
+
+def _job_status(job: db.Job) -> db.JobStatus:
+    if job["interview"]:
+        return "interview"
+    if job["rejected"]:
+        return "rejected"
+    if job["applied"]:
+        return "applied"
+    return "unapplied"
 
 
 def _resolve_job(job_id: int) -> db.Job | None:
@@ -94,8 +117,13 @@ def _render_job_detail(job: db.Job) -> None:
     st.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
     st.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
     st.markdown(f"**Added:** {job['date_added']}")
-    applied = f"Yes — {job['date_applied']}" if job["applied"] else "No"
-    st.markdown(f"**Applied:** {applied}")
+    st.markdown(f"**Status:** {_job_status(job).title()}")
+    if job["date_applied"]:
+        st.markdown(f"**Applied:** {job['date_applied']}")
+    if job["date_interview"]:
+        st.markdown(f"**Interview:** {job['date_interview']}")
+    if job["date_rejected"]:
+        st.markdown(f"**Rejected:** {job['date_rejected']}")
     st.markdown(f"[Open original posting]({job['job_url']})")
 
     st.divider()
@@ -250,13 +278,22 @@ def main() -> None:
         if st.button("Scan & Save Position"):
             _handle_scan(url)
 
-        unapplied_tab, applied_tab = st.tabs(
-            ["⏳ Unapplied Positions", "✅ Applied Positions"]
+        unapplied_tab, applied_tab, interview_tab, rejected_tab = st.tabs(
+            [
+                "⏳ Unapplied Positions",
+                "✅ Applied Positions",
+                "🗣️ Interview Positions",
+                "❌ Rejected Positions",
+            ]
         )
         with unapplied_tab:
-            _render_job_list(db.get_jobs(applied_filter=False), "No unapplied positions yet.")
+            _render_job_list(db.get_jobs(status="unapplied"), "No unapplied positions yet.")
         with applied_tab:
-            _render_job_list(db.get_jobs(applied_filter=True), "No applied positions yet.")
+            _render_job_list(db.get_jobs(status="applied"), "No applied positions yet.")
+        with interview_tab:
+            _render_job_list(db.get_jobs(status="interview"), "No interview positions yet.")
+        with rejected_tab:
+            _render_job_list(db.get_jobs(status="rejected"), "No rejected positions yet.")
 
         _render_settings()
 

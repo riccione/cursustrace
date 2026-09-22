@@ -54,7 +54,11 @@ def test_add_job_returns_true_and_stamps_date(db_path: Path) -> None:
     assert job["job_url"] == "https://example.com/1"
     assert job["title"] == "Engineer"
     assert job["applied"] == 0
+    assert job["interview"] == 0
+    assert job["rejected"] == 0
     assert job["date_applied"] is None
+    assert job["date_interview"] is None
+    assert job["date_rejected"] is None
     assert TIMESTAMP_RE.match(job["date_added"])
 
 
@@ -80,38 +84,78 @@ def test_get_jobs_orders_by_id_desc(db_path: Path) -> None:
     assert len(ids) == 3
 
 
-def test_get_jobs_applied_filter(db_path: Path) -> None:
+def test_get_jobs_status_filter(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1", "Engineer One")
     _add("https://example.com/2", "Engineer Two")
+    _add("https://example.com/3", "Engineer Three")
     jobs = db.get_jobs()
-    db.update_applied_status(jobs[0]["id"], True)
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "interview")
+    db.set_job_status(jobs[2]["id"], "rejected")
 
-    assert [j["job_url"] for j in db.get_jobs(applied_filter=True)] == ["https://example.com/2"]
-    assert [j["job_url"] for j in db.get_jobs(applied_filter=False)] == ["https://example.com/1"]
-    assert len(db.get_jobs(applied_filter=None)) == 2
+    assert [j["job_url"] for j in db.get_jobs(status="applied")] == ["https://example.com/3"]
+    assert [j["job_url"] for j in db.get_jobs(status="interview")] == ["https://example.com/2"]
+    assert [j["job_url"] for j in db.get_jobs(status="rejected")] == ["https://example.com/1"]
+    assert db.get_jobs(status="unapplied") == []
+    assert len(db.get_jobs(status=None)) == 3
 
 
-def test_update_applied_status_round_trip(db_path: Path) -> None:
+def test_set_job_status_is_mutually_exclusive(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
     job_id = db.get_jobs()[0]["id"]
 
-    db.update_applied_status(job_id, True)
+    db.set_job_status(job_id, "interview")
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
+    assert job["date_interview"] is not None
+
+    db.set_job_status(job_id, "rejected")
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 1)
+    assert job["date_rejected"] is not None
+
+
+def test_set_job_status_round_trip(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "applied")
     applied = db.get_jobs()[0]
     assert applied["applied"] == 1
-    assert applied["date_applied"] is not None
     assert TIMESTAMP_RE.match(applied["date_applied"] or "")
 
-    db.update_applied_status(job_id, False)
+    db.set_job_status(job_id, "unapplied")
     unapplied = db.get_jobs()[0]
-    assert unapplied["applied"] == 0
+    assert (unapplied["applied"], unapplied["interview"], unapplied["rejected"]) == (0, 0, 0)
     assert unapplied["date_applied"] is None
 
 
-def test_update_applied_status_unknown_id_is_noop(db_path: Path) -> None:
+def test_set_job_status_preserves_earlier_dates(db_path: Path) -> None:
     db.init_db()
-    db.update_applied_status(999, True)
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "applied")
+    date_applied = db.get_jobs()[0]["date_applied"]
+
+    db.set_job_status(job_id, "interview")
+    interview = db.get_jobs()[0]
+    assert interview["date_applied"] == date_applied
+    assert interview["date_interview"] is not None
+
+    db.set_job_status(job_id, "rejected")
+    rejected = db.get_jobs()[0]
+    assert rejected["date_applied"] == date_applied
+    assert rejected["date_interview"] == interview["date_interview"]
+    assert rejected["date_rejected"] is not None
+
+
+def test_set_job_status_unknown_id_is_noop(db_path: Path) -> None:
+    db.init_db()
+    db.set_job_status(999, "applied")
     assert db.get_jobs() == []
 
 
@@ -158,6 +202,11 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
     jobs = db.get_jobs()
     assert len(jobs) == 1
     assert jobs[0]["fingerprint"] == generate_fingerprint("Acme", "Engineer", "Remote")
+    assert jobs[0]["interview"] == 0
+    assert jobs[0]["rejected"] == 0
+    with db.get_connection() as conn:
+        columns = set(_fingerprint_columns(conn))
+    assert {"interview", "rejected", "date_interview", "date_rejected"} <= columns
 
 
 def test_add_job_stores_fingerprint(db_path: Path) -> None:
