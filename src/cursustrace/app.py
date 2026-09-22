@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import os
 import sys
 from pathlib import Path
 
@@ -15,14 +15,33 @@ APP_TITLE = "CursusTrace — Job Application Tracker"
 DETAIL_PARAM = "job"
 
 
-def run() -> int:
-    """Launch the Streamlit UI in a subprocess and return its exit code."""
-    app_path = Path(__file__).resolve()
-    completed = subprocess.run(
-        [sys.executable, "-m", "streamlit", "run", str(app_path)],
-        check=False,
-    )
-    return completed.returncode
+def run() -> None:
+    """CLI entrypoint that launches the CursusTrace Streamlit dashboard."""
+    app_file = str(Path(__file__).resolve())
+
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+
+    cli_args = ["streamlit", "run", app_file, "--browser.gatherUsageStats=false"]
+
+    try:
+        os.execvp("streamlit", cli_args)
+    except FileNotFoundError:
+        import subprocess
+
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "streamlit",
+                    "run",
+                    app_file,
+                    "--browser.gatherUsageStats=false",
+                ],
+                check=False,
+            )
+        except KeyboardInterrupt:
+            sys.exit(0)
 
 
 def _render_job_card(job: db.Job) -> None:
