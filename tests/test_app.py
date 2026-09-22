@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -36,20 +38,51 @@ def app_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
     return AppTest.from_file(APP_PATH)
 
 
-def test_run_invokes_streamlit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_execs_streamlit(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, list[str]]] = []
+
+    def _fake_execvp(file: str, args: list[str]) -> None:
+        calls.append((file, args))
+
+    monkeypatch.setattr(os, "execvp", _fake_execvp)
+
+    app.run()
+    assert len(calls) == 1
+    file, argv = calls[0]
+    assert file == "streamlit"
+    assert argv[0:2] == ["streamlit", "run"]
+    assert argv[2] == str(APP_PATH)
+    assert argv[-1] == "--browser.gatherUsageStats=false"
+
+
+def test_run_sets_telemetry_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(os, "execvp", lambda file, args: None)
+    monkeypatch.delenv("STREAMLIT_BROWSER_GATHER_USAGE_STATS", raising=False)
+
+    app.run()
+
+    assert os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] == "false"
+
+
+def test_run_fallback_when_streamlit_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _missing_execvp(file: str, args: list[str]) -> None:
+        raise FileNotFoundError
+
     calls: list[list[str]] = []
 
     def _fake_run(args: list[str], check: bool) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         return subprocess.CompletedProcess(args, returncode=0)
 
+    monkeypatch.setattr(os, "execvp", _missing_execvp)
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    assert app.run() == 0
+    app.run()
     assert len(calls) == 1
     argv = calls[0]
-    assert argv[1:4] == ["-m", "streamlit", "run"]
+    assert argv[0:4] == [sys.executable, "-m", "streamlit", "run"]
     assert argv[4] == str(APP_PATH)
+    assert argv[-1] == "--browser.gatherUsageStats=false"
 
 
 def test_title_renders(app_test: AppTest) -> None:
