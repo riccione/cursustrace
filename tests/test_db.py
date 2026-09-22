@@ -239,3 +239,26 @@ def test_check_duplicate_returns_false_for_new_job(db_path: Path) -> None:
     )
     assert found is False
     assert reason == ""
+
+
+def test_clear_all_jobs_on_empty_db_returns_zero(db_path: Path) -> None:
+    db.init_db()
+    assert db.clear_all_jobs() == 0
+
+
+def test_clear_all_jobs_returns_count_and_empties_table(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1", "Engineer One")
+    _add("https://example.com/2", "Engineer Two")
+
+    assert db.clear_all_jobs() == 2
+    assert db.get_jobs() == []
+
+
+def test_clear_all_jobs_resets_auto_increment(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1", "Engineer One")
+    db.clear_all_jobs()
+    _add("https://example.com/2", "Engineer Two")
+
+    assert db.get_jobs()[0]["id"] == 1

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
+from streamlit.testing.v1.element_tree import Button
 
 from cursustrace import app, db, scraper
 from cursustrace.errors import ScrapeError
@@ -230,8 +231,61 @@ def test_details_back_button_returns_to_list(app_test: AppTest) -> None:
     app_test.query_params[app.DETAIL_PARAM] = str(job_id)
     app_test.run()
 
-    app_test.button[0].click().run()
+    next(button for button in app_test.button if button.label == "← Back to list").click().run()
 
     assert not app_test.exception
-    assert len(app_test.text_input) == 1
+    assert any(field.label == "Job URL" for field in app_test.text_input)
     assert app.DETAIL_PARAM not in app_test.query_params
+
+
+CLEAR_BUTTON_LABEL = "Confirm & Clear All Data"
+
+
+def _clear_button(app_test: AppTest) -> Button:
+    return next(
+        button for button in app_test.sidebar.button if button.label == CLEAR_BUTTON_LABEL
+    )
+
+
+def test_clear_button_disabled_initially(app_test: AppTest) -> None:
+    app_test.run()
+    assert _clear_button(app_test).disabled is True
+
+
+def test_clear_button_stays_disabled_for_wrong_case(app_test: AppTest) -> None:
+    app_test.run()
+    confirm = next(
+        field for field in app_test.sidebar.text_input if field.label.startswith("Type 'DELETE'")
+    )
+    confirm.set_value("delete").run()
+
+    assert _clear_button(app_test).disabled is True
+
+
+def test_clear_button_enabled_with_exact_delete(app_test: AppTest) -> None:
+    app_test.run()
+    confirm = next(
+        field for field in app_test.sidebar.text_input if field.label.startswith("Type 'DELETE'")
+    )
+    confirm.set_value("DELETE").run()
+
+    assert _clear_button(app_test).disabled is False
+
+
+def test_clear_database_removes_all_jobs(app_test: AppTest) -> None:
+    app_test.run()
+    app_test.text_input[0].set_value(JOB_URL).run()
+    app_test.button[0].click().run()
+    assert len(db.get_jobs()) == 1
+
+    confirm = next(
+        field for field in app_test.sidebar.text_input if field.label.startswith("Type 'DELETE'")
+    )
+    confirm.set_value("DELETE").run()
+    _clear_button(app_test).click().run()
+
+    assert not app_test.exception
+    assert db.get_jobs() == []
+    assert any(
+        message.value == "Successfully cleared 1 positions." for message in app_test.success
+    )
