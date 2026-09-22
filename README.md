@@ -33,7 +33,9 @@ Paste a job listing URL, click **Scan & Save Position**, then use the
 metadata.
 
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
-your CV in Markdown with a live preview. Saving keeps `data/cv.md` in sync.
+your CV in Markdown with a live preview. Your profile and CV are stored only in
+the SQLite database, and **📄 Export to PDF** downloads a formatted document
+combining your contact header with the CV body.
 
 ## Development
 
