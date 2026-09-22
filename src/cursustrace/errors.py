@@ -9,3 +9,7 @@ class CursustraceError(Exception):
 
 class ScrapeError(CursustraceError):
     """Raised when a job listing cannot be fetched or parsed."""
+
+
+class PdfExportError(CursustraceError):
+    """Raised when a Markdown CV cannot be rendered to PDF."""
