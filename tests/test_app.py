@@ -35,7 +35,6 @@ def _raise_scrape(url: str) -> scraper.ScrapedJob:
 @pytest.fixture
 def app_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
-    monkeypatch.setattr(db, "CV_PATH", tmp_path / "cv.md")
     monkeypatch.setattr(scraper, "scrape_job", _fake_scrape)
     return AppTest.from_file(APP_PATH)
 
@@ -331,7 +330,7 @@ def test_profile_prefills_existing_values(app_test: AppTest) -> None:
     assert _profile_text_area(app_test).value == "# Jane"
 
 
-def test_profile_save_persists_and_syncs_cv(app_test: AppTest) -> None:
+def test_profile_save_persists(app_test: AppTest) -> None:
     app_test.run()
     _profile_input(app_test, "Full Name").set_value("Jane Doe").run()
     _profile_input(app_test, "Email").set_value("jane@example.com").run()
@@ -346,7 +345,6 @@ def test_profile_save_persists_and_syncs_cv(app_test: AppTest) -> None:
     assert profile["full_name"] == "Jane Doe"
     assert profile["email"] == "jane@example.com"
     assert profile["cv_markdown"] == "# Jane Doe\n\nNew CV"
-    assert db.CV_PATH.read_text(encoding="utf-8") == "# Jane Doe\n\nNew CV"
     assert any(
         message.value == "Profile and CV saved successfully!" for message in app_test.success
     )

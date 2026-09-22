@@ -17,8 +17,8 @@ DETAIL_PARAM = "job"
 
 
 @st.cache_data(show_spinner=False)
-def _cv_pdf_bytes(full_name: str, cv_md: str) -> bytes:
-    return generate_cv_pdf(full_name, cv_md)
+def _cv_pdf_bytes(profile: db.Profile) -> bytes:
+    return generate_cv_pdf(profile)
 
 
 def run() -> None:
@@ -177,7 +177,7 @@ def _render_profile_editor() -> None:
 
     st.divider()
     try:
-        pdf_bytes = _cv_pdf_bytes(profile["full_name"], profile["cv_markdown"])
+        pdf_bytes = _cv_pdf_bytes(profile)
     except PdfExportError as exc:
         st.error(f"Could not generate PDF: {exc}")
     else:

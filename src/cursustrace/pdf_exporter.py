@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
-import html
 import io
 import re
+from typing import TYPE_CHECKING
 
 import markdown
 from xhtml2pdf import pisa
 
 from cursustrace.errors import PdfExportError
 
+if TYPE_CHECKING:
+    from cursustrace.db import Profile
+
 _CV_TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>{title}</title>
     <style>
         @page {{
             size: letter portrait;
-            margin: 2cm;
+            margin: 1.8cm;
         }}
         body {{
             font-family: 'Helvetica', 'Arial', sans-serif;
@@ -28,34 +30,34 @@ _CV_TEMPLATE = """<!DOCTYPE html>
             color: #222222;
         }}
         h1 {{
-            font-size: 20pt;
-            border-bottom: 2px solid #333333;
-            padding-bottom: 4px;
-            margin-top: 0;
+            font-size: 22pt;
+            margin-bottom: 4px;
+            color: #111827;
         }}
         h2 {{
-            font-size: 14pt;
-            border-bottom: 1px solid #cccccc;
+            font-size: 13pt;
+            border-bottom: 1px solid #d1d5db;
             padding-bottom: 2px;
             margin-top: 14px;
             margin-bottom: 6px;
-            color: #1a365d;
-        }}
-        h3 {{
-            font-size: 11pt;
-            margin-top: 10px;
-            margin-bottom: 2px;
+            color: #1f2937;
         }}
         p, li {{
             margin-bottom: 4px;
         }}
         ul {{
             margin-top: 2px;
-            padding-left: 20px;
+            padding-left: 18px;
         }}
         a {{
             color: #2563eb;
             text-decoration: none;
+        }}
+        hr {{
+            border: none;
+            border-top: 1.5px solid #374151;
+            margin-top: 8px;
+            margin-bottom: 12px;
         }}
     </style>
 </head>
@@ -82,10 +84,36 @@ def get_pdf_filename(full_name: str) -> str:
     return f"CV_{first_name}_{last_name}.pdf"
 
 
-def generate_cv_pdf(full_name: str, cv_md: str) -> bytes:
-    """Convert Markdown text into a styled PDF binary buffer."""
-    html_content = markdown.markdown(cv_md, extensions=["extra", "tables"])
-    full_html = _CV_TEMPLATE.format(title=html.escape(full_name), content=html_content)
+def build_header_markdown(profile: Profile) -> str:
+    """Build the contact header Markdown block from profile metadata."""
+    full_name = profile.get("full_name", "").strip() or "Candidate Name"
+
+    contact_items: list[str] = []
+    location = profile.get("location", "").strip()
+    if location:
+        contact_items.append(f"**{location}**")
+    phone = profile.get("phone", "").strip()
+    if phone:
+        contact_items.append(phone)
+    email = profile.get("email", "").strip()
+    if email:
+        contact_items.append(f"[{email}](mailto:{email})")
+    linkedin = profile.get("linkedin_url", "").strip()
+    if linkedin:
+        contact_items.append(f"[{linkedin}]({linkedin})")
+    github = profile.get("github_url", "").strip()
+    if github:
+        contact_items.append(f"[{github}]({github})")
+
+    contact_line = " | ".join(contact_items)
+    return f"# {full_name}\n\n{contact_line}\n\n---\n\n"
+
+
+def generate_cv_pdf(profile: Profile) -> bytes:
+    """Render the profile header and Markdown CV body into a PDF document."""
+    combined_md = f"{build_header_markdown(profile)}{profile.get('cv_markdown', '').strip()}"
+    html_content = markdown.markdown(combined_md, extensions=["extra", "tables"])
+    full_html = _CV_TEMPLATE.format(content=html_content)
 
     pdf_buffer = io.BytesIO()
     result = pisa.CreatePDF(io.StringIO(full_html), dest=pdf_buffer)
