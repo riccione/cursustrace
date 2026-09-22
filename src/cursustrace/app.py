@@ -12,6 +12,7 @@ from cursustrace import db, scraper
 from cursustrace.errors import ScrapeError
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
+DETAIL_PARAM = "job"
 
 
 def run() -> int:
@@ -31,6 +32,7 @@ def _render_job_card(job: db.Job) -> None:
         st.markdown(f"**Location:** {job['location']}")
         st.markdown(f"**Added:** {job['date_added']}")
         st.markdown(f"[Open job posting]({job['job_url']})")
+        st.markdown(f"[View full details](?{DETAIL_PARAM}={job['id']})")
 
         checked = st.checkbox(
             "Mark as Applied",
@@ -48,6 +50,31 @@ def _render_job_list(jobs: list[db.Job], empty_message: str) -> None:
         return
     for job in jobs:
         _render_job_card(job)
+
+
+def _resolve_job(job_id: int) -> db.Job | None:
+    return next((job for job in db.get_jobs() if job["id"] == job_id), None)
+
+
+def _render_back_button() -> None:
+    if st.button("← Back to list"):
+        st.query_params.clear()
+        st.rerun()
+
+
+def _render_job_detail(job: db.Job) -> None:
+    _render_back_button()
+
+    st.subheader(job["title"] or "Untitled position")
+    st.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
+    st.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
+    st.markdown(f"**Added:** {job['date_added']}")
+    applied = f"Yes — {job['date_applied']}" if job["applied"] else "No"
+    st.markdown(f"**Applied:** {applied}")
+    st.markdown(f"[Open original posting]({job['job_url']})")
+
+    st.divider()
+    st.markdown(job["description"] or "_No description captured._")
 
 
 def _handle_scan(url: str) -> None:
@@ -78,6 +105,16 @@ def main() -> None:
     db.init_db()
 
     st.title(APP_TITLE)
+
+    job_id_raw = st.query_params.get(DETAIL_PARAM)
+    if job_id_raw is not None:
+        job = _resolve_job(int(job_id_raw)) if job_id_raw.isdigit() else None
+        if job is not None:
+            _render_job_detail(job)
+        else:
+            st.warning("Position not found.")
+            _render_back_button()
+        return
 
     url = st.text_input("Job URL", key="job_url")
     if st.button("Scan & Save Position"):
