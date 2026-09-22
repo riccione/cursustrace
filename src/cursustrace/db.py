@@ -13,7 +13,6 @@ from rapidfuzz import fuzz
 from cursustrace.utils import clean_url, generate_fingerprint
 
 DEFAULT_DB_PATH = Path("data/cursustrace.db")
-CV_PATH = Path("data/cv.md")
 
 FUZZY_THRESHOLD = 85
 FUZZY_CANDIDATE_LIMIT = 50
@@ -107,6 +106,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_FINGERPRINT_INDEX)
 
 
+def _migrate_profile(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
+    if "cv_markdown" not in columns:
+        conn.execute("ALTER TABLE profile ADD COLUMN cv_markdown TEXT")
+
+
 
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """Open a connection, creating the parent directory and database on first use."""
@@ -123,6 +128,7 @@ def init_db() -> None:
         conn.execute(CREATE_JOBS_TABLE)
         conn.execute(CREATE_PROFILE_TABLE)
         _migrate(conn)
+        _migrate_profile(conn)
         conn.commit()
 
 
@@ -232,15 +238,8 @@ def clear_all_jobs() -> int:
     return count
 
 
-def _cv_fallback() -> str:
-    try:
-        return CV_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ""
-
-
 def save_profile(data: Profile) -> None:
-    """Upsert the single profile row and mirror its Markdown CV to data/cv.md."""
+    """Upsert the single profile row with contact metadata and the Markdown CV."""
     with closing(get_connection()) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO profile "
@@ -258,12 +257,10 @@ def save_profile(data: Profile) -> None:
             ),
         )
         conn.commit()
-    CV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CV_PATH.write_text(data["cv_markdown"], encoding="utf-8")
 
 
 def get_profile() -> Profile:
-    """Return the stored profile, falling back to data/cv.md when no row exists."""
+    """Return the stored profile, or an empty profile when no row exists."""
     with closing(get_connection()) as conn:
         row = conn.execute("SELECT * FROM profile WHERE id = 1").fetchone()
     if row is None:
@@ -274,7 +271,7 @@ def get_profile() -> Profile:
             "email": "",
             "linkedin_url": "",
             "github_url": "",
-            "cv_markdown": _cv_fallback(),
+            "cv_markdown": "",
             "date_updated": None,
         }
     return {

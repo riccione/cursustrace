@@ -20,7 +20,6 @@ TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     path = tmp_path / "cursustrace.db"
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", path)
-    monkeypatch.setattr(db, "CV_PATH", tmp_path / "cv.md")
     yield path
 
 
@@ -309,25 +308,37 @@ def test_save_profile_upserts_single_row(db_path: Path) -> None:
     assert db.get_profile()["full_name"] == "Jane Smith"
 
 
-def test_save_profile_writes_cv_markdown(db_path: Path) -> None:
+def test_save_profile_keeps_cv_in_database(db_path: Path) -> None:
     db.init_db()
     db.save_profile(_profile_payload(cv_markdown="# Updated CV"))
 
-    assert db.CV_PATH.read_text(encoding="utf-8") == "# Updated CV"
+    with db.get_connection() as conn:
+        stored = conn.execute("SELECT cv_markdown FROM profile WHERE id = 1").fetchone()[0]
+    assert stored == "# Updated CV"
+    assert not (db_path.parent / "cv.md").exists()
 
 
-def test_get_profile_seeds_cv_from_file(db_path: Path) -> None:
+def test_init_db_migrates_profile_cv_markdown(db_path: Path) -> None:
+    with db.get_connection() as conn:
+        conn.execute(
+            "CREATE TABLE profile ("
+            "id INTEGER PRIMARY KEY CHECK (id = 1), "
+            "full_name TEXT, location TEXT, phone TEXT, email TEXT, "
+            "linkedin_url TEXT, github_url TEXT, "
+            "date_updated TEXT DEFAULT (datetime('now')))"
+        )
+        conn.execute("INSERT INTO profile (id, full_name) VALUES (1, 'Legacy')")
+        conn.commit()
+
     db.init_db()
-    db.CV_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db.CV_PATH.write_text("# From File", encoding="utf-8")
 
-    profile = db.get_profile()
-    assert profile["full_name"] == ""
-    assert profile["cv_markdown"] == "# From File"
-    assert profile["date_updated"] is None
+    with db.get_connection() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
+    assert "cv_markdown" in columns
+    assert db.get_profile()["full_name"] == "Legacy"
 
 
-def test_get_profile_without_row_or_file(db_path: Path) -> None:
+def test_get_profile_without_row(db_path: Path) -> None:
     db.init_db()
     profile = db.get_profile()
     assert profile["cv_markdown"] == ""

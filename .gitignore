@@ -16,3 +16,6 @@ wheels/
 
 # Local database
 data/*.db
+
+# Personal data kept only in SQLite
+data/cv.md
