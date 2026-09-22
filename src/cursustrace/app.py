@@ -106,6 +106,19 @@ def _handle_scan(url: str) -> None:
         st.error(f"Could not scan that URL: {exc}")
         return
 
+    duplicate, _reason = db.check_duplicate(
+        url.strip(),
+        job["title"],
+        job["company"],
+        job["location"],
+        job["description"],
+    )
+    if duplicate:
+        st.warning(
+            "⚠️ Position already exists in database (Matched by title/company fingerprint)."
+        )
+        return
+
     added = db.add_job(
         url.strip(),
         job["title"],
@@ -116,7 +129,9 @@ def _handle_scan(url: str) -> None:
     if added:
         st.success("Position saved.")
     else:
-        st.warning("This URL is already tracked.")
+        st.warning(
+            "⚠️ Position already exists in database (Matched by title/company fingerprint)."
+        )
 
 
 def main() -> None:
