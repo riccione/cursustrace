@@ -1,19 +1,29 @@
-"""Streamlit entry point for cursustrace."""
+"""NiceGUI entry point for cursustrace."""
 
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
+import signal
+from collections.abc import Callable
+from functools import lru_cache
+from types import FrameType
 
-import streamlit as st
+from nicegui import app, events, ui
 
 from cursustrace import db, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
-DETAIL_PARAM = "job"
+
+_shutdown_signal: int | None = None
+
+STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
+    ("unapplied", "⏳ Unapplied Positions", "No unapplied positions yet."),
+    ("applied", "✅ Applied Positions", "No applied positions yet."),
+    ("interview", "🗣️ Interview Positions", "No interview positions yet."),
+    ("rejected", "❌ Rejected Positions", "No rejected positions yet."),
+)
 
 STATUS_CHECKBOXES: tuple[tuple[db.JobFlag, str], ...] = (
     ("applied", "Mark as Applied"),
@@ -21,73 +31,47 @@ STATUS_CHECKBOXES: tuple[tuple[db.JobFlag, str], ...] = (
     ("rejected", "Rejected"),
 )
 
+GLOBAL_CSS = """
+html { font-size: 22px; }
+body { font-size: 22px; }
+.q-btn, .q-field, .q-field__label, .q-tab__label, .q-item, .q-checkbox,
+.q-notification { font-size: inherit; }
+"""
 
-@st.cache_data(show_spinner=False)
-def _cv_pdf_bytes(profile: db.Profile) -> bytes:
+
+@lru_cache(maxsize=16)
+def _cv_pdf_bytes(
+    full_name: str,
+    location: str,
+    phone: str,
+    email: str,
+    linkedin_url: str,
+    github_url: str,
+    cv_markdown: str,
+) -> bytes:
+    profile: db.Profile = {
+        "full_name": full_name,
+        "location": location,
+        "phone": phone,
+        "email": email,
+        "linkedin_url": linkedin_url,
+        "github_url": github_url,
+        "cv_markdown": cv_markdown,
+        "date_updated": None,
+    }
     return generate_cv_pdf(profile)
 
 
-def run() -> None:
-    """CLI entrypoint that launches the CursusTrace Streamlit dashboard."""
-    app_file = str(Path(__file__).resolve())
-
-    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
-
-    cli_args = ["streamlit", "run", app_file, "--browser.gatherUsageStats=false"]
-
-    try:
-        os.execvp("streamlit", cli_args)
-    except FileNotFoundError:
-        import subprocess
-
-        try:
-            subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "streamlit",
-                    "run",
-                    app_file,
-                    "--browser.gatherUsageStats=false",
-                ],
-                check=False,
-            )
-        except KeyboardInterrupt:
-            sys.exit(0)
-
-
-def _on_status_change(job_id: int, status: db.JobFlag) -> None:
-    checked = bool(st.session_state.get(f"{status}_{job_id}"))
-    db.set_job_status(job_id, status if checked else "unapplied")
-    for name, _label in STATUS_CHECKBOXES:
-        st.session_state.pop(f"{name}_{job_id}", None)
-
-
-def _render_job_card(job: db.Job) -> None:
-    title = job["title"] or "Untitled position"
-    company = job["company"] or "Unknown company"
-    with st.expander(f"{title} — {company}"):
-        st.markdown(f"**Location:** {job['location']}")
-        st.markdown(f"**Added:** {job['date_added']}")
-        st.markdown(f"[Open job posting]({job['job_url']})")
-        st.markdown(f"[View full details](?{DETAIL_PARAM}={job['id']})")
-
-        for status, label in STATUS_CHECKBOXES:
-            st.checkbox(
-                label,
-                value=bool(job[status]),
-                key=f"{status}_{job['id']}",
-                on_change=_on_status_change,
-                args=(job["id"], status),
-            )
-
-
-def _render_job_list(jobs: list[db.Job], empty_message: str) -> None:
-    if not jobs:
-        st.info(empty_message)
-        return
-    for job in jobs:
-        _render_job_card(job)
+def _cached_pdf(profile: db.Profile) -> bytes:
+    return _cv_pdf_bytes(
+        profile["full_name"],
+        profile["location"],
+        profile["phone"],
+        profile["email"],
+        profile["linkedin_url"],
+        profile["github_url"],
+        profile["cv_markdown"],
+    )
 
 
 def _job_status(job: db.Job) -> db.JobStatus:
@@ -104,202 +88,291 @@ def _resolve_job(job_id: int) -> db.Job | None:
     return next((job for job in db.get_jobs() if job["id"] == job_id), None)
 
 
-def _render_back_button() -> None:
-    if st.button("← Back to list"):
-        st.query_params.clear()
-        st.rerun()
+def _status_handler(
+    job_id: int,
+    status: db.JobFlag,
+    refresh: Callable[[], None],
+) -> Callable[[events.ValueChangeEventArguments[bool | None]], None]:
+    def handler(event: events.ValueChangeEventArguments[bool | None]) -> None:
+        db.set_job_status(job_id, status if event.value else "unapplied")
+        refresh()
+
+    return handler
 
 
-def _render_job_detail(job: db.Job) -> None:
-    _render_back_button()
-
-    st.subheader(job["title"] or "Untitled position")
-    st.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
-    st.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
-    st.markdown(f"**Added:** {job['date_added']}")
-    st.markdown(f"**Status:** {_job_status(job).title()}")
-    if job["date_applied"]:
-        st.markdown(f"**Applied:** {job['date_applied']}")
-    if job["date_interview"]:
-        st.markdown(f"**Interview:** {job['date_interview']}")
-    if job["date_rejected"]:
-        st.markdown(f"**Rejected:** {job['date_rejected']}")
-    st.markdown(f"[Open original posting]({job['job_url']})")
-
-    st.divider()
-    st.markdown(job["description"] or "_No description captured._")
-
-
-def _render_settings() -> None:
-    with st.sidebar:
-        st.header("⚙️ Settings & Maintenance")
-        with st.expander("⚠️ Danger Zone: Clear Database"):
-            cleared_count = st.session_state.pop("cleared_count", None)
-            if cleared_count is not None:
-                st.success(f"Successfully cleared {cleared_count} positions.")
-
-            st.warning(
-                "⚠️ This action cannot be undone. All tracked job postings and "
-                "application history will be permanently erased."
+def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
+    title = job["title"] or "Untitled position"
+    company = job["company"] or "Unknown company"
+    with ui.expansion(f"{title} — {company}").classes("w-full"):
+        ui.markdown(f"**Location:** {job['location']}")
+        ui.markdown(f"**Added:** {job['date_added']}")
+        ui.link("Open job posting", job["job_url"], new_tab=True)
+        ui.link("View full details", f"/job/{job['id']}")
+        for status, label in STATUS_CHECKBOXES:
+            ui.checkbox(
+                label,
+                value=bool(job[status]),
+                on_change=_status_handler(job["id"], status, refresh),
             )
-            confirm_text = st.text_input(
-                "Type 'DELETE' to confirm:",
-                placeholder="DELETE",
-                key="clear_confirm",
-            )
-            if st.button(
-                "Confirm & Clear All Data",
-                type="primary",
-                disabled=(confirm_text != "DELETE"),
-            ):
-                count = db.clear_all_jobs()
-                st.session_state["cleared_count"] = count
-                st.rerun()
 
 
-def _render_profile_editor() -> None:
-    st.header("👤 Profile & CV Configuration")
-    if st.session_state.pop("profile_saved", False):
-        st.success("Profile and CV saved successfully!")
-    profile = db.get_profile()
-
-    with st.form("profile_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("Full Name", value=profile["full_name"])
-            email = st.text_input("Email", value=profile["email"])
-            linkedin = st.text_input("LinkedIn URL", value=profile["linkedin_url"])
-        with col2:
-            location = st.text_input("Location", value=profile["location"])
-            phone = st.text_input("Phone Number", value=profile["phone"])
-            github = st.text_input("GitHub URL", value=profile["github_url"])
-
-        st.subheader("Markdown CV")
-        editor_col, preview_col = st.columns([1, 1])
-        with editor_col:
-            cv_text = st.text_area(
-                "Edit your CV in Markdown format:",
-                value=profile["cv_markdown"],
-                height=450,
-            )
-        with preview_col:
-            st.markdown("**Live preview**")
-            st.markdown(cv_text or "_Nothing to preview yet._")
-
-        submitted = st.form_submit_button("💾 Save Profile & CV")
-        if submitted:
-            db.save_profile(
-                {
-                    "full_name": name,
-                    "location": location,
-                    "phone": phone,
-                    "email": email,
-                    "linkedin_url": linkedin,
-                    "github_url": github,
-                    "cv_markdown": cv_text,
-                    "date_updated": None,
-                }
-            )
-            st.session_state["profile_saved"] = True
-            st.rerun()
-
-    st.divider()
-    try:
-        pdf_bytes = _cv_pdf_bytes(profile)
-    except PdfExportError as exc:
-        st.error(f"Could not generate PDF: {exc}")
-    else:
-        st.download_button(
-            label="📄 Export to PDF",
-            data=pdf_bytes,
-            file_name=get_pdf_filename(profile["full_name"]),
-            mime="application/pdf",
-            type="secondary",
-        )
-
-
-def _handle_scan(url: str) -> None:
-    if not url.strip():
-        st.warning("Please enter a job URL.")
+def _render_job_list(
+    jobs: list[db.Job],
+    empty_message: str,
+    refresh: Callable[[], None],
+) -> None:
+    if not jobs:
+        ui.label(empty_message)
         return
+    for job in jobs:
+        _render_job_card(job, refresh)
+
+
+def _handle_scan(url: str | None, refresh: Callable[[], None]) -> None:
+    candidate = (url or "").strip()
+    if not candidate:
+        ui.notify("Please enter a job URL.", type="warning")
+        return
+
     try:
-        job = scraper.scrape_job(url.strip())
+        job = scraper.scrape_job(candidate)
     except ScrapeError as exc:
-        st.error(f"Could not scan that URL: {exc}")
+        ui.notify(f"Could not scan that URL: {exc}", type="negative")
         return
 
     duplicate, _reason = db.check_duplicate(
-        url.strip(),
+        candidate,
         job["title"],
         job["company"],
         job["location"],
         job["description"],
     )
     if duplicate:
-        st.warning(
-            "⚠️ Position already exists in database (Matched by title/company fingerprint)."
+        ui.notify(
+            "⚠️ Position already exists in database (Matched by title/company fingerprint).",
+            type="warning",
         )
         return
 
     added = db.add_job(
-        url.strip(),
+        candidate,
         job["title"],
         job["company"],
         job["location"],
         job["description"],
     )
     if added:
-        st.success("Position saved.")
+        ui.notify("Position saved.", type="positive")
+        refresh()
     else:
-        st.warning(
-            "⚠️ Position already exists in database (Matched by title/company fingerprint)."
+        ui.notify(
+            "⚠️ Position already exists in database (Matched by title/company fingerprint).",
+            type="warning",
         )
 
 
-def main() -> None:
-    st.set_page_config(page_title=APP_TITLE, page_icon="📋", layout="wide")
-    db.init_db()
+def _render_settings(refresh: Callable[[], None]) -> None:
+    ui.label("⚙️ Settings & Maintenance").classes("text-h6")
+    with ui.expansion("⚠️ Danger Zone: Clear Database"):
+        ui.label(
+            "⚠️ This action cannot be undone. All tracked job postings and "
+            "application history will be permanently erased."
+        ).classes("text-negative")
+        confirm = ui.input("Type 'DELETE' to confirm", placeholder="DELETE")
+        button = ui.button(
+            "Confirm & Clear All Data",
+            on_click=lambda: _clear_database(refresh),
+        ).props("color=negative")
+        button.enabled = False
 
-    st.title(APP_TITLE)
+        def update_button(event: events.ValueChangeEventArguments[str | None]) -> None:
+            button.enabled = event.value == "DELETE"
 
-    job_id_raw = st.query_params.get(DETAIL_PARAM)
-    if job_id_raw is not None:
-        job = _resolve_job(int(job_id_raw)) if job_id_raw.isdigit() else None
-        if job is not None:
-            _render_job_detail(job)
-        else:
-            st.warning("Position not found.")
-            _render_back_button()
+        confirm.on_value_change(update_button)
+
+
+def _clear_database(refresh: Callable[[], None]) -> None:
+    count = db.clear_all_jobs()
+    ui.notify(f"Successfully cleared {count} positions.", type="positive")
+    refresh()
+
+
+def _render_profile_editor() -> None:
+    profile = db.get_profile()
+    ui.label("👤 Profile & CV Configuration").classes("text-h5")
+
+    with ui.row().classes("w-full gap-8"):
+        with ui.column().classes("flex-1 gap-2"):
+            name = ui.input("Full Name", value=profile["full_name"])
+            email = ui.input("Email", value=profile["email"])
+            linkedin = ui.input("LinkedIn URL", value=profile["linkedin_url"])
+        with ui.column().classes("flex-1 gap-2"):
+            location = ui.input("Location", value=profile["location"])
+            phone = ui.input("Phone Number", value=profile["phone"])
+            github = ui.input("GitHub URL", value=profile["github_url"])
+
+    ui.label("Markdown CV").classes("text-h6")
+    with ui.row().classes("w-full gap-4"):
+        with ui.column().classes("flex-1"):
+            cv = ui.textarea(
+                "Edit your CV in Markdown format",
+                value=profile["cv_markdown"],
+            ).classes("w-full").props('autogrow input-style="min-height: 400px; line-height: 1.7"')
+        with ui.column().classes("flex-1"):
+            ui.label("Live preview").classes("font-bold")
+            preview = ui.markdown(profile["cv_markdown"] or "_Nothing to preview yet._")
+
+    def update_preview(event: events.ValueChangeEventArguments[str | None]) -> None:
+        preview.set_content(event.value or "_Nothing to preview yet._")
+
+    cv.on_value_change(update_preview)
+
+    def save() -> None:
+        db.save_profile(
+            {
+                "full_name": name.value or "",
+                "location": location.value or "",
+                "phone": phone.value or "",
+                "email": email.value or "",
+                "linkedin_url": linkedin.value or "",
+                "github_url": github.value or "",
+                "cv_markdown": cv.value or "",
+                "date_updated": None,
+            }
+        )
+        ui.notify("Profile and CV saved successfully!", type="positive")
+
+    ui.button("💾 Save Profile & CV", on_click=save).props("color=primary")
+
+    ui.separator()
+
+    def export() -> None:
+        current = db.get_profile()
+        try:
+            pdf_bytes = _cached_pdf(current)
+        except PdfExportError as exc:
+            ui.notify(f"Could not generate PDF: {exc}", type="negative")
+            return
+        ui.download.content(
+            pdf_bytes,
+            get_pdf_filename(current["full_name"]),
+            media_type="application/pdf",
+        )
+
+    ui.button("📄 Export to PDF", on_click=export)
+
+
+@ui.page("/")
+def dashboard_page() -> None:
+    ui.page_title(APP_TITLE)
+    containers: dict[db.JobStatus, ui.column] = {}
+
+    def refresh() -> None:
+        for status, _label, empty_message in STATUS_TABS:
+            container = containers[status]
+            container.clear()
+            with container:
+                _render_job_list(db.get_jobs(status=status), empty_message, refresh)
+
+    with ui.header().classes("items-center justify-between"):
+        ui.label(APP_TITLE).classes("text-h6")
+        settings_button = ui.button(icon="settings").props("flat color=white")
+
+    with ui.right_drawer(value=False).classes("bg-grey-1") as drawer:
+        settings_button.on_click(lambda: drawer.toggle())
+        _render_settings(refresh)
+
+    with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
+        with ui.row().classes("w-full items-end"):
+            url_input = ui.input("Job URL").classes("flex-grow")
+            ui.button(
+                "Scan & Save Position",
+                on_click=lambda: _handle_scan(url_input.value, refresh),
+            )
+
+        with ui.tabs().classes("w-full") as main_tabs:
+            dashboard_tab = ui.tab("📋 Dashboard")
+            profile_tab = ui.tab("👤 Profile & CV Editor")
+
+        with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
+            with ui.tab_panel(dashboard_tab):
+                with ui.tabs().classes("w-full") as status_tabs:
+                    for status, label, _message in STATUS_TABS:
+                        ui.tab(status, label=label)
+                with ui.tab_panels(status_tabs, value="unapplied").classes("w-full"):
+                    for status, _label, _message in STATUS_TABS:
+                        with ui.tab_panel(status):
+                            containers[status] = ui.column().classes("w-full")
+            with ui.tab_panel(profile_tab):
+                _render_profile_editor()
+
+        refresh()
+
+
+@ui.page("/job/{job_id}")
+def job_detail_page(job_id: int) -> None:
+    ui.page_title(APP_TITLE)
+    with ui.column().classes("w-full max-w-4xl mx-auto p-4 gap-2"):
+        ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
+
+        job = _resolve_job(job_id)
+        if job is None:
+            ui.label("Position not found.").classes("text-warning")
+            return
+
+        ui.label(job["title"] or "Untitled position").classes("text-h5")
+        ui.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
+        ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
+        ui.markdown(f"**Added:** {job['date_added']}")
+        ui.markdown(f"**Status:** {_job_status(job).title()}")
+        if job["date_applied"]:
+            ui.markdown(f"**Applied:** {job['date_applied']}")
+        if job["date_interview"]:
+            ui.markdown(f"**Interview:** {job['date_interview']}")
+        if job["date_rejected"]:
+            ui.markdown(f"**Rejected:** {job['date_rejected']}")
+        ui.link("Open original posting", job["job_url"], new_tab=True)
+
+        ui.separator()
+        ui.markdown(job["description"] or "_No description captured._")
+
+
+def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
+    global _shutdown_signal
+    _shutdown_signal = signum
+    app.shutdown()
+
+
+def _install_signal_handlers() -> None:
+    if os.environ.get("NICEGUI_USER_SIMULATION") == "true":
         return
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _request_shutdown)
+        except ValueError:
+            pass
 
-    dashboard_tab, profile_tab = st.tabs(["📋 Dashboard", "👤 Profile & CV Editor"])
-    with dashboard_tab:
-        url = st.text_input("Job URL", key="job_url")
-        if st.button("Scan & Save Position"):
-            _handle_scan(url)
 
-        unapplied_tab, applied_tab, interview_tab, rejected_tab = st.tabs(
-            [
-                "⏳ Unapplied Positions",
-                "✅ Applied Positions",
-                "🗣️ Interview Positions",
-                "❌ Rejected Positions",
-            ]
+def run() -> None:
+    """CLI entrypoint that launches the CursusTrace NiceGUI dashboard."""
+    global _shutdown_signal
+    db.init_db()
+    ui.add_css(GLOBAL_CSS, shared=True)
+    app.on_startup(_install_signal_handlers)
+    try:
+        ui.run(
+            title=APP_TITLE,
+            favicon="📋",
+            show=False,
+            reload=False,
+            port=8080,
         )
-        with unapplied_tab:
-            _render_job_list(db.get_jobs(status="unapplied"), "No unapplied positions yet.")
-        with applied_tab:
-            _render_job_list(db.get_jobs(status="applied"), "No applied positions yet.")
-        with interview_tab:
-            _render_job_list(db.get_jobs(status="interview"), "No interview positions yet.")
-        with rejected_tab:
-            _render_job_list(db.get_jobs(status="rejected"), "No rejected positions yet.")
-
-        _render_settings()
-
-    with profile_tab:
-        _render_profile_editor()
+    except KeyboardInterrupt:
+        _shutdown_signal = signal.SIGINT
+    print("\nCursusTrace stopped.")
+    if _shutdown_signal is not None:
+        raise SystemExit(128 + _shutdown_signal)
 
 
-if __name__ == "__main__":
-    main()
+if __name__ in {"__main__", "__mp_main__"}:
+    run()
