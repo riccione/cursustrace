@@ -11,8 +11,8 @@ dependencies = [
     "requests",
     "pydantic",
     "rapidfuzz>=3.14.6",
-    "markdown>=3.10.3",
-    "xhtml2pdf>=0.2.20",
+    "weasyprint>=68.1",
+    "markdown-it-py>=4.2.0",
 ]
 
 [project.scripts]
@@ -23,6 +23,7 @@ dev = [
     "pytest",
     "mypy",
     "ruff",
+    "pypdf>=6.19.0",
 ]
 
 [build-system]
@@ -33,7 +34,7 @@ build-backend = "uv_build"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["markdown", "markdown.*", "xhtml2pdf", "xhtml2pdf.*"]
+module = ["weasyprint", "weasyprint.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

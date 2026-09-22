@@ -11,6 +11,9 @@ Requires [uv](https://docs.astral.sh/uv/). Install dependencies:
 uv sync
 ```
 
+PDF export uses [WeasyPrint](https://weasyprint.org/), which relies on the
+Pango, Cairo, and GDK-Pixbuf system libraries.
+
 ## Run
 
 Install and launch the app:

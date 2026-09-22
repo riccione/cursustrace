@@ -2,8 +2,28 @@
 
 from __future__ import annotations
 
+import io
+import re
+
+from pypdf import PdfReader
+
 from cursustrace.db import Profile
-from cursustrace.pdf_exporter import build_header_markdown, generate_cv_pdf, get_pdf_filename
+from cursustrace.pdf_exporter import (
+    build_header_markdown,
+    build_html,
+    generate_cv_pdf,
+    get_pdf_filename,
+)
+
+
+def _page_footers(pdf: bytes) -> list[str]:
+    reader = PdfReader(io.BytesIO(pdf))
+    footers: list[str] = []
+    for page in reader.pages:
+        text = (page.extract_text() or "").replace("\n", " ")
+        match = re.search(r"Page\s+\d+\s+of\s+\d+", text)
+        footers.append(match.group(0) if match else "")
+    return footers
 
 
 def _profile(
@@ -97,3 +117,32 @@ def test_generate_cv_pdf_handles_empty_profile() -> None:
     )
 
     assert generate_cv_pdf(empty).startswith(b"%PDF")
+
+
+def test_generate_cv_pdf_numbers_single_page() -> None:
+    assert _page_footers(generate_cv_pdf(_profile())) == ["Page 1 of 1"]
+
+
+def test_generate_cv_pdf_numbers_every_page() -> None:
+    long_cv = "\n\n".join(f"Line {index}" for index in range(200))
+
+    footers = _page_footers(generate_cv_pdf(_profile(cv_markdown=long_cv)))
+
+    assert len(footers) > 1
+    assert footers[0] == f"Page 1 of {len(footers)}"
+    assert footers[-1] == f"Page {len(footers)} of {len(footers)}"
+
+
+def test_build_html_renders_markdown_tables() -> None:
+    html = build_html("| A | B |\n|---|---|\n| 1 | 2 |")
+
+    assert "<table>" in html
+    assert "<td>1</td>" in html
+
+
+def test_build_html_applies_print_styles() -> None:
+    html = build_html("# Jane Doe\n\nRemote | 555-0100")
+
+    assert "@bottom-right" in html
+    assert 'content: "Page " counter(page) " of " counter(pages);' in html
+    assert "<h1>Jane Doe</h1>" in html

@@ -2,69 +2,129 @@
 
 from __future__ import annotations
 
-import io
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-import markdown
-from xhtml2pdf import pisa
+from markdown_it import MarkdownIt
+from weasyprint import HTML
 
 from cursustrace.errors import PdfExportError
 
 if TYPE_CHECKING:
     from cursustrace.db import Profile
 
-_CV_TEMPLATE = """<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <style>
-        @page {{
-            size: letter portrait;
-            margin: 1.8cm;
-        }}
-        body {{
-            font-family: 'Helvetica', 'Arial', sans-serif;
-            font-size: 10pt;
-            line-height: 1.4;
-            color: #222222;
-        }}
-        h1 {{
-            font-size: 22pt;
-            margin-bottom: 4px;
-            color: #111827;
-        }}
-        h2 {{
-            font-size: 13pt;
-            border-bottom: 1px solid #d1d5db;
-            padding-bottom: 2px;
-            margin-top: 14px;
-            margin-bottom: 6px;
-            color: #1f2937;
-        }}
-        p, li {{
-            margin-bottom: 4px;
-        }}
-        ul {{
-            margin-top: 2px;
-            padding-left: 18px;
-        }}
-        a {{
-            color: #2563eb;
-            text-decoration: none;
-        }}
-        hr {{
-            border: none;
-            border-top: 1.5px solid #374151;
-            margin-top: 8px;
-            margin-bottom: 12px;
-        }}
-    </style>
-</head>
-<body>
-    {content}
-</body>
-</html>
+_CV_STYLES = """@page {
+    size: letter;
+    margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+    @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 9pt;
+        color: #666;
+    }
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 9.5pt;
+    line-height: 1.35;
+    color: #222;
+}
+
+h1 {
+    text-align: center;
+    font-size: 16pt;
+    font-weight: 700;
+    margin: 0 0 2pt 0;
+    color: #1a1a1a;
+    letter-spacing: 1pt;
+}
+
+h1 + p {
+    text-align: left;
+    font-size: 9pt;
+    color: #444;
+    margin-bottom: 12pt;
+    line-height: 1.5;
+}
+
+h1 + p a {
+    color: #2563eb;
+    text-decoration: none;
+}
+
+h2 {
+    font-size: 11pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1pt;
+    color: #1a1a1a;
+    border-bottom: 1px solid #dddddd;
+    padding-bottom: 2pt;
+    margin: 12pt 0 6pt 0;
+    page-break-after: avoid;
+    break-after: avoid;
+}
+
+h3 {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin: 8pt 0 2pt 0;
+    page-break-after: avoid;
+    break-after: avoid;
+}
+
+p {
+    margin: 0 0 4pt 0;
+    text-align: justify;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 4pt 0 6pt 0;
+    font-size: 9pt;
+}
+
+th, td {
+    border: 1px solid #dddddd;
+    padding: 2pt 4pt;
+    text-align: left;
+}
+
+ul {
+    margin: 2pt 0 5pt 1.4em;
+    padding: 0;
+}
+
+li {
+    margin-bottom: 1pt;
+}
+
+strong {
+    font-weight: 700;
+}
+
+a {
+    color: #2563eb;
+    text-decoration: none;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 8pt 0;
+}
+
+em {
+    font-style: italic;
+}
 """
 
 
@@ -109,14 +169,20 @@ def build_header_markdown(profile: Profile) -> str:
     return f"# {full_name}\n\n{contact_line}\n\n---\n\n"
 
 
+def build_html(markdown_text: str) -> str:
+    """Render Markdown into a print-styled HTML document."""
+    body_html = MarkdownIt("commonmark").enable("table").render(markdown_text)
+    return (
+        '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        f"<style>\n{_CV_STYLES}</style>\n</head>\n<body>\n{body_html}\n</body>\n</html>"
+    )
+
+
 def generate_cv_pdf(profile: Profile) -> bytes:
     """Render the profile header and Markdown CV body into a PDF document."""
     combined_md = f"{build_header_markdown(profile)}{profile.get('cv_markdown', '').strip()}"
-    html_content = markdown.markdown(combined_md, extensions=["extra", "tables"])
-    full_html = _CV_TEMPLATE.format(content=html_content)
-
-    pdf_buffer = io.BytesIO()
-    result = pisa.CreatePDF(io.StringIO(full_html), dest=pdf_buffer)
-    if result.err:
-        raise PdfExportError("xhtml2pdf could not render the CV")
-    return pdf_buffer.getvalue()
+    try:
+        pdf = HTML(string=build_html(combined_md)).write_pdf()
+    except Exception as exc:
+        raise PdfExportError("WeasyPrint could not render the CV") from exc
+    return cast("bytes", pdf)
