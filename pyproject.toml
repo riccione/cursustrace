@@ -5,7 +5,6 @@ description = "Trace job listings against a CV"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit",
     "trafilatura",
     "beautifulsoup4",
     "requests",
@@ -13,6 +12,7 @@ dependencies = [
     "rapidfuzz>=3.14.6",
     "weasyprint>=68.1",
     "markdown-it-py>=4.2.0",
+    "nicegui>=3.17.1",
 ]
 
 [project.scripts]
@@ -24,6 +24,7 @@ dev = [
     "mypy",
     "ruff",
     "pypdf>=6.19.0",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [build-system]
@@ -36,6 +37,9 @@ strict = true
 [[tool.mypy.overrides]]
 module = ["weasyprint", "weasyprint.*"]
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
