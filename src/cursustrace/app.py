@@ -96,6 +96,33 @@ def _render_job_detail(job: db.Job) -> None:
     st.markdown(job["description"] or "_No description captured._")
 
 
+def _render_settings() -> None:
+    with st.sidebar:
+        st.header("⚙️ Settings & Maintenance")
+        with st.expander("⚠️ Danger Zone: Clear Database"):
+            cleared_count = st.session_state.pop("cleared_count", None)
+            if cleared_count is not None:
+                st.success(f"Successfully cleared {cleared_count} positions.")
+
+            st.warning(
+                "⚠️ This action cannot be undone. All tracked job postings and "
+                "application history will be permanently erased."
+            )
+            confirm_text = st.text_input(
+                "Type 'DELETE' to confirm:",
+                placeholder="DELETE",
+                key="clear_confirm",
+            )
+            if st.button(
+                "Confirm & Clear All Data",
+                type="primary",
+                disabled=(confirm_text != "DELETE"),
+            ):
+                count = db.clear_all_jobs()
+                st.session_state["cleared_count"] = count
+                st.rerun()
+
+
 def _handle_scan(url: str) -> None:
     if not url.strip():
         st.warning("Please enter a job URL.")
@@ -159,6 +186,8 @@ def main() -> None:
         _render_job_list(db.get_jobs(applied_filter=False), "No unapplied positions yet.")
     with applied_tab:
         _render_job_list(db.get_jobs(applied_filter=True), "No applied positions yet.")
+
+    _render_settings()
 
 
 if __name__ == "__main__":
