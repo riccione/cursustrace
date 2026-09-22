@@ -13,6 +13,7 @@ from rapidfuzz import fuzz
 from cursustrace.utils import clean_url, generate_fingerprint
 
 DEFAULT_DB_PATH = Path("data/cursustrace.db")
+CV_PATH = Path("data/cv.md")
 
 FUZZY_THRESHOLD = 85
 FUZZY_CANDIDATE_LIMIT = 50
@@ -29,6 +30,20 @@ CREATE TABLE IF NOT EXISTS jobs (
     date_added TEXT NOT NULL,
     date_applied TEXT,
     fingerprint TEXT UNIQUE
+)
+"""
+
+CREATE_PROFILE_TABLE = """
+CREATE TABLE IF NOT EXISTS profile (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    full_name TEXT,
+    location TEXT,
+    phone TEXT,
+    email TEXT,
+    linkedin_url TEXT,
+    github_url TEXT,
+    cv_markdown TEXT,
+    date_updated TEXT DEFAULT (datetime('now'))
 )
 """
 
@@ -50,6 +65,30 @@ class Job(TypedDict):
     date_added: str
     date_applied: str | None
     fingerprint: str | None
+
+
+class Profile(TypedDict):
+    """The single user profile row, including the raw Markdown CV."""
+
+    full_name: str
+    location: str
+    phone: str
+    email: str
+    linkedin_url: str
+    github_url: str
+    cv_markdown: str
+    date_updated: str | None
+
+
+PROFILE_FIELDS = (
+    "full_name",
+    "location",
+    "phone",
+    "email",
+    "linkedin_url",
+    "github_url",
+    "cv_markdown",
+)
 
 
 def _now() -> str:
@@ -79,9 +118,10 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create the jobs table if needed and apply schema migrations."""
+    """Create the jobs and profile tables if needed and apply schema migrations."""
     with closing(get_connection()) as conn:
         conn.execute(CREATE_JOBS_TABLE)
+        conn.execute(CREATE_PROFILE_TABLE)
         _migrate(conn)
         conn.commit()
 
@@ -190,3 +230,60 @@ def clear_all_jobs() -> int:
         conn.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
         conn.commit()
     return count
+
+
+def _cv_fallback() -> str:
+    try:
+        return CV_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+
+
+def save_profile(data: Profile) -> None:
+    """Upsert the single profile row and mirror its Markdown CV to data/cv.md."""
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO profile "
+            "(id, full_name, location, phone, email, linkedin_url, github_url, "
+            "cv_markdown, date_updated) "
+            "VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (
+                data["full_name"],
+                data["location"],
+                data["phone"],
+                data["email"],
+                data["linkedin_url"],
+                data["github_url"],
+                data["cv_markdown"],
+            ),
+        )
+        conn.commit()
+    CV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CV_PATH.write_text(data["cv_markdown"], encoding="utf-8")
+
+
+def get_profile() -> Profile:
+    """Return the stored profile, falling back to data/cv.md when no row exists."""
+    with closing(get_connection()) as conn:
+        row = conn.execute("SELECT * FROM profile WHERE id = 1").fetchone()
+    if row is None:
+        return {
+            "full_name": "",
+            "location": "",
+            "phone": "",
+            "email": "",
+            "linkedin_url": "",
+            "github_url": "",
+            "cv_markdown": _cv_fallback(),
+            "date_updated": None,
+        }
+    return {
+        "full_name": row["full_name"] or "",
+        "location": row["location"] or "",
+        "phone": row["phone"] or "",
+        "email": row["email"] or "",
+        "linkedin_url": row["linkedin_url"] or "",
+        "github_url": row["github_url"] or "",
+        "cv_markdown": row["cv_markdown"] or "",
+        "date_updated": row["date_updated"],
+    }
