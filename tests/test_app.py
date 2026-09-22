@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,22 @@ def app_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
     monkeypatch.setattr(scraper, "scrape_job", _fake_scrape)
     return AppTest.from_file(APP_PATH)
+
+
+def test_run_invokes_streamlit(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    def _fake_run(args: list[str], check: bool) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    assert app.run() == 0
+    assert len(calls) == 1
+    argv = calls[0]
+    assert argv[1:4] == ["-m", "streamlit", "run"]
+    assert argv[4] == str(APP_PATH)
 
 
 def test_title_renders(app_test: AppTest) -> None:
