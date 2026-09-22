@@ -32,6 +32,9 @@ Paste a job listing URL, click **Scan & Save Position**, then use the
 **View full details** on a card to open the complete scraped description and
 metadata.
 
+Use the **👤 Profile & CV Editor** tab to set your contact details and edit
+your CV in Markdown with a live preview. Saving keeps `data/cv.md` in sync.
+
 ## Development
 
 ```sh
