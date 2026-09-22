@@ -350,3 +350,11 @@ def test_profile_save_persists_and_syncs_cv(app_test: AppTest) -> None:
     assert any(
         message.value == "Profile and CV saved successfully!" for message in app_test.success
     )
+
+
+def test_profile_export_button_renders(app_test: AppTest) -> None:
+    app_test.run()
+
+    assert not app_test.exception
+    labels = [button.label for button in app_test.download_button]
+    assert "📄 Export to PDF" in labels

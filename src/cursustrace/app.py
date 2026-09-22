@@ -9,10 +9,16 @@ from pathlib import Path
 import streamlit as st
 
 from cursustrace import db, scraper
-from cursustrace.errors import ScrapeError
+from cursustrace.errors import PdfExportError, ScrapeError
+from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
 DETAIL_PARAM = "job"
+
+
+@st.cache_data(show_spinner=False)
+def _cv_pdf_bytes(full_name: str, cv_md: str) -> bytes:
+    return generate_cv_pdf(full_name, cv_md)
 
 
 def run() -> None:
@@ -168,6 +174,20 @@ def _render_profile_editor() -> None:
             )
             st.session_state["profile_saved"] = True
             st.rerun()
+
+    st.divider()
+    try:
+        pdf_bytes = _cv_pdf_bytes(profile["full_name"], profile["cv_markdown"])
+    except PdfExportError as exc:
+        st.error(f"Could not generate PDF: {exc}")
+    else:
+        st.download_button(
+            label="📄 Export to PDF",
+            data=pdf_bytes,
+            file_name=get_pdf_filename(profile["full_name"]),
+            mime="application/pdf",
+            type="secondary",
+        )
 
 
 def _handle_scan(url: str) -> None:
