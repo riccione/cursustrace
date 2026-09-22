@@ -28,7 +28,9 @@ uv run streamlit run src/cursustrace/app.py
 
 Paste a job listing URL, click **Scan & Save Position**, then use the
 **Unapplied** and **Applied** tabs to manage each position. Toggle
-**Mark as Applied** on a card to move it between tabs.
+**Mark as Applied** on a card to move it between tabs. Select
+**View full details** on a card to open the complete scraped description and
+metadata.
 
 ## Development
 
