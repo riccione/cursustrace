@@ -1,2 +1,5 @@
 [server]
 headless = true
+
+[theme]
+baseFontSize = 18
