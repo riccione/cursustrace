@@ -13,6 +13,15 @@ uv sync
 
 ## Run
 
+Install and launch the app:
+
+```sh
+uv sync
+uv run cursustrace
+```
+
+Alternatively, run the Streamlit app directly:
+
 ```sh
 uv run streamlit run src/cursustrace/app.py
 ```
