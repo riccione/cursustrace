@@ -1,248 +1,38 @@
-"""Streamlit UI tests for cursustrace using AppTest."""
+"""NiceGUI UI tests for cursustrace using the user simulation."""
 
 from __future__ import annotations
 
-import os
+import asyncio
 import re
-import subprocess
-import sys
-from pathlib import Path
+import time
+from collections.abc import Callable
+from typing import cast
 
 import pytest
-from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1.element_tree import Button, Checkbox, TextArea, TextInput
+from nicegui import ui
+from nicegui.testing import User
 
 from cursustrace import app, db, scraper
 from cursustrace.errors import ScrapeError
 
-APP_PATH = Path(__file__).resolve().parents[1] / "src" / "cursustrace" / "app.py"
 JOB_URL = "https://example.com/jobs/1"
-
-
-def _fake_scrape(url: str) -> scraper.ScrapedJob:
-    return {
-        "title": "Senior Engineer",
-        "company": "Acme",
-        "location": "Remote",
-        "description": "Body text",
-    }
-
-
-def _raise_scrape(url: str) -> scraper.ScrapedJob:
-    raise ScrapeError(f"boom: {url}")
-
-
-@pytest.fixture
-def app_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppTest:
-    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
-    monkeypatch.setattr(scraper, "scrape_job", _fake_scrape)
-    return AppTest.from_file(APP_PATH)
-
-
-def test_run_execs_streamlit(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple[str, list[str]]] = []
-
-    def _fake_execvp(file: str, args: list[str]) -> None:
-        calls.append((file, args))
-
-    monkeypatch.setattr(os, "execvp", _fake_execvp)
-
-    app.run()
-    assert len(calls) == 1
-    file, argv = calls[0]
-    assert file == "streamlit"
-    assert argv[0:2] == ["streamlit", "run"]
-    assert argv[2] == str(APP_PATH)
-    assert argv[-1] == "--browser.gatherUsageStats=false"
-
-
-def test_run_sets_telemetry_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(os, "execvp", lambda file, args: None)
-    monkeypatch.delenv("STREAMLIT_BROWSER_GATHER_USAGE_STATS", raising=False)
-
-    app.run()
-
-    assert os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] == "false"
-
-
-def test_run_fallback_when_streamlit_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _missing_execvp(file: str, args: list[str]) -> None:
-        raise FileNotFoundError
-
-    calls: list[list[str]] = []
-
-    def _fake_run(args: list[str], check: bool) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        return subprocess.CompletedProcess(args, returncode=0)
-
-    monkeypatch.setattr(os, "execvp", _missing_execvp)
-    monkeypatch.setattr(subprocess, "run", _fake_run)
-
-    app.run()
-    assert len(calls) == 1
-    argv = calls[0]
-    assert argv[0:4] == [sys.executable, "-m", "streamlit", "run"]
-    assert argv[4] == str(APP_PATH)
-    assert argv[-1] == "--browser.gatherUsageStats=false"
-
-
-def test_title_renders(app_test: AppTest) -> None:
-    app_test.run()
-    assert not app_test.exception
-    assert app_test.title[0].value == app.APP_TITLE
-
-
-def test_scan_saves_position(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    assert not app_test.exception
-    assert app_test.success[0].value == "Position saved."
-    jobs = db.get_jobs()
-    assert len(jobs) == 1
-    assert jobs[0]["title"] == "Senior Engineer"
-    assert jobs[0]["company"] == "Acme"
-
-
-def test_duplicate_url_shows_warning(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-    app_test.button[0].click().run()
-
-    assert not app_test.exception
-    assert app_test.warning[0].value == (
-        "Position already exists in database (Matched by title/company fingerprint)."
-    )
-    assert len(db.get_jobs()) == 1
-
-
-def test_duplicate_fingerprint_shows_warning(
-    app_test: AppTest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    def _variant_scrape(url: str) -> scraper.ScrapedJob:
-        return {
-            "title": "Senior Engineer",
-            "company": "Acme",
-            "location": "Remote",
-            "description": "Body text",
-        }
-
-    monkeypatch.setattr(scraper, "scrape_job", _variant_scrape)
-    app_test.text_input[0].set_value("https://other.com/jobs/999").run()
-    app_test.button[0].click().run()
-
-    assert not app_test.exception
-    assert app_test.warning[0].value.startswith("Position already exists")
-    assert len(db.get_jobs()) == 1
-
-
-def test_empty_url_shows_warning(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.button[0].click().run()
-
-    assert not app_test.exception
-    assert app_test.warning[0].value == "Please enter a job URL."
-
-
-def test_scrape_error_shows_error(
-    app_test: AppTest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(scraper, "scrape_job", _raise_scrape)
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    assert not app_test.exception
-    assert "boom" in app_test.error[0].value
-    assert db.get_jobs() == []
-
-
-def _job_checkbox(app_test: AppTest, label: str) -> Checkbox:
-    return next(box for box in app_test.checkbox if box.label == label)
-
-
-def test_checkbox_marks_job_applied(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-    assert len(app_test.checkbox) == 3
-
-    _job_checkbox(app_test, "Mark as Applied").check().run()
-
-    assert not app_test.exception
-    applied = db.get_jobs(status="applied")
-    assert len(applied) == 1
-    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", applied[0]["date_applied"] or "")
-    assert db.get_jobs(status="unapplied") == []
-
-
-def test_checkbox_marks_job_interview(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    _job_checkbox(app_test, "Interview").check().run()
-
-    assert not app_test.exception
-    job = db.get_jobs()[0]
-    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
-    assert job["date_interview"] is not None
-
-
-def test_checkbox_marks_job_rejected(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    _job_checkbox(app_test, "Rejected").check().run()
-
-    assert not app_test.exception
-    job = db.get_jobs()[0]
-    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 1)
-    assert job["date_rejected"] is not None
-
-
-def test_interview_replaces_applied(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    _job_checkbox(app_test, "Mark as Applied").check().run()
-    _job_checkbox(app_test, "Interview").check().run()
-
-    assert not app_test.exception
-    job = db.get_jobs()[0]
-    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
-
-
-def test_unchecking_returns_to_unapplied(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    _job_checkbox(app_test, "Mark as Applied").check().run()
-    _job_checkbox(app_test, "Mark as Applied").uncheck().run()
-
-    assert not app_test.exception
-    job = db.get_jobs()[0]
-    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 0)
-    assert job["date_applied"] is None
-
-
-def test_dashboard_lists_status_tabs(app_test: AppTest) -> None:
-    app_test.run()
-
-    infos = [element.value for element in app_test.info]
-    assert "No unapplied positions yet." in infos
-    assert "No applied positions yet." in infos
-    assert "No interview positions yet." in infos
-    assert "No rejected positions yet." in infos
+TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+
+
+async def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError("condition not met in time")
+
+
+async def _scan(user: User, url: str = JOB_URL) -> None:
+    user.find("Job URL").clear().type(url)
+    await asyncio.sleep(0.05)
+    user.find("Scan & Save Position").click()
+    await asyncio.sleep(0.05)
 
 
 def _seed_job(title: str = "Senior Engineer", description: str = "Body text") -> int:
@@ -251,177 +41,303 @@ def _seed_job(title: str = "Senior Engineer", description: str = "Body text") ->
     return db.get_jobs()[0]["id"]
 
 
-def test_card_has_full_details_link(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
-
-    markdown = [element.value for element in app_test.markdown]
-    assert any("View full details" in value and "?job=" in value for value in markdown)
-
-
-def test_details_view_shows_full_description(app_test: AppTest) -> None:
-    job_id = _seed_job(description="## Responsibilities\n- Build things")
-    app_test.query_params[app.DETAIL_PARAM] = str(job_id)
-    app_test.run()
-
-    assert not app_test.exception
-    assert app_test.subheader[0].value == "Senior Engineer"
-    markdown = [element.value for element in app_test.markdown]
-    assert any("Responsibilities" in value for value in markdown)
-    assert any("**Company:** Acme" in value for value in markdown)
-    assert any("**Location:** Remote" in value for value in markdown)
+def _profile_payload(full_name: str = "Jane Doe", cv_markdown: str = "# Jane") -> db.Profile:
+    return {
+        "full_name": full_name,
+        "location": "Remote",
+        "phone": "555-0100",
+        "email": "jane@example.com",
+        "linkedin_url": "https://linkedin.com/in/jane",
+        "github_url": "https://github.com/jane",
+        "cv_markdown": cv_markdown,
+        "date_updated": None,
+    }
 
 
-def test_details_view_shows_tracking_fields(app_test: AppTest) -> None:
-    job_id = _seed_job()
-    db.set_job_status(job_id, "interview")
-    app_test.query_params[app.DETAIL_PARAM] = str(job_id)
-    app_test.run()
-
-    assert not app_test.exception
-    markdown = [element.value for element in app_test.markdown]
-    assert any(value == "**Status:** Interview" for value in markdown)
-    assert any(value.startswith("**Applied:**") for value in markdown)
-    assert any(value.startswith("**Interview:**") for value in markdown)
-    assert any("**Added:**" in value for value in markdown)
+async def test_title_renders(user: User) -> None:
+    await user.open("/")
+    await user.should_see(app.APP_TITLE)
 
 
-def test_details_view_unknown_id_warns(app_test: AppTest) -> None:
-    app_test.query_params[app.DETAIL_PARAM] = "999"
-    app_test.run()
+async def test_scan_saves_position(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
 
-    assert not app_test.exception
-    assert app_test.warning[0].value == "Position not found."
-
-
-def test_details_back_button_returns_to_list(app_test: AppTest) -> None:
-    job_id = _seed_job()
-    app_test.query_params[app.DETAIL_PARAM] = str(job_id)
-    app_test.run()
-
-    next(button for button in app_test.button if button.label == "← Back to list").click().run()
-
-    assert not app_test.exception
-    assert any(field.label == "Job URL" for field in app_test.text_input)
-    assert app.DETAIL_PARAM not in app_test.query_params
+    await user.should_see("Position saved.")
+    jobs = db.get_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]["title"] == "Senior Engineer"
+    assert jobs[0]["company"] == "Acme"
 
 
-CLEAR_BUTTON_LABEL = "Confirm & Clear All Data"
+async def test_duplicate_url_shows_warning(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
 
+    await _scan(user)
 
-def _clear_button(app_test: AppTest) -> Button:
-    return next(
-        button for button in app_test.sidebar.button if button.label == CLEAR_BUTTON_LABEL
-    )
-
-
-def test_clear_button_disabled_initially(app_test: AppTest) -> None:
-    app_test.run()
-    assert _clear_button(app_test).disabled is True
-
-
-def test_clear_button_stays_disabled_for_wrong_case(app_test: AppTest) -> None:
-    app_test.run()
-    confirm = next(
-        field for field in app_test.sidebar.text_input if field.label.startswith("Type 'DELETE'")
-    )
-    confirm.set_value("delete").run()
-
-    assert _clear_button(app_test).disabled is True
-
-
-def test_clear_button_enabled_with_exact_delete(app_test: AppTest) -> None:
-    app_test.run()
-    confirm = next(
-        field for field in app_test.sidebar.text_input if field.label.startswith("Type 'DELETE'")
-    )
-    confirm.set_value("DELETE").run()
-
-    assert _clear_button(app_test).disabled is False
-
-
-def test_clear_database_removes_all_jobs(app_test: AppTest) -> None:
-    app_test.run()
-    app_test.text_input[0].set_value(JOB_URL).run()
-    app_test.button[0].click().run()
+    await user.should_see("Position already exists in database")
     assert len(db.get_jobs()) == 1
 
-    confirm = next(
-        field for field in app_test.sidebar.text_input if field.label.startswith("Type 'DELETE'")
-    )
-    confirm.set_value("DELETE").run()
-    _clear_button(app_test).click().run()
 
-    assert not app_test.exception
-    assert db.get_jobs() == []
-    assert any(
-        message.value == "Successfully cleared 1 positions." for message in app_test.success
-    )
+async def test_duplicate_fingerprint_shows_warning(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
 
-
-def _profile_text_area(app_test: AppTest) -> TextArea:
-    return next(
-        field
-        for field in app_test.text_area
-        if field.label.startswith("Edit your CV in Markdown format")
-    )
-
-
-def _profile_input(app_test: AppTest, label: str) -> TextInput:
-    return next(field for field in app_test.text_input if field.label == label)
-
-
-def test_profile_tab_renders(app_test: AppTest) -> None:
-    app_test.run()
-    assert not app_test.exception
-    labels = {field.label for field in app_test.text_input}
-    assert {"Full Name", "Email", "LinkedIn URL", "Location", "Phone Number", "GitHub URL"} <= labels
-
-
-def test_profile_prefills_existing_values(app_test: AppTest) -> None:
-    db.init_db()
-    db.save_profile(
-        {
-            "full_name": "Jane Doe",
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "Senior Engineer",
+            "company": "Acme",
             "location": "Remote",
-            "phone": "555-0100",
-            "email": "jane@example.com",
-            "linkedin_url": "https://linkedin.com/in/jane",
-            "github_url": "https://github.com/jane",
-            "cv_markdown": "# Jane",
-            "date_updated": None,
-        }
+            "description": "Body text",
+        },
     )
-    app_test.run()
+    await _scan(user, "https://other.com/jobs/999")
 
-    assert _profile_input(app_test, "Full Name").value == "Jane Doe"
-    assert _profile_text_area(app_test).value == "# Jane"
+    await user.should_see("Position already exists in database")
+    assert len(db.get_jobs()) == 1
 
 
-def test_profile_save_persists(app_test: AppTest) -> None:
-    app_test.run()
-    _profile_input(app_test, "Full Name").set_value("Jane Doe").run()
-    _profile_input(app_test, "Email").set_value("jane@example.com").run()
-    _profile_text_area(app_test).set_value("# Jane Doe\n\nNew CV").run()
+async def test_empty_url_shows_warning(user: User) -> None:
+    await user.open("/")
+    user.find("Scan & Save Position").click()
 
-    next(
-        button for button in app_test.button if button.label == "💾 Save Profile & CV"
-    ).click().run()
+    await user.should_see("Please enter a job URL.")
 
-    assert not app_test.exception
+
+async def test_scrape_error_shows_error(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def raise_scrape(url: str) -> scraper.ScrapedJob:
+        raise ScrapeError(f"boom: {url}")
+
+    monkeypatch.setattr(scraper, "scrape_job", raise_scrape)
+    await user.open("/")
+    await _scan(user)
+
+    await user.should_see("boom")
+    assert db.get_jobs() == []
+
+
+async def test_checkbox_marks_job_applied(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
+
+    user.find(kind=ui.checkbox, content="Mark as Applied").click()
+
+    await _wait_for(lambda: len(db.get_jobs(status="applied")) == 1)
+    applied = db.get_jobs(status="applied")[0]
+    assert TIMESTAMP_RE.match(applied["date_applied"] or "")
+    assert db.get_jobs(status="unapplied") == []
+
+
+async def test_checkbox_marks_job_interview(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
+
+    user.find(kind=ui.checkbox, content="Interview").click()
+
+    await _wait_for(lambda: db.get_jobs()[0]["interview"] == 1)
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
+    assert job["date_interview"] is not None
+
+
+async def test_checkbox_marks_job_rejected(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
+
+    user.find(kind=ui.checkbox, content="Rejected").click()
+
+    await _wait_for(lambda: db.get_jobs()[0]["rejected"] == 1)
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 1)
+    assert job["date_rejected"] is not None
+
+
+async def test_interview_replaces_applied(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
+
+    user.find(kind=ui.checkbox, content="Mark as Applied").click()
+    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
+
+    user.find(kind=ui.checkbox, content="Interview").click()
+    await _wait_for(lambda: db.get_jobs()[0]["interview"] == 1)
+
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
+
+
+async def test_unchecking_returns_to_unapplied(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
+
+    user.find(kind=ui.checkbox, content="Mark as Applied").click()
+    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
+
+    user.find(kind=ui.checkbox, content="Mark as Applied").click()
+    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 0)
+
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 0)
+    assert job["date_applied"] is None
+
+
+async def test_dashboard_lists_status_tabs(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see("No unapplied positions yet.")
+    await user.should_see("No applied positions yet.")
+    await user.should_see("No interview positions yet.")
+    await user.should_see("No rejected positions yet.")
+
+
+async def test_card_has_full_details_link(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Position saved.")
+
+    await user.should_see("View full details")
+
+
+async def test_details_view_shows_full_description(user: User) -> None:
+    job_id = _seed_job(description="## Responsibilities\n- Build things")
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("Responsibilities")
+    await user.should_see("**Company:** Acme")
+    await user.should_see("**Location:** Remote")
+
+
+async def test_details_view_shows_tracking_fields(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "interview")
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("**Status:** Interview")
+    await user.should_see("**Applied:**")
+    await user.should_see("**Interview:**")
+    await user.should_see("**Added:**")
+
+
+async def test_details_view_unknown_id_warns(user: User) -> None:
+    await user.open("/job/999")
+
+    await user.should_see("Position not found.")
+
+
+async def test_details_back_button_returns_to_list(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    user.find("← Back to list").click()
+
+    await user.should_see("Job URL", retries=20)
+
+
+def _clear_button(user: User) -> ui.button:
+    return cast(ui.button, user.find("Confirm & Clear All Data").elements.pop())
+
+
+async def test_clear_button_disabled_initially(user: User) -> None:
+    await user.open("/")
+    assert _clear_button(user).enabled is False
+
+
+async def test_clear_button_stays_disabled_for_wrong_case(user: User) -> None:
+    await user.open("/")
+    user.find("Type 'DELETE' to confirm").type("delete")
+    await asyncio.sleep(0.1)
+
+    assert _clear_button(user).enabled is False
+
+
+async def test_clear_button_enabled_with_exact_delete(user: User) -> None:
+    await user.open("/")
+    user.find("Type 'DELETE' to confirm").type("DELETE")
+    await asyncio.sleep(0.1)
+
+    assert _clear_button(user).enabled is True
+
+
+async def test_clear_database_removes_all_jobs(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+
+    user.find("Type 'DELETE' to confirm").type("DELETE")
+    await asyncio.sleep(0.1)
+    user.find("Confirm & Clear All Data").click()
+
+    await _wait_for(lambda: db.get_jobs() == [])
+    await user.should_see("Successfully cleared 1 positions.")
+
+
+async def test_profile_tab_renders(user: User) -> None:
+    await user.open("/")
+
+    for label in (
+        "Full Name",
+        "Email",
+        "LinkedIn URL",
+        "Location",
+        "Phone Number",
+        "GitHub URL",
+    ):
+        await user.should_see(label)
+
+
+async def test_profile_prefills_existing_values(user: User) -> None:
+    db.init_db()
+    db.save_profile(_profile_payload(full_name="Jane Doe", cv_markdown="# Jane"))
+    await user.open("/")
+
+    name_input = cast(ui.input, user.find("Full Name").elements.pop())
+    cv_input = cast(ui.textarea, user.find("Edit your CV in Markdown format").elements.pop())
+    assert name_input.value == "Jane Doe"
+    assert cv_input.value == "# Jane"
+
+
+async def test_profile_save_persists(user: User) -> None:
+    await user.open("/")
+    user.find("Full Name").clear().type("Jane Doe")
+    user.find("Email").clear().type("jane@example.com")
+    user.find("Edit your CV in Markdown format").clear().type("# Jane Doe\n\nNew CV")
+    await asyncio.sleep(0.1)
+
+    user.find("💾 Save Profile & CV").click()
+
+    await user.should_see("Profile and CV saved successfully!")
     profile = db.get_profile()
     assert profile["full_name"] == "Jane Doe"
     assert profile["email"] == "jane@example.com"
     assert profile["cv_markdown"] == "# Jane Doe\n\nNew CV"
-    assert any(
-        message.value == "Profile and CV saved successfully!" for message in app_test.success
-    )
 
 
-def test_profile_export_button_renders(app_test: AppTest) -> None:
-    app_test.run()
+async def test_profile_export_button_renders(user: User) -> None:
+    await user.open("/")
 
-    assert not app_test.exception
-    labels = [button.label for button in app_test.download_button]
-    assert "📄 Export to PDF" in labels
+    await user.should_see("📄 Export to PDF")
+
+
+async def test_profile_export_downloads_pdf(user: User) -> None:
+    db.init_db()
+    db.save_profile(_profile_payload())
+    await user.open("/")
+
+    user.find("📄 Export to PDF").click()
+
+    response = await user.download.next()
+    assert response.content.startswith(b"%PDF")
