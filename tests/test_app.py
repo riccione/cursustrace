@@ -116,3 +116,63 @@ def test_checkbox_marks_job_applied(app_test: AppTest) -> None:
     assert len(applied) == 1
     assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", applied[0]["date_applied"] or "")
     assert db.get_jobs(applied_filter=False) == []
+
+
+def _seed_job(title: str = "Senior Engineer", description: str = "Body text") -> int:
+    db.init_db()
+    db.add_job(JOB_URL, title, "Acme", "Remote", description)
+    return db.get_jobs()[0]["id"]
+
+
+def test_card_has_full_details_link(app_test: AppTest) -> None:
+    app_test.run()
+    app_test.text_input[0].set_value(JOB_URL).run()
+    app_test.button[0].click().run()
+
+    markdown = [element.value for element in app_test.markdown]
+    assert any("View full details" in value and "?job=" in value for value in markdown)
+
+
+def test_details_view_shows_full_description(app_test: AppTest) -> None:
+    job_id = _seed_job(description="## Responsibilities\n- Build things")
+    app_test.query_params[app.DETAIL_PARAM] = str(job_id)
+    app_test.run()
+
+    assert not app_test.exception
+    assert app_test.subheader[0].value == "Senior Engineer"
+    markdown = [element.value for element in app_test.markdown]
+    assert any("Responsibilities" in value for value in markdown)
+    assert any("**Company:** Acme" in value for value in markdown)
+    assert any("**Location:** Remote" in value for value in markdown)
+
+
+def test_details_view_shows_tracking_fields(app_test: AppTest) -> None:
+    job_id = _seed_job()
+    db.update_applied_status(job_id, True)
+    app_test.query_params[app.DETAIL_PARAM] = str(job_id)
+    app_test.run()
+
+    assert not app_test.exception
+    markdown = [element.value for element in app_test.markdown]
+    assert any(value.startswith("**Applied:** Yes") for value in markdown)
+    assert any("**Added:**" in value for value in markdown)
+
+
+def test_details_view_unknown_id_warns(app_test: AppTest) -> None:
+    app_test.query_params[app.DETAIL_PARAM] = "999"
+    app_test.run()
+
+    assert not app_test.exception
+    assert app_test.warning[0].value == "Position not found."
+
+
+def test_details_back_button_returns_to_list(app_test: AppTest) -> None:
+    job_id = _seed_job()
+    app_test.query_params[app.DETAIL_PARAM] = str(job_id)
+    app_test.run()
+
+    app_test.button[0].click().run()
+
+    assert not app_test.exception
+    assert len(app_test.text_input) == 1
+    assert app.DETAIL_PARAM not in app_test.query_params
