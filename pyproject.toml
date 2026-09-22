@@ -12,6 +12,9 @@ dependencies = [
     "pydantic",
 ]
 
+[project.scripts]
+cursustrace = "cursustrace.app:run"
+
 [dependency-groups]
 dev = [
     "pytest",

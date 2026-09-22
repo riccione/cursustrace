@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 import streamlit as st
 
 from cursustrace import db, scraper
 from cursustrace.errors import ScrapeError
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
+
+
+def run() -> int:
+    """Launch the Streamlit UI in a subprocess and return its exit code."""
+    app_path = Path(__file__).resolve()
+    completed = subprocess.run(
+        [sys.executable, "-m", "streamlit", "run", str(app_path)],
+        check=False,
+    )
+    return completed.returncode
 
 
 def _render_job_card(job: db.Job) -> None:
