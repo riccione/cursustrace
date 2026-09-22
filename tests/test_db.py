@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from cursustrace import db
+from cursustrace.utils import generate_fingerprint
 
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
 
@@ -73,15 +74,16 @@ def test_add_job_accepts_null_fields(db_path: Path) -> None:
 def test_get_jobs_orders_by_id_desc(db_path: Path) -> None:
     db.init_db()
     for i in range(3):
-        _add(f"https://example.com/{i}")
+        _add(f"https://example.com/{i}", f"Engineer {i}")
     ids = [job["id"] for job in db.get_jobs()]
     assert ids == sorted(ids, reverse=True)
+    assert len(ids) == 3
 
 
 def test_get_jobs_applied_filter(db_path: Path) -> None:
     db.init_db()
-    _add("https://example.com/1")
-    _add("https://example.com/2")
+    _add("https://example.com/1", "Engineer One")
+    _add("https://example.com/2", "Engineer Two")
     jobs = db.get_jobs()
     db.update_applied_status(jobs[0]["id"], True)
 
@@ -119,3 +121,121 @@ def test_timestamp_is_close_to_now(db_path: Path) -> None:
     date_added = db.get_jobs()[0]["date_added"]
     created = time.mktime(time.strptime(date_added, "%Y-%m-%d %H:%M:%S"))
     assert abs(time.time() - created) < 60
+
+
+def _fingerprint_columns(conn: sqlite3.Connection) -> list[str]:
+    return [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+
+
+def test_init_db_adds_fingerprint_column_and_index(db_path: Path) -> None:
+    db.init_db()
+    with db.get_connection() as conn:
+        assert "fingerprint" in _fingerprint_columns(conn)
+        indexes = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_jobs_fingerprint'"
+        ).fetchall()
+    assert len(indexes) == 1
+
+
+def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
+    legacy = sqlite3.connect(db_path)
+    legacy.execute(
+        "CREATE TABLE jobs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, job_url TEXT UNIQUE NOT NULL, title TEXT, "
+        "company TEXT, location TEXT, description TEXT, applied INTEGER DEFAULT 0, "
+        "date_added TEXT NOT NULL, date_applied TEXT)"
+    )
+    legacy.execute(
+        "INSERT INTO jobs (job_url, title, company, location, description, date_added) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("https://example.com/old", "Engineer", "Acme", "Remote", "old body", "2024-01-01 00:00:00"),
+    )
+    legacy.commit()
+    legacy.close()
+
+    db.init_db()
+
+    jobs = db.get_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]["fingerprint"] == generate_fingerprint("Acme", "Engineer", "Remote")
+
+
+def test_add_job_stores_fingerprint(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    assert db.get_jobs()[0]["fingerprint"] == generate_fingerprint("Acme", "Engineer", "Remote")
+
+
+def test_add_job_rejects_same_fingerprint_different_url(db_path: Path) -> None:
+    db.init_db()
+    assert db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "desc") is True
+    assert db.add_job("https://b.com/2", "Engineer", "Acme", "Remote", "desc") is False
+    assert len(db.get_jobs()) == 1
+
+
+def test_check_duplicate_matches_url_ignoring_trackers(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    found, reason = db.check_duplicate(
+        "https://example.com/1?utm_source=x&ref=y", "Other", "OtherCo", "Berlin", "body"
+    )
+    assert found is True
+    assert reason == "Duplicate position already applied/tracked"
+
+
+def test_check_duplicate_matches_fingerprint_from_other_url(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    found, reason = db.check_duplicate(
+        "https://example.com/1-variant", "Engineer", "Acme", "Remote", "body"
+    )
+    assert found is True
+    assert reason == "Duplicate position already applied/tracked"
+
+
+def test_check_duplicate_matches_similar_description(db_path: Path) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/1",
+        "Backend Developer",
+        "Acme",
+        "Remote",
+        "Build distributed systems and maintain APIs for our platform.",
+    )
+    found, _ = db.check_duplicate(
+        "https://example.com/new",
+        "Platform Engineer",
+        "Acme",
+        "Berlin",
+        "Build distributed systems and maintain the APIs for our platform!",
+    )
+    assert found is True
+
+
+def test_check_duplicate_ignores_different_company(db_path: Path) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/1",
+        "Backend Developer",
+        "Acme",
+        "Remote",
+        "Build distributed systems and maintain APIs for our platform.",
+    )
+    found, reason = db.check_duplicate(
+        "https://example.com/new",
+        "Backend Developer",
+        "Globex",
+        "Remote",
+        "Build distributed systems and maintain APIs for our platform.",
+    )
+    assert found is False
+    assert reason == ""
+
+
+def test_check_duplicate_returns_false_for_new_job(db_path: Path) -> None:
+    db.init_db()
+    found, reason = db.check_duplicate(
+        "https://example.com/1", "Engineer", "Acme", "Remote", "unique body"
+    )
+    assert found is False
+    assert reason == ""

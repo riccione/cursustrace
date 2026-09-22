@@ -111,7 +111,33 @@ def test_duplicate_url_shows_warning(app_test: AppTest) -> None:
     app_test.button[0].click().run()
 
     assert not app_test.exception
-    assert app_test.warning[0].value == "This URL is already tracked."
+    assert app_test.warning[0].value == (
+        "Position already exists in database (Matched by title/company fingerprint)."
+    )
+    assert len(db.get_jobs()) == 1
+
+
+def test_duplicate_fingerprint_shows_warning(
+    app_test: AppTest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app_test.run()
+    app_test.text_input[0].set_value(JOB_URL).run()
+    app_test.button[0].click().run()
+
+    def _variant_scrape(url: str) -> scraper.ScrapedJob:
+        return {
+            "title": "Senior Engineer",
+            "company": "Acme",
+            "location": "Remote",
+            "description": "Body text",
+        }
+
+    monkeypatch.setattr(scraper, "scrape_job", _variant_scrape)
+    app_test.text_input[0].set_value("https://other.com/jobs/999").run()
+    app_test.button[0].click().run()
+
+    assert not app_test.exception
+    assert app_test.warning[0].value.startswith("Position already exists")
     assert len(db.get_jobs()) == 1
 
 
