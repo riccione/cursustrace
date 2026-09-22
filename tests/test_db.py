@@ -313,6 +313,28 @@ def test_clear_all_jobs_resets_auto_increment(db_path: Path) -> None:
     assert db.get_jobs()[0]["id"] == 1
 
 
+def test_delete_job_removes_row(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1", "Engineer One")
+    _add("https://example.com/2", "Engineer Two")
+    job_id = db.get_jobs()[-1]["id"]
+
+    db.delete_job(job_id)
+
+    remaining = db.get_jobs()
+    assert len(remaining) == 1
+    assert remaining[0]["job_url"] == "https://example.com/2"
+
+
+def test_delete_job_unknown_id_is_noop(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+
+    db.delete_job(999)
+
+    assert len(db.get_jobs()) == 1
+
+
 def _profile_payload(full_name: str = "Jane Doe", cv_markdown: str = "# Jane Doe\n\nEngineer") -> db.Profile:
     return {
         "full_name": full_name,
@@ -392,3 +414,15 @@ def test_get_profile_without_row(db_path: Path) -> None:
     profile = db.get_profile()
     assert profile["cv_markdown"] == ""
     assert profile["full_name"] == ""
+
+
+def test_setting_round_trip(db_path: Path) -> None:
+    db.init_db()
+    assert db.get_setting("dark_mode") is None
+    assert db.get_setting("dark_mode", "system") == "system"
+
+    db.set_setting("dark_mode", "dark")
+    assert db.get_setting("dark_mode") == "dark"
+
+    db.set_setting("dark_mode", "light")
+    assert db.get_setting("dark_mode") == "light"

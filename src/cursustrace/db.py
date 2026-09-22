@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS profile (
 )
 """
 
+CREATE_SETTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+)
+"""
+
 CREATE_FINGERPRINT_INDEX = (
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint)"
 )
@@ -147,6 +154,7 @@ def init_db() -> None:
     with closing(get_connection()) as conn:
         conn.execute(CREATE_JOBS_TABLE)
         conn.execute(CREATE_PROFILE_TABLE)
+        conn.execute(CREATE_SETTINGS_TABLE)
         _migrate(conn)
         _migrate_profile(conn)
         conn.commit()
@@ -290,6 +298,30 @@ def clear_all_jobs() -> int:
         conn.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
         conn.commit()
     return count
+
+
+def delete_job(job_id: int) -> None:
+    """Delete a single job listing by id."""
+    with closing(get_connection()) as conn:
+        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        conn.commit()
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    """Return a stored preference value, or the default when unset."""
+    with closing(get_connection()) as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row is not None else default
+
+
+def set_setting(key: str, value: str) -> None:
+    """Store a preference value, replacing any existing value for the key."""
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        conn.commit()
 
 
 def save_profile(data: Profile) -> None:
