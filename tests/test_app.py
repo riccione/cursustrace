@@ -31,7 +31,7 @@ async def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None
 async def _scan(user: User, url: str = JOB_URL) -> None:
     user.find("Job URL").clear().type(url)
     await asyncio.sleep(0.05)
-    user.find("Scan & Save Position").click()
+    user.find("Scan & Save Positions").click()
     await asyncio.sleep(0.05)
 
 
@@ -63,7 +63,7 @@ async def test_scan_saves_position(user: User) -> None:
     await user.open("/")
     await _scan(user)
 
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
     jobs = db.get_jobs()
     assert len(jobs) == 1
     assert jobs[0]["title"] == "Senior Engineer"
@@ -73,11 +73,11 @@ async def test_scan_saves_position(user: User) -> None:
 async def test_duplicate_url_shows_warning(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
     await _scan(user)
 
-    await user.should_see("Position already exists in database")
+    await user.should_see("Duplicates 1")
     assert len(db.get_jobs()) == 1
 
 
@@ -86,7 +86,7 @@ async def test_duplicate_fingerprint_shows_warning(
 ) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
     monkeypatch.setattr(
         scraper,
@@ -100,15 +100,15 @@ async def test_duplicate_fingerprint_shows_warning(
     )
     await _scan(user, "https://other.com/jobs/999")
 
-    await user.should_see("Position already exists in database")
+    await user.should_see("Duplicates 1")
     assert len(db.get_jobs()) == 1
 
 
 async def test_empty_url_shows_warning(user: User) -> None:
     await user.open("/")
-    user.find("Scan & Save Position").click()
+    user.find("Scan & Save Positions").click()
 
-    await user.should_see("Please enter a job URL.")
+    await user.should_see("Please enter at least one job URL.")
 
 
 async def test_scrape_error_shows_error(
@@ -125,12 +125,81 @@ async def test_scrape_error_shows_error(
     assert db.get_jobs() == []
 
 
+async def test_scan_multiple_urls_saves_all(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def scrape(url: str) -> scraper.ScrapedJob:
+        slug = url.rstrip("/").rsplit("/", 1)[-1]
+        return {
+            "title": f"Engineer {slug}",
+            "company": "Acme",
+            "location": "Remote",
+            "description": f"Body {slug}",
+        }
+
+    monkeypatch.setattr(scraper, "scrape_job", scrape)
+    await user.open("/")
+    user.find("Job URL").clear().type(
+        "https://example.com/jobs/1\nhttps://example.com/jobs/2\nhttps://example.com/jobs/3"
+    )
+    await asyncio.sleep(0.05)
+    user.find("Scan & Save Positions").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 3)
+    await user.should_see("Saved 3")
+
+
+async def test_scan_multiple_reports_mixed_outcomes(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def scrape(url: str) -> scraper.ScrapedJob:
+        if url.endswith("/bad"):
+            raise ScrapeError("nope")
+        slug = url.rstrip("/").rsplit("/", 1)[-1]
+        return {
+            "title": f"Engineer {slug}",
+            "company": "Acme",
+            "location": "Remote",
+            "description": f"Body {slug}",
+        }
+
+    monkeypatch.setattr(scraper, "scrape_job", scrape)
+    await user.open("/")
+    await _scan(user, "https://example.com/jobs/1")
+    await user.should_see("Saved 1")
+
+    user.find("Job URL").clear().type(
+        "https://example.com/jobs/2\nhttps://example.com/jobs/1\nhttps://example.com/jobs/bad"
+    )
+    await asyncio.sleep(0.05)
+    user.find("Scan & Save Positions").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 2)
+    await user.should_see("Saved 1 · Duplicates 1 · Failed 1")
+    assert db.get_jobs()[0]["job_url"] == "https://example.com/jobs/2"
+
+
+def test_parse_urls_splits_and_dedupes() -> None:
+    text = "https://a.com/1\n\n  https://a.com/2  \nhttps://a.com/1\n"
+
+    assert app._parse_urls(text) == ["https://a.com/1", "https://a.com/2"]
+
+
+def test_parse_urls_handles_empty_input() -> None:
+    assert app._parse_urls(None) == []
+    assert app._parse_urls("   \n  ") == []
+
+
+def _checkbox(user: User, label: str) -> ui.checkbox:
+    return user.find(kind=ui.checkbox, content=label).elements.pop()
+
+
 async def test_checkbox_marks_job_applied(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
-    user.find(kind=ui.checkbox, content="Mark as Applied").click()
+    user.find(kind=ui.checkbox, content="Applied").click()
 
     await _wait_for(lambda: len(db.get_jobs(status="applied")) == 1)
     applied = db.get_jobs(status="applied")[0]
@@ -141,7 +210,7 @@ async def test_checkbox_marks_job_applied(user: User) -> None:
 async def test_checkbox_marks_job_interview(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
     user.find(kind=ui.checkbox, content="Interview").click()
 
@@ -154,7 +223,7 @@ async def test_checkbox_marks_job_interview(user: User) -> None:
 async def test_checkbox_marks_job_rejected(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
     user.find(kind=ui.checkbox, content="Rejected").click()
 
@@ -167,9 +236,9 @@ async def test_checkbox_marks_job_rejected(user: User) -> None:
 async def test_interview_replaces_applied(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
-    user.find(kind=ui.checkbox, content="Mark as Applied").click()
+    user.find(kind=ui.checkbox, content="Applied").click()
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
 
     user.find(kind=ui.checkbox, content="Interview").click()
@@ -179,20 +248,131 @@ async def test_interview_replaces_applied(user: User) -> None:
     assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
 
 
-async def test_unchecking_returns_to_unapplied(user: User) -> None:
+async def test_unchecking_rejected_returns_to_unapplied(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
-    user.find(kind=ui.checkbox, content="Mark as Applied").click()
-    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
+    user.find(kind=ui.checkbox, content="Rejected").click()
+    await _wait_for(lambda: db.get_jobs()[0]["rejected"] == 1)
 
-    user.find(kind=ui.checkbox, content="Mark as Applied").click()
-    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 0)
+    user.find(kind=ui.checkbox, content="Rejected").click()
+    await _wait_for(
+        lambda: (
+            db.get_jobs()[0]["applied"],
+            db.get_jobs()[0]["interview"],
+            db.get_jobs()[0]["rejected"],
+        )
+        == (0, 0, 0)
+    )
 
     job = db.get_jobs()[0]
-    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 0)
     assert job["date_applied"] is None
+    assert job["date_interview"] is None
+    assert job["date_rejected"] is None
+
+
+async def test_checkbox_states_unapplied(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    assert _checkbox(user, "Applied").enabled is True
+    assert _checkbox(user, "Interview").enabled is True
+    assert _checkbox(user, "Rejected").enabled is True
+    assert _checkbox(user, "Applied").value is False
+    assert _checkbox(user, "Interview").value is False
+    assert _checkbox(user, "Rejected").value is False
+
+
+async def test_checkbox_states_applied(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    await user.open("/")
+
+    assert _checkbox(user, "Applied").enabled is False
+    assert _checkbox(user, "Applied").value is True
+    assert _checkbox(user, "Interview").enabled is True
+    assert _checkbox(user, "Rejected").enabled is True
+
+
+async def test_checkbox_states_interview(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "interview")
+    await user.open("/")
+
+    assert _checkbox(user, "Applied").enabled is False
+    assert _checkbox(user, "Applied").value is True
+    assert _checkbox(user, "Interview").enabled is False
+    assert _checkbox(user, "Interview").value is True
+    assert _checkbox(user, "Rejected").enabled is True
+    assert _checkbox(user, "Rejected").value is False
+
+
+async def test_checkbox_states_rejected_from_applied(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "rejected")
+    await user.open("/")
+
+    assert _checkbox(user, "Applied").enabled is False
+    assert _checkbox(user, "Applied").value is True
+    assert _checkbox(user, "Interview").enabled is False
+    assert _checkbox(user, "Interview").value is False
+    assert _checkbox(user, "Rejected").enabled is True
+    assert _checkbox(user, "Rejected").value is True
+
+
+async def test_checkbox_states_rejected_from_interview(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "interview")
+    db.set_job_status(job_id, "rejected")
+    await user.open("/")
+
+    assert _checkbox(user, "Applied").enabled is False
+    assert _checkbox(user, "Applied").value is True
+    assert _checkbox(user, "Interview").enabled is False
+    assert _checkbox(user, "Interview").value is True
+    assert _checkbox(user, "Rejected").enabled is True
+    assert _checkbox(user, "Rejected").value is True
+
+
+async def test_delete_requires_confirmation(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Saved 1")
+
+    user.find("🗑️ Delete").click()
+    dialog = user.find(ui.dialog).elements.pop()
+    await _wait_for(lambda: dialog.value is True)
+
+    user.find("Cancel").click()
+    await _wait_for(lambda: dialog.value is False)
+    assert len(db.get_jobs()) == 1
+
+
+async def test_delete_confirmed_removes_position(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Saved 1")
+
+    job_id = db.get_jobs()[0]["id"]
+    user.find("🗑️ Delete").click()
+    user.find(marker=f"delete-confirm-{job_id}").click()
+
+    await _wait_for(lambda: db.get_jobs() == [])
+    await user.should_see("Position deleted.")
+
+
+async def test_delete_from_detail_returns_to_dashboard(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    user.find("🗑️ Delete").click()
+    user.find(marker=f"delete-confirm-{job_id}").click()
+
+    await user.should_see("Job URL", retries=20)
+    assert db.get_jobs() == []
 
 
 async def test_dashboard_lists_status_tabs(user: User) -> None:
@@ -207,7 +387,7 @@ async def test_dashboard_lists_status_tabs(user: User) -> None:
 async def test_card_has_full_details_link(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Position saved.")
+    await user.should_see("Saved 1")
 
     await user.should_see("View full details")
 
@@ -341,3 +521,24 @@ async def test_profile_export_downloads_pdf(user: User) -> None:
 
     response = await user.download.next()
     assert response.content.startswith(b"%PDF")
+
+
+async def test_theme_defaults_to_system(user: User) -> None:
+    await user.open("/")
+
+    dark = user.find(ui.dark_mode).elements.pop()
+    assert dark.value is None
+
+
+async def test_theme_toggle_persists_dark(user: User) -> None:
+    await user.open("/")
+
+    user.find(ui.toggle).elements.pop().set_value("dark")
+    await _wait_for(lambda: db.get_setting("dark_mode") == "dark")
+
+    dark = user.find(ui.dark_mode).elements.pop()
+    assert dark.value is True
+
+    await user.open("/")
+    reloaded = user.find(ui.dark_mode).elements.pop()
+    assert reloaded.value is True

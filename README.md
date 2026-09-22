@@ -26,11 +26,12 @@ uv run cursustrace
 The [NiceGUI](https://nicegui.io/) server starts on
 [http://localhost:8080](http://localhost:8080).
 
-Paste a job listing URL, click **Scan & Save Position**, then use the
-**Unapplied**, **Applied**, **Interview**, and **Rejected** tabs to manage each
-position through the pipeline. Toggle **Mark as Applied**, **Interview**, or
-**Rejected** on a card to move it between tabs. Select **View full details** on
-a card to open the complete scraped description and metadata.
+Paste one or more job listing URLs (one per line), click **Scan & Save
+Positions**, then use the **Unapplied**, **Applied**, **Interview**, and
+**Rejected** tabs to manage each position through the pipeline. Toggle
+**Applied**, **Interview**, or **Rejected** on a card to move it between tabs.
+Select **View full details** on a card to open the complete scraped description
+and metadata.
 
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
 your CV in Markdown with a live preview. Your profile and CV are stored only in

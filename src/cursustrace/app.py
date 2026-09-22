@@ -7,8 +7,10 @@ import signal
 from collections.abc import Callable
 from functools import lru_cache
 from types import FrameType
+from typing import Literal
 
 from nicegui import app, events, ui
+from nicegui.run import io_bound
 
 from cursustrace import db, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
@@ -26,7 +28,7 @@ STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
 )
 
 STATUS_CHECKBOXES: tuple[tuple[db.JobFlag, str], ...] = (
-    ("applied", "Mark as Applied"),
+    ("applied", "Applied"),
     ("interview", "Interview"),
     ("rejected", "Rejected"),
 )
@@ -36,7 +38,34 @@ html { font-size: 22px; }
 body { font-size: 22px; }
 .q-btn, .q-field, .q-field__label, .q-tab__label, .q-item, .q-checkbox,
 .q-notification { font-size: inherit; }
+body.body--dark .q-drawer { background: #1d1d1d; }
 """
+
+DARK_MODE_KEY = "dark_mode"
+DARK_MODE_OPTIONS: dict[str, str] = {
+    "light": "☀️ Light",
+    "dark": "🌙 Dark",
+    "system": "🖥️ System",
+}
+
+
+def _dark_mode_value(name: str | None) -> bool | None:
+    if name == "dark":
+        return True
+    if name == "light":
+        return False
+    return None
+
+
+def _dark_mode_name(value: bool | None) -> str:
+    if value is None:
+        return "system"
+    return "dark" if value else "light"
+
+
+def _apply_dark_mode() -> ui.dark_mode:
+    name = db.get_setting(DARK_MODE_KEY, "system")
+    return ui.dark_mode(value=_dark_mode_value(name))
 
 
 @lru_cache(maxsize=16)
@@ -84,6 +113,28 @@ def _job_status(job: db.Job) -> db.JobStatus:
     return "unapplied"
 
 
+_DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobFlag]] = {
+    "unapplied": frozenset(),
+    "applied": frozenset({"applied"}),
+    "interview": frozenset({"applied", "interview"}),
+    "rejected": frozenset({"applied", "interview"}),
+}
+
+
+def _checked_flags(job: db.Job) -> frozenset[db.JobFlag]:
+    status = _job_status(job)
+    if status == "applied":
+        return frozenset({"applied"})
+    if status == "interview":
+        return frozenset({"applied", "interview"})
+    if status == "rejected":
+        flags: set[db.JobFlag] = {"applied", "rejected"}
+        if job["date_interview"]:
+            flags.add("interview")
+        return frozenset(flags)
+    return frozenset()
+
+
 def _resolve_job(job_id: int) -> db.Job | None:
     return next((job for job in db.get_jobs() if job["id"] == job_id), None)
 
@@ -108,12 +159,27 @@ def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
         ui.markdown(f"**Added:** {job['date_added']}")
         ui.link("Open job posting", job["job_url"], new_tab=True)
         ui.link("View full details", f"/job/{job['id']}")
+        current = _job_status(job)
+        checked = _checked_flags(job)
         for status, label in STATUS_CHECKBOXES:
-            ui.checkbox(
+            checkbox = ui.checkbox(
                 label,
-                value=bool(job[status]),
+                value=status in checked,
                 on_change=_status_handler(job["id"], status, refresh),
             )
+            checkbox.enabled = status not in _DISABLED_CHECKBOXES[current]
+
+        with ui.dialog() as dialog, ui.card():
+            ui.label("Delete this position?")
+            ui.label(f"{title} — {company}").classes("font-bold")
+            ui.label("This action cannot be undone.").classes("text-negative")
+            with ui.row():
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+                ui.button(
+                    "Delete",
+                    on_click=lambda: _delete_job(dialog, job["id"], refresh),
+                ).props("color=negative").mark(f"delete-confirm-{job['id']}")
+        ui.button("🗑️ Delete", on_click=dialog.open).props("flat color=negative")
 
 
 def _render_job_list(
@@ -128,50 +194,98 @@ def _render_job_list(
         _render_job_card(job, refresh)
 
 
-def _handle_scan(url: str | None, refresh: Callable[[], None]) -> None:
-    candidate = (url or "").strip()
-    if not candidate:
-        ui.notify("Please enter a job URL.", type="warning")
-        return
+def _parse_urls(text: str | None) -> list[str]:
+    lines = [line.strip() for line in (text or "").splitlines()]
+    return list(dict.fromkeys(line for line in lines if line))
 
+
+def _scan_url(url: str) -> tuple[str, str]:
     try:
-        job = scraper.scrape_job(candidate)
+        job = scraper.scrape_job(url)
     except ScrapeError as exc:
-        ui.notify(f"Could not scan that URL: {exc}", type="negative")
-        return
+        return ("error", f"{url}: {exc}")
 
     duplicate, _reason = db.check_duplicate(
-        candidate,
+        url,
         job["title"],
         job["company"],
         job["location"],
         job["description"],
     )
-    if duplicate:
-        ui.notify(
-            "⚠️ Position already exists in database (Matched by title/company fingerprint).",
-            type="warning",
-        )
+    if duplicate or not db.add_job(
+        url,
+        job["title"],
+        job["company"],
+        job["location"],
+        job["description"],
+    ):
+        return ("duplicate", url)
+    return ("saved", url)
+
+
+def _scan_summary(saved: int, duplicates: int, errors: int, failures: list[str]) -> str:
+    parts: list[str] = []
+    if saved:
+        parts.append(f"Saved {saved}")
+    if duplicates:
+        parts.append(f"Duplicates {duplicates}")
+    if errors:
+        parts.append(f"Failed {errors}: {'; '.join(failures)}")
+    return " · ".join(parts) if parts else "Nothing saved."
+
+
+async def _handle_scan(
+    text: str | None,
+    refresh: Callable[[], None],
+    status_label: ui.label,
+    button: ui.button,
+) -> None:
+    urls = _parse_urls(text)
+    if not urls:
+        ui.notify("Please enter at least one job URL.", type="warning")
         return
 
-    added = db.add_job(
-        candidate,
-        job["title"],
-        job["company"],
-        job["location"],
-        job["description"],
+    button.enabled = False
+    saved = duplicates = errors = 0
+    failures: list[str] = []
+    try:
+        for index, url in enumerate(urls, start=1):
+            status_label.set_text(f"Scanning {index}/{len(urls)}: {url}")
+            outcome = await io_bound(_scan_url, url)
+            kind, message = outcome if outcome is not None else ("error", f"{url}: cancelled")
+            if kind == "saved":
+                saved += 1
+            elif kind == "duplicate":
+                duplicates += 1
+            else:
+                errors += 1
+                failures.append(message)
+    finally:
+        status_label.set_text("")
+        button.enabled = True
+
+    refresh()
+    notify_type: Literal["positive", "negative", "warning"] = (
+        "negative" if errors else ("warning" if duplicates else "positive")
     )
-    if added:
-        ui.notify("Position saved.", type="positive")
-        refresh()
-    else:
-        ui.notify(
-            "⚠️ Position already exists in database (Matched by title/company fingerprint).",
-            type="warning",
-        )
+    ui.notify(
+        _scan_summary(saved, duplicates, errors, failures),
+        type=notify_type,
+    )
 
 
-def _render_settings(refresh: Callable[[], None]) -> None:
+def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
+    ui.label("Appearance").classes("text-h6")
+    theme = ui.toggle(DARK_MODE_OPTIONS, value=_dark_mode_name(dark.value))
+
+    def update_theme(event: events.ValueChangeEventArguments[str | None]) -> None:
+        name = event.value or "system"
+        dark.value = _dark_mode_value(name)
+        db.set_setting(DARK_MODE_KEY, name)
+
+    theme.on_value_change(update_theme)
+
+    ui.separator()
     ui.label("⚙️ Settings & Maintenance").classes("text-h6")
     with ui.expansion("⚠️ Danger Zone: Clear Database"):
         ui.label(
@@ -195,6 +309,19 @@ def _clear_database(refresh: Callable[[], None]) -> None:
     count = db.clear_all_jobs()
     ui.notify(f"Successfully cleared {count} positions.", type="positive")
     refresh()
+
+
+def _delete_job(dialog: ui.dialog, job_id: int, refresh: Callable[[], None] | None = None) -> None:
+    db.delete_job(job_id)
+    dialog.close()
+    ui.notify("Position deleted.", type="positive")
+    if refresh is not None:
+        refresh()
+
+
+def _delete_job_from_detail(dialog: ui.dialog, job_id: int) -> None:
+    _delete_job(dialog, job_id)
+    ui.navigate.to("/")
 
 
 def _render_profile_editor() -> None:
@@ -265,6 +392,7 @@ def _render_profile_editor() -> None:
 @ui.page("/")
 def dashboard_page() -> None:
     ui.page_title(APP_TITLE)
+    dark = _apply_dark_mode()
     containers: dict[db.JobStatus, ui.column] = {}
 
     def refresh() -> None:
@@ -278,16 +406,21 @@ def dashboard_page() -> None:
         ui.label(APP_TITLE).classes("text-h6")
         settings_button = ui.button(icon="settings").props("flat color=white")
 
-    with ui.right_drawer(value=False).classes("bg-grey-1") as drawer:
+    with ui.right_drawer(value=False) as drawer:
         settings_button.on_click(lambda: drawer.toggle())
-        _render_settings(refresh)
+        _render_settings(refresh, dark)
 
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
-        with ui.row().classes("w-full items-end"):
-            url_input = ui.input("Job URL").classes("flex-grow")
-            ui.button(
-                "Scan & Save Position",
-                on_click=lambda: _handle_scan(url_input.value, refresh),
+        with ui.column().classes("w-full gap-2"):
+            urls_input = ui.textarea(
+                "Job URLs (one per line)",
+                placeholder="https://example.com/job/1\nhttps://example.com/job/2",
+            ).classes("w-full").props('autogrow input-style="min-height: 80px"')
+            with ui.row().classes("w-full items-center gap-3"):
+                scan_button = ui.button("Scan & Save Positions")
+                status_label = ui.label()
+            scan_button.on_click(
+                lambda: _handle_scan(urls_input.value, refresh, status_label, scan_button)
             )
 
         with ui.tabs().classes("w-full") as main_tabs:
@@ -312,6 +445,7 @@ def dashboard_page() -> None:
 @ui.page("/job/{job_id}")
 def job_detail_page(job_id: int) -> None:
     ui.page_title(APP_TITLE)
+    _apply_dark_mode()
     with ui.column().classes("w-full max-w-4xl mx-auto p-4 gap-2"):
         ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
 
@@ -335,6 +469,20 @@ def job_detail_page(job_id: int) -> None:
 
         ui.separator()
         ui.markdown(job["description"] or "_No description captured._")
+
+        with ui.dialog() as dialog, ui.card():
+            ui.label("Delete this position?")
+            ui.label(f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}").classes(
+                "font-bold"
+            )
+            ui.label("This action cannot be undone.").classes("text-negative")
+            with ui.row():
+                ui.button("Cancel", on_click=dialog.close).props("flat")
+                ui.button(
+                    "Delete",
+                    on_click=lambda: _delete_job_from_detail(dialog, job["id"]),
+                ).props("color=negative").mark(f"delete-confirm-{job['id']}")
+        ui.button("🗑️ Delete", on_click=dialog.open).props("flat color=negative")
 
 
 def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
@@ -369,8 +517,8 @@ def run() -> None:
         )
     except KeyboardInterrupt:
         _shutdown_signal = signal.SIGINT
-    print("\nCursusTrace stopped.")
     if _shutdown_signal is not None:
+        print("\nCursusTrace stopped.")
         raise SystemExit(128 + _shutdown_signal)
 
 
