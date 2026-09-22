@@ -23,11 +23,8 @@ uv sync
 uv run cursustrace
 ```
 
-Alternatively, run the Streamlit app directly:
-
-```sh
-uv run streamlit run src/cursustrace/app.py
-```
+The [NiceGUI](https://nicegui.io/) server starts on
+[http://localhost:8080](http://localhost:8080).
 
 Paste a job listing URL, click **Scan & Save Position**, then use the
 **Unapplied**, **Applied**, **Interview**, and **Rejected** tabs to manage each
