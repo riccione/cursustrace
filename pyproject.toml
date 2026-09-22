@@ -11,6 +11,8 @@ dependencies = [
     "requests",
     "pydantic",
     "rapidfuzz>=3.14.6",
+    "markdown>=3.10.3",
+    "xhtml2pdf>=0.2.20",
 ]
 
 [project.scripts]
@@ -29,6 +31,10 @@ build-backend = "uv_build"
 
 [tool.mypy]
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["markdown", "markdown.*", "xhtml2pdf", "xhtml2pdf.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
