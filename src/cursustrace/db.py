@@ -180,3 +180,13 @@ def get_jobs(applied_filter: bool | None = None) -> list[Job]:
     with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
     return [cast(Job, dict(row)) for row in rows]
+
+
+def clear_all_jobs() -> int:
+    """Delete every job row, reset the auto-increment counter, and return the count."""
+    with closing(get_connection()) as conn:
+        count = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+        conn.execute("DELETE FROM jobs")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
+        conn.commit()
+    return count
