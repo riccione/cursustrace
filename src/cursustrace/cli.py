@@ -49,6 +49,19 @@ def _ingest(
     return {"status": "added", "id": job_id, "url": url}
 
 
+def _report_summary(added: int, skipped: int, errors: list[dict[str, str]], as_json: bool) -> None:
+    """Print the batch result and exit non-zero when any item errored."""
+    if as_json:
+        click.echo(json_module.dumps({"added": added, "skipped": skipped, "errors": errors}))
+    else:
+        for error in errors:
+            label = error.get("url", error.get("item", "?"))
+            click.echo(f"Error ({label}): {error['error']}", err=True)
+        click.echo(f"Added {added}, skipped {skipped}, errors {len(errors)}.")
+    if errors:
+        raise click.exceptions.Exit(1)
+
+
 @click.group(invoke_without_command=True)
 @click.version_option(
     None,
@@ -128,15 +141,7 @@ def scan(urls: tuple[str, ...], as_json: bool) -> None:
             click.echo(f"Skipped (already tracked): {url}", err=True)
         else:
             added += 1
-    if as_json:
-        click.echo(json_module.dumps({"added": added, "skipped": skipped, "errors": errors}))
-    else:
-        for error in errors:
-            label = error.get("url", error.get("item", "?"))
-            click.echo(f"Error ({label}): {error['error']}", err=True)
-        click.echo(f"Added {added}, skipped {skipped}, errors {len(errors)}.")
-    if errors:
-        raise click.exceptions.Exit(1)
+    _report_summary(added, skipped, errors, as_json)
 
 
 @cli.command(name="import")
@@ -185,15 +190,7 @@ def import_jobs(source: TextIO, as_json: bool) -> None:
         else:
             added += 1
 
-    if as_json:
-        click.echo(json_module.dumps({"added": added, "skipped": skipped, "errors": errors}))
-    else:
-        for error in errors:
-            label = error.get("url", error.get("item", "?"))
-            click.echo(f"Error ({label}): {error['error']}", err=True)
-        click.echo(f"Added {added}, skipped {skipped}, errors {len(errors)}.")
-    if errors:
-        raise click.exceptions.Exit(1)
+    _report_summary(added, skipped, errors, as_json)
 
 
 @cli.command(name="list")
