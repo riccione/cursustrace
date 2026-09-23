@@ -112,6 +112,40 @@ def _status_handler(
     return handler
 
 
+def _render_status_controls(
+    job: db.Job, current: db.JobStatus, refresh: Callable[[], None]
+) -> None:
+    checked = _checked_flags(job)
+    for status, label in STATUS_CHECKBOXES:
+        checkbox = ui.checkbox(
+            label,
+            value=status in checked,
+            on_change=_status_handler(job["id"], status, refresh),
+        )
+        checkbox.enabled = status not in _DISABLED_CHECKBOXES[current]
+
+
+def _render_comment_box(job: db.Job, current: db.JobFlag) -> None:
+    comment_input = (
+        ui.textarea(f"{current.title()} comment", value=_stage_comment(job, current))
+        .classes("w-full")
+        .props('autogrow input-style="min-height: 80px"')
+    )
+
+    def save_comment() -> None:
+        db.set_job_comment(job["id"], current, comment_input.value or "")
+        ui.notify("Comment saved.", type="positive")
+
+    ui.button("💾 Save comment", on_click=save_comment).props("flat color=primary")
+
+
+def _render_delete_controls(job: db.Job, refresh: Callable[[], None]) -> None:
+    delete_dialog = _confirm_delete_dialog(
+        job, lambda dialog: _delete_job(dialog, job["id"], refresh)
+    )
+    ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
+
+
 def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
     title = job["title"] or "Untitled position"
     company = job["company"] or "Unknown company"
@@ -121,35 +155,10 @@ def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
         ui.link("Open job posting", job["job_url"], new_tab=True)
         ui.link("View full details", f"/job/{job['id']}")
         current = db.job_status(job)
-        checked = _checked_flags(job)
-        for status, label in STATUS_CHECKBOXES:
-            checkbox = ui.checkbox(
-                label,
-                value=status in checked,
-                on_change=_status_handler(job["id"], status, refresh),
-            )
-            checkbox.enabled = status not in _DISABLED_CHECKBOXES[current]
-
+        _render_status_controls(job, current, refresh)
         if current != "unapplied":
-            comment_input = (
-                ui.textarea(
-                    f"{current.title()} comment",
-                    value=_stage_comment(job, current),
-                )
-                .classes("w-full")
-                .props('autogrow input-style="min-height: 80px"')
-            )
-
-            def save_comment() -> None:
-                db.set_job_comment(job["id"], current, comment_input.value or "")
-                ui.notify("Comment saved.", type="positive")
-
-            ui.button("💾 Save comment", on_click=save_comment).props("flat color=primary")
-
-        delete_dialog = _confirm_delete_dialog(
-            job, lambda dialog: _delete_job(dialog, job["id"], refresh)
-        )
-        ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
+            _render_comment_box(job, current)
+        _render_delete_controls(job, refresh)
 
 
 def _render_job_list(
