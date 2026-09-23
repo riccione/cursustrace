@@ -69,6 +69,13 @@ echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
 
 # list stored positions
 uv run cursustrace list --status applied --json
+
+# show the version
+uv run cursustrace -V
+
+# delete job positions (or everything with --all); --yes skips the prompt
+uv run cursustrace clear --yes
+uv run cursustrace clear --all --yes
 ```
 
 Each JSON item may be structured (`url`, `title`, `company`, `location`,

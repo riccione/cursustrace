@@ -41,6 +41,19 @@ def _varying_scrape(url: str) -> scraper.ScrapedJob:
     }
 
 
+def _profile() -> db.Profile:
+    return {
+        "full_name": "Jane Doe",
+        "location": "Remote",
+        "phone": "555-0100",
+        "email": "jane@example.com",
+        "linkedin_url": "",
+        "github_url": "",
+        "cv_markdown": "# Jane",
+        "date_updated": None,
+    }
+
+
 def test_add_inserts_position(runner: CliRunner) -> None:
     result = runner.invoke(cli_module.cli, ADD_ARGS)
 
@@ -194,3 +207,51 @@ def test_list_filters_by_status(runner: CliRunner) -> None:
     jobs = json.loads(result.output)
     assert len(jobs) == 1
     assert jobs[0]["title"] == "Two"
+
+
+def test_version_flags(runner: CliRunner) -> None:
+    for flag in ("--version", "-V"):
+        result = runner.invoke(cli_module.cli, [flag])
+
+        assert result.exit_code == 0
+        assert "cursustrace 0.1.0" in result.output
+
+
+def test_clear_requires_confirmation(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["clear"], input="n\n")
+
+    assert result.exit_code == 1
+    assert len(db.get_jobs()) == 1
+
+
+def test_clear_removes_positions(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    db.save_profile(_profile())
+    db.set_setting("dark_mode", "dark")
+
+    result = runner.invoke(cli_module.cli, ["clear", "--yes"])
+
+    assert result.exit_code == 0
+    assert "Removed 1 position(s)." in result.output
+    assert db.get_jobs() == []
+    assert db.get_profile()["full_name"] == "Jane Doe"
+    assert db.get_setting("dark_mode") == "dark"
+
+
+def test_clear_all_removes_everything(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    db.save_profile(_profile())
+    db.set_setting("dark_mode", "dark")
+
+    result = runner.invoke(cli_module.cli, ["clear", "--all", "--yes", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {"positions": 1, "profile": True, "settings": 1}
+    assert db.get_jobs() == []
+    assert db.get_profile()["full_name"] == ""
+    assert db.get_setting("dark_mode") is None

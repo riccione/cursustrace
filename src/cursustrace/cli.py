@@ -57,6 +57,14 @@ def _ingest(
 
 
 @click.group(invoke_without_command=True)
+@click.version_option(
+    None,
+    "-V",
+    "--version",
+    package_name="cursustrace",
+    prog_name="cursustrace",
+    message="cursustrace %(version)s",
+)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
     """CursusTrace — job application tracker."""
@@ -212,6 +220,42 @@ def list_jobs(status: str | None, as_json: bool) -> None:
         title = job["title"] or "Untitled position"
         company = job["company"] or "Unknown company"
         click.echo(f"{job['id']}. {title} — {company} [{_status_name(job)}]")
+
+
+@cli.command()
+@click.option("--all", "clear_all", is_flag=True, help="Also delete profile/CV and settings.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
+def clear(clear_all: bool, yes: bool, as_json: bool) -> None:
+    """Delete job positions, or ALL data with --all."""
+    db.init_db()
+    prompt = (
+        "Delete ALL data (positions, profile/CV, settings)? This cannot be undone."
+        if clear_all
+        else "Delete all job positions? This cannot be undone."
+    )
+    if not yes:
+        click.confirm(prompt, abort=True)
+
+    if clear_all:
+        counts = db.clear_all_data()
+        payload: dict[str, object] = {
+            "positions": counts["positions"],
+            "profile": True,
+            "settings": counts["settings"],
+        }
+        message = (
+            f"Removed {counts['positions']} position(s) and cleared profile & settings."
+        )
+    else:
+        positions = db.clear_all_jobs()
+        payload = {"positions": positions}
+        message = f"Removed {positions} position(s)."
+
+    if as_json:
+        click.echo(json_module.dumps(payload))
+    else:
+        click.echo(message)
 
 
 if __name__ == "__main__":

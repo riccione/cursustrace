@@ -329,6 +329,19 @@ def delete_job(job_id: int) -> None:
         conn.commit()
 
 
+def clear_all_data() -> dict[str, int]:
+    """Delete all jobs, the profile row, and all settings; return the counts."""
+    with closing(get_connection()) as conn:
+        positions = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+        settings = int(conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0])
+        conn.execute("DELETE FROM jobs")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
+        conn.execute("DELETE FROM profile")
+        conn.execute("DELETE FROM settings")
+        conn.commit()
+    return {"positions": positions, "settings": settings}
+
+
 def update_job(
     job_id: int,
     url: str,
