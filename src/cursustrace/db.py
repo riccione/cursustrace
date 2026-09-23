@@ -233,11 +233,9 @@ def add_job(
     company: str | None,
     location: str | None,
     description: str | None,
-    fingerprint: str | None = None,
 ) -> int | None:
     """Insert a job listing; return the new id, or None when the URL/fingerprint exists."""
-    if fingerprint is None:
-        fingerprint = generate_fingerprint(company, title, location)
+    fingerprint = generate_fingerprint(company, title, location)
     try:
         with closing(get_connection()) as conn:
             cursor = conn.execute(
