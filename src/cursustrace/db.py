@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     date_applied TEXT,
     date_interview TEXT,
     date_rejected TEXT,
+    applied_comment TEXT,
+    interview_comment TEXT,
+    rejected_comment TEXT,
     fingerprint TEXT UNIQUE
 )
 """
@@ -79,6 +82,9 @@ class Job(TypedDict):
     date_applied: str | None
     date_interview: str | None
     date_rejected: str | None
+    applied_comment: str | None
+    interview_comment: str | None
+    rejected_comment: str | None
     fingerprint: str | None
 
 
@@ -128,6 +134,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("rejected", "INTEGER DEFAULT 0"),
         ("date_interview", "TEXT"),
         ("date_rejected", "TEXT"),
+        ("applied_comment", "TEXT"),
+        ("interview_comment", "TEXT"),
+        ("rejected_comment", "TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
@@ -290,6 +299,32 @@ def set_job_status(job_id: int, status: JobStatus) -> None:
                 date_rejected,
                 job_id,
             ),
+        )
+        conn.commit()
+
+
+_COMMENT_COLUMNS: dict[JobFlag, str] = {
+    "applied": "applied_comment",
+    "interview": "interview_comment",
+    "rejected": "rejected_comment",
+}
+
+
+def set_job_comment(job_id: int, stage: JobFlag, comment: str) -> None:
+    """Store the free-text comment for a pipeline stage."""
+    column = _COMMENT_COLUMNS[stage]
+    with closing(get_connection()) as conn:
+        conn.execute(f"UPDATE jobs SET {column} = ? WHERE id = ?", (comment, job_id))
+        conn.commit()
+
+
+def update_job_comments(job_id: int, applied: str, interview: str, rejected: str) -> None:
+    """Replace all three stage comments at once."""
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "UPDATE jobs SET applied_comment = ?, interview_comment = ?, "
+            "rejected_comment = ? WHERE id = ?",
+            (applied, interview, rejected, job_id),
         )
         conn.commit()
 

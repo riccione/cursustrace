@@ -493,6 +493,50 @@ async def test_company_search_filters_cards(user: User) -> None:
     await user.should_see("Paysend")
 
 
+async def test_card_comment_box_for_current_stage(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    await user.open("/")
+
+    user.find("Applied comment").clear().type("Referred by a friend")
+    user.find("💾 Save comment").click()
+
+    await _wait_for(lambda: db.get_jobs()[0]["applied_comment"] == "Referred by a friend")
+    await user.should_see("Comment saved.")
+
+
+async def test_card_hides_comment_box_when_unapplied(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    await user.should_not_see("Applied comment")
+
+
+async def test_detail_shows_comments(user: User) -> None:
+    job_id = _seed_job()
+    db.update_job_comments(job_id, "applied note", "interview note", "rejected note")
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("**Applied comment:** applied note")
+    await user.should_see("**Interview comment:** interview note")
+    await user.should_see("**Rejected comment:** rejected note")
+
+
+async def test_edit_dialog_updates_comments(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    user.find("✏️ Edit").click()
+    with user.scope(marker="job-form"):
+        user.find("Applied comment").clear().type("via referral")
+        user.find("Interview comment").clear().type("great team")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: db.get_jobs()[0]["applied_comment"] == "via referral")
+    assert db.get_jobs()[0]["interview_comment"] == "great team"
+
+
 async def test_card_has_full_details_link(user: User) -> None:
     await user.open("/")
     await _scan(user)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import lru_cache
 from types import FrameType
 from typing import Literal
@@ -138,6 +139,14 @@ def _checked_flags(job: db.Job) -> frozenset[db.JobFlag]:
     return frozenset()
 
 
+def _stage_comment(job: db.Job, stage: db.JobFlag) -> str:
+    if stage == "applied":
+        return job["applied_comment"] or ""
+    if stage == "interview":
+        return job["interview_comment"] or ""
+    return job["rejected_comment"] or ""
+
+
 def _resolve_job(job_id: int) -> db.Job | None:
     return next((job for job in db.get_jobs() if job["id"] == job_id), None)
 
@@ -171,6 +180,22 @@ def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
                 on_change=_status_handler(job["id"], status, refresh),
             )
             checkbox.enabled = status not in _DISABLED_CHECKBOXES[current]
+
+        if current != "unapplied":
+            comment_input = (
+                ui.textarea(
+                    f"{current.title()} comment",
+                    value=_stage_comment(job, current),
+                )
+                .classes("w-full")
+                .props('autogrow input-style="min-height: 80px"')
+            )
+
+            def save_comment() -> None:
+                db.set_job_comment(job["id"], current, comment_input.value or "")
+                ui.notify("Comment saved.", type="positive")
+
+            ui.button("💾 Save comment", on_click=save_comment).props("flat color=primary")
 
         with ui.dialog() as dialog, ui.card():
             dialog.mark(f"delete-dialog-{job['id']}")
@@ -328,9 +353,25 @@ def _delete_job_from_detail(dialog: ui.dialog, job_id: int) -> None:
     ui.navigate.to("/")
 
 
+@dataclass(frozen=True)
+class JobFormValues:
+    """Values collected from the manual job form."""
+
+    url: str
+    title: str
+    company: str
+    location: str
+    description: str
+    applied_comment: str = ""
+    interview_comment: str = ""
+    rejected_comment: str = ""
+
+
 def _job_form_dialog(
     values: db.Job | None,
-    on_save: Callable[[str, str, str, str, str], bool],
+    on_save: Callable[[JobFormValues], bool],
+    *,
+    with_comments: bool = False,
 ) -> ui.dialog:
     job_url = values["job_url"] if values else ""
     title = (values["title"] or "") if values else ""
@@ -358,6 +399,18 @@ def _job_form_dialog(
             .props('autogrow input-style="min-height: 120px"')
         )
 
+        comment_inputs: dict[db.JobFlag, ui.textarea] = {}
+        if with_comments:
+            for stage, label in STATUS_CHECKBOXES:
+                comment_inputs[stage] = (
+                    ui.textarea(
+                        f"{label} comment",
+                        value=_stage_comment(values, stage) if values else "",
+                    )
+                    .classes("w-full")
+                    .props('autogrow input-style="min-height: 80px"')
+                )
+
         def save() -> None:
             valid = all(
                 [
@@ -369,13 +422,25 @@ def _job_form_dialog(
             )
             if not valid:
                 return
-            if on_save(
-                (url.value or "").strip(),
-                (title_input.value or "").strip(),
-                (company_input.value or "").strip(),
-                (location_input.value or "").strip(),
-                (description_input.value or "").strip(),
-            ):
+            result = on_save(
+                JobFormValues(
+                    url=(url.value or "").strip(),
+                    title=(title_input.value or "").strip(),
+                    company=(company_input.value or "").strip(),
+                    location=(location_input.value or "").strip(),
+                    description=(description_input.value or "").strip(),
+                    applied_comment=(comment_inputs["applied"].value or "")
+                    if with_comments
+                    else "",
+                    interview_comment=(comment_inputs["interview"].value or "")
+                    if with_comments
+                    else "",
+                    rejected_comment=(comment_inputs["rejected"].value or "")
+                    if with_comments
+                    else "",
+                )
+            )
+            if result:
                 dialog.close()
 
         with ui.row():
@@ -384,16 +449,13 @@ def _job_form_dialog(
     return dialog
 
 
-def _add_job_manually(
-    url: str,
-    title: str,
-    company: str,
-    location: str,
-    description: str,
-    refresh: Callable[[], None],
-) -> bool:
-    duplicate, _reason = db.check_duplicate(url, title, company, location or None, description)
-    if duplicate or not db.add_job(url, title, company, location or None, description):
+def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> bool:
+    duplicate, _reason = db.check_duplicate(
+        values.url, values.title, values.company, values.location or None, values.description
+    )
+    if duplicate or not db.add_job(
+        values.url, values.title, values.company, values.location or None, values.description
+    ):
         ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
         return False
     ui.notify("Position added.", type="positive")
@@ -401,15 +463,31 @@ def _add_job_manually(
     return True
 
 
-def _update_job_fields(
-    job_id: int, url: str, title: str, company: str, location: str, description: str
-) -> bool:
+def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
     duplicate, _reason = db.check_duplicate(
-        url, title, company, location or None, description, exclude_id=job_id
+        values.url,
+        values.title,
+        values.company,
+        values.location or None,
+        values.description,
+        exclude_id=job_id,
     )
-    if duplicate or not db.update_job(job_id, url, title, company, location or None, description):
+    if duplicate or not db.update_job(
+        job_id,
+        values.url,
+        values.title,
+        values.company,
+        values.location or None,
+        values.description,
+    ):
         ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
         return False
+    db.update_job_comments(
+        job_id,
+        values.applied_comment,
+        values.interview_comment,
+        values.rejected_comment,
+    )
     ui.notify("Position updated.", type="positive")
     ui.navigate.to(f"/job/{job_id}")
     return True
@@ -523,7 +601,7 @@ def dashboard_page() -> None:
                 status_label = ui.label()
             add_dialog = _job_form_dialog(
                 None,
-                lambda u, t, c, loc, desc: _add_job_manually(u, t, c, loc, desc, refresh),
+                lambda values: _add_job_manually(values, refresh),
             )
             scan_button.on_click(
                 lambda: _handle_scan(urls_input.value, refresh, status_label, scan_button)
@@ -571,7 +649,8 @@ def job_detail_page(job_id: int) -> None:
             if job is not None:
                 edit_dialog = _job_form_dialog(
                     job,
-                    lambda u, t, c, loc, desc: _update_job_fields(job["id"], u, t, c, loc, desc),
+                    lambda values: _update_job_fields(job["id"], values),
+                    with_comments=True,
                 )
                 ui.button("✏️ Edit", on_click=edit_dialog.open).props("flat color=primary")
         if job is None:
@@ -589,6 +668,10 @@ def job_detail_page(job_id: int) -> None:
             ui.markdown(f"**Interview:** {job['date_interview']}")
         if job["date_rejected"]:
             ui.markdown(f"**Rejected:** {job['date_rejected']}")
+        for stage, label in STATUS_CHECKBOXES:
+            comment = _stage_comment(job, stage)
+            if comment:
+                ui.markdown(f"**{label} comment:** {comment}")
         ui.link("Open original posting", job["job_url"], new_tab=True)
 
         ui.separator()

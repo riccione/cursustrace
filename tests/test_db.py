@@ -213,6 +213,35 @@ def test_set_job_status_unknown_id_is_noop(db_path: Path) -> None:
     assert db.get_jobs() == []
 
 
+def test_set_job_comment_round_trip(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_comment(job_id, "applied", "referred by a friend")
+    db.set_job_comment(job_id, "interview", "technical round scheduled")
+
+    job = db.get_jobs()[0]
+    assert job["applied_comment"] == "referred by a friend"
+    assert job["interview_comment"] == "technical round scheduled"
+    assert job["rejected_comment"] is None
+
+
+def test_update_job_comments_replaces_all(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.update_job_comments(job_id, "a", "i", "r")
+
+    job = db.get_jobs()[0]
+    assert (job["applied_comment"], job["interview_comment"], job["rejected_comment"]) == (
+        "a",
+        "i",
+        "r",
+    )
+
+
 def test_timestamp_is_close_to_now(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
@@ -267,7 +296,15 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
     assert jobs[0]["rejected"] == 0
     with db.get_connection() as conn:
         columns = set(_fingerprint_columns(conn))
-    assert {"interview", "rejected", "date_interview", "date_rejected"} <= columns
+    assert {
+        "interview",
+        "rejected",
+        "date_interview",
+        "date_rejected",
+        "applied_comment",
+        "interview_comment",
+        "rejected_comment",
+    } <= columns
 
 
 def test_add_job_stores_fingerprint(db_path: Path) -> None:

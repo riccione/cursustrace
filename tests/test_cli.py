@@ -221,6 +221,17 @@ def test_list_search(runner: CliRunner) -> None:
     assert [job["company"] for job in jobs] == ["Adapty"]
 
 
+def test_list_json_includes_comments(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA", "Adapty", "Remote", "Body")
+    db.set_job_comment(db.get_jobs()[0]["id"], "applied", "note")
+
+    result = runner.invoke(cli_module.cli, ["list", "--json"])
+
+    jobs = json.loads(result.output)
+    assert jobs[0]["applied_comment"] == "note"
+
+
 def test_version_flags(runner: CliRunner) -> None:
     for flag in ("--version", "-V"):
         result = runner.invoke(cli_module.cli, [flag])
