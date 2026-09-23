@@ -536,10 +536,9 @@ def dashboard_page() -> None:
     ui.page_title(APP_TITLE)
     dark = _apply_dark_mode()
     containers: dict[db.JobStatus, ui.column] = {}
-    search_state = {"query": ""}
+    query = ""
 
     def refresh() -> None:
-        query = search_state["query"]
         for status, _label, empty_message in STATUS_TABS:
             container = containers[status]
             container.clear()
@@ -590,7 +589,8 @@ def dashboard_page() -> None:
                 )
 
                 def on_search(event: events.ValueChangeEventArguments[str | None]) -> None:
-                    search_state["query"] = event.value or ""
+                    nonlocal query
+                    query = event.value or ""
                     refresh()
 
                 search_input.on_value_change(on_search)
