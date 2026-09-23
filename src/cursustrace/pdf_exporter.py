@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from markdown_it import MarkdownIt
@@ -13,119 +14,16 @@ from cursustrace.errors import PdfExportError
 if TYPE_CHECKING:
     from cursustrace.db import Profile
 
-_CV_STYLES = """@page {
-    size: letter;
-    margin: 1.5cm 1.5cm 1.5cm 1.5cm;
-    @bottom-right {
-        content: "Page " counter(page) " of " counter(pages);
-        font-size: 9pt;
-        color: #666;
-    }
-}
+CV_STYLE_PATH = Path("styles/cv.css")
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
 
-body {
-    font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 9.5pt;
-    line-height: 1.35;
-    color: #222;
-}
-
-h1 {
-    text-align: center;
-    font-size: 16pt;
-    font-weight: 700;
-    margin: 0 0 2pt 0;
-    color: #1a1a1a;
-    letter-spacing: 1pt;
-}
-
-h1 + p {
-    text-align: left;
-    font-size: 9pt;
-    color: #444;
-    margin-bottom: 12pt;
-    line-height: 1.5;
-}
-
-h1 + p a {
-    color: #2563eb;
-    text-decoration: none;
-}
-
-h2 {
-    font-size: 11pt;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1pt;
-    color: #1a1a1a;
-    border-bottom: 1px solid #dddddd;
-    padding-bottom: 2pt;
-    margin: 12pt 0 6pt 0;
-    page-break-after: avoid;
-    break-after: avoid;
-}
-
-h3 {
-    font-size: 10pt;
-    font-weight: 700;
-    color: #1a1a1a;
-    margin: 8pt 0 2pt 0;
-    page-break-after: avoid;
-    break-after: avoid;
-}
-
-p {
-    margin: 0 0 4pt 0;
-    text-align: justify;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 4pt 0 6pt 0;
-    font-size: 9pt;
-}
-
-th, td {
-    border: 1px solid #dddddd;
-    padding: 2pt 4pt;
-    text-align: left;
-}
-
-ul {
-    margin: 2pt 0 5pt 1.4em;
-    padding: 0;
-}
-
-li {
-    margin-bottom: 1pt;
-}
-
-strong {
-    font-weight: 700;
-}
-
-a {
-    color: #2563eb;
-    text-decoration: none;
-}
-
-hr {
-    border: none;
-    border-top: 1px solid #ddd;
-    margin: 8pt 0;
-}
-
-em {
-    font-style: italic;
-}
-"""
+def load_cv_styles(path: Path | None = None) -> str:
+    """Read the customizable CV stylesheet; raise PdfExportError when it is missing."""
+    stylesheet = path if path is not None else CV_STYLE_PATH
+    try:
+        return stylesheet.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise PdfExportError(f"CV stylesheet not found at {stylesheet}") from exc
 
 
 def get_pdf_filename(full_name: str) -> str:
@@ -169,20 +67,21 @@ def build_header_markdown(profile: Profile) -> str:
     return f"# {full_name}\n\n{contact_line}\n\n---\n\n"
 
 
-def build_html(markdown_text: str) -> str:
+def build_html(markdown_text: str, css: str | None = None) -> str:
     """Render Markdown into a print-styled HTML document."""
+    styles = css if css is not None else load_cv_styles()
     body_html = MarkdownIt("commonmark").enable("table").render(markdown_text)
     return (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-        f"<style>\n{_CV_STYLES}</style>\n</head>\n<body>\n{body_html}\n</body>\n</html>"
+        f"<style>\n{styles}</style>\n</head>\n<body>\n{body_html}\n</body>\n</html>"
     )
 
 
-def generate_cv_pdf(profile: Profile) -> bytes:
+def generate_cv_pdf(profile: Profile, css: str | None = None) -> bytes:
     """Render the profile header and Markdown CV body into a PDF document."""
     combined_md = f"{build_header_markdown(profile)}{profile.get('cv_markdown', '').strip()}"
     try:
-        pdf = HTML(string=build_html(combined_md)).write_pdf()
+        pdf = HTML(string=build_html(combined_md, css)).write_pdf()
     except Exception as exc:
         raise PdfExportError("WeasyPrint could not render the CV") from exc
     return cast("bytes", pdf)

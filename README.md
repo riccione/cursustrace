@@ -38,6 +38,12 @@ your CV in Markdown with a live preview. Your profile and CV are stored only in
 the SQLite database, and **📄 Export to PDF** downloads a formatted document
 combining your contact header with the CV body.
 
+## Customizing the CV PDF style
+
+The PDF stylesheet lives at [`styles/cv.css`](styles/cv.css). Edit it to change
+the fonts, margins, colours, spacing, or page footer — the file is read on every
+export, so changes apply immediately without restarting the app.
+
 ## Development
 
 ```sh

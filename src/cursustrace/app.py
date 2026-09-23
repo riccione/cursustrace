@@ -14,7 +14,7 @@ from nicegui.run import io_bound
 
 from cursustrace import db, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
-from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename
+from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
 
@@ -77,6 +77,7 @@ def _cv_pdf_bytes(
     linkedin_url: str,
     github_url: str,
     cv_markdown: str,
+    styles: str,
 ) -> bytes:
     profile: db.Profile = {
         "full_name": full_name,
@@ -88,7 +89,7 @@ def _cv_pdf_bytes(
         "cv_markdown": cv_markdown,
         "date_updated": None,
     }
-    return generate_cv_pdf(profile)
+    return generate_cv_pdf(profile, styles)
 
 
 def _cached_pdf(profile: db.Profile) -> bytes:
@@ -100,6 +101,7 @@ def _cached_pdf(profile: db.Profile) -> bytes:
         profile["linkedin_url"],
         profile["github_url"],
         profile["cv_markdown"],
+        load_cv_styles(),
     )
 
 

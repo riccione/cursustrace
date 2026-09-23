@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import io
 import re
+from pathlib import Path
 
+import pytest
 from pypdf import PdfReader
 
 from cursustrace.db import Profile
+from cursustrace.errors import PdfExportError
 from cursustrace.pdf_exporter import (
     build_header_markdown,
     build_html,
     generate_cv_pdf,
     get_pdf_filename,
+    load_cv_styles,
 )
 
 
@@ -146,3 +150,18 @@ def test_build_html_applies_print_styles() -> None:
     assert "@bottom-right" in html
     assert 'content: "Page " counter(page) " of " counter(pages);' in html
     assert "<h1>Jane Doe</h1>" in html
+
+
+def test_load_cv_styles_reads_stylesheet() -> None:
+    assert "@bottom-right" in load_cv_styles()
+
+
+def test_load_cv_styles_missing_file_raises(tmp_path: Path) -> None:
+    with pytest.raises(PdfExportError, match="stylesheet not found"):
+        load_cv_styles(tmp_path / "does-not-exist.css")
+
+
+def test_generate_cv_pdf_accepts_custom_styles() -> None:
+    pdf = generate_cv_pdf(_profile(), css="body { font-size: 30pt; }")
+
+    assert pdf.startswith(b"%PDF")
