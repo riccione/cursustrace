@@ -8,7 +8,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process, utils
 
 from cursustrace.utils import clean_url, generate_fingerprint
 
@@ -16,6 +16,7 @@ DEFAULT_DB_PATH = Path("data/cursustrace.db")
 
 FUZZY_THRESHOLD = 85
 FUZZY_CANDIDATE_LIMIT = 50
+COMPANY_SEARCH_THRESHOLD = 70
 
 CREATE_JOBS_TABLE = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -310,6 +311,31 @@ def get_jobs(status: JobStatus | None = None) -> list[Job]:
     with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
     return [cast(Job, dict(row)) for row in rows]
+
+
+def search_jobs(
+    query: str,
+    status: JobStatus | None = None,
+    *,
+    threshold: int = COMPANY_SEARCH_THRESHOLD,
+) -> list[Job]:
+    """Return jobs whose company fuzzy-matches the query, best match first."""
+    text = (query or "").strip()
+    jobs = get_jobs(status=status)
+    if not text:
+        return jobs
+
+    choices = {job["id"]: job["company"] or "" for job in jobs}
+    matches = process.extract(
+        text,
+        choices,
+        scorer=fuzz.WRatio,
+        processor=utils.default_process,
+        score_cutoff=threshold,
+        limit=None,
+    )
+    by_id = {job["id"]: job for job in jobs}
+    return [by_id[key] for _choice, _score, key in matches]
 
 
 def clear_all_jobs() -> int:

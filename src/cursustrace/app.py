@@ -489,13 +489,16 @@ def dashboard_page() -> None:
     ui.page_title(APP_TITLE)
     dark = _apply_dark_mode()
     containers: dict[db.JobStatus, ui.column] = {}
+    search_state = {"query": ""}
 
     def refresh() -> None:
+        query = search_state["query"]
         for status, _label, empty_message in STATUS_TABS:
             container = containers[status]
             container.clear()
+            message = f'No positions match "{query}".' if query else empty_message
             with container:
-                _render_job_list(db.get_jobs(status=status), empty_message, refresh)
+                _render_job_list(db.search_jobs(query, status=status), message, refresh)
 
     with ui.header().classes("items-center justify-between"):
         ui.label(APP_TITLE).classes("text-h6")
@@ -533,6 +536,17 @@ def dashboard_page() -> None:
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
+                search_input = (
+                    ui.input("Search company", placeholder="e.g. Adapty")
+                    .props("clearable debounce=300")
+                    .classes("w-full")
+                )
+
+                def on_search(event: events.ValueChangeEventArguments[str | None]) -> None:
+                    search_state["query"] = event.value or ""
+                    refresh()
+
+                search_input.on_value_change(on_search)
                 with ui.tabs().classes("w-full") as status_tabs:
                     for status, label, _message in STATUS_TABS:
                         ui.tab(status, label=label)

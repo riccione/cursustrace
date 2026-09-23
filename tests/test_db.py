@@ -101,6 +101,60 @@ def test_get_jobs_status_filter(db_path: Path) -> None:
     assert len(db.get_jobs(status=None)) == 3
 
 
+def test_search_jobs_matches_company_fuzzy(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA Engineer", "Adapty", "Remote", "desc")
+    db.add_job("https://a.com/2", "QA Engineer", "Paysend", "Remote", "desc")
+
+    matches = db.search_jobs("adapt")
+
+    assert [job["company"] for job in matches] == ["Adapty"]
+
+
+def test_search_jobs_matches_company_typo(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA", "Friendly HR (Agency)", "Remote", "desc")
+
+    assert [job["company"] for job in db.search_jobs("frendly hr")] == ["Friendly HR (Agency)"]
+
+
+def test_search_jobs_no_match(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA", "Adapty", "Remote", "desc")
+
+    assert db.search_jobs("zzzz") == []
+
+
+def test_search_jobs_empty_query_returns_all(db_path: Path) -> None:
+    db.init_db()
+    _add("https://a.com/1", "Engineer One")
+    _add("https://a.com/2", "Engineer Two")
+
+    assert len(db.search_jobs("")) == 2
+    assert len(db.search_jobs("   ")) == 2
+
+
+def test_search_jobs_filters_by_status(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA", "Adapty", "Remote", "desc")
+    db.add_job("https://a.com/2", "QA", "Adapty", "Berlin", "desc")
+    db.set_job_status(db.get_jobs()[0]["id"], "applied")
+
+    assert len(db.search_jobs("adapt")) == 2
+    assert len(db.search_jobs("adapt", status="applied")) == 1
+    assert db.search_jobs("adapt", status="rejected") == []
+
+
+def test_search_jobs_orders_by_score(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA", "Ada", "Remote", "desc")
+    db.add_job("https://a.com/2", "QA", "Adapty", "Remote", "desc")
+
+    matches = db.search_jobs("adapty")
+
+    assert [job["company"] for job in matches] == ["Adapty", "Ada"]
+
+
 def test_set_job_status_is_mutually_exclusive(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")

@@ -474,6 +474,25 @@ async def test_dashboard_lists_status_tabs(user: User) -> None:
     await user.should_see("No rejected positions yet.")
 
 
+async def test_company_search_filters_cards(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA Engineer", "Adapty", "Remote", "Body")
+    db.add_job("https://a.com/2", "QA Engineer", "Paysend", "Remote", "Body")
+    await user.open("/")
+    await user.should_see("Adapty")
+    await user.should_see("Paysend")
+
+    user.find("Search company").clear().type("Adapty")
+    await asyncio.sleep(0.4)
+
+    await user.should_see("Adapty")
+    await user.should_not_see("Paysend")
+
+    user.find("Search company").clear()
+    await asyncio.sleep(0.4)
+    await user.should_see("Paysend")
+
+
 async def test_card_has_full_details_link(user: User) -> None:
     await user.open("/")
     await _scan(user)

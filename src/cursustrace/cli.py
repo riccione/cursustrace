@@ -205,11 +205,12 @@ def import_jobs(source: TextIO, as_json: bool) -> None:
 
 @cli.command(name="list")
 @click.option("--status", type=click.Choice(STATUSES), default=None)
+@click.option("--search", default=None, help="Fuzzy company search.")
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON array.")
-def list_jobs(status: str | None, as_json: bool) -> None:
+def list_jobs(status: str | None, search: str | None, as_json: bool) -> None:
     """List stored positions."""
     db.init_db()
-    jobs = db.get_jobs(status=cast("db.JobStatus | None", status))
+    jobs = db.search_jobs(search or "", status=cast("db.JobStatus | None", status))
     if as_json:
         click.echo(json_module.dumps([dict(job) for job in jobs]))
         return

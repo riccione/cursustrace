@@ -209,6 +209,18 @@ def test_list_filters_by_status(runner: CliRunner) -> None:
     assert jobs[0]["title"] == "Two"
 
 
+def test_list_search(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "QA", "Adapty", "Remote", "Body")
+    db.add_job("https://a.com/2", "QA", "Paysend", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["list", "--search", "adapt", "--json"])
+
+    assert result.exit_code == 0
+    jobs = json.loads(result.output)
+    assert [job["company"] for job in jobs] == ["Adapty"]
+
+
 def test_version_flags(runner: CliRunner) -> None:
     for flag in ("--version", "-V"):
         result = runner.invoke(cli_module.cli, [flag])
