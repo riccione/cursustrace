@@ -19,8 +19,6 @@ from cursustrace.validation import validate_required, validate_url
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
 
-_shutdown_signal: int | None = None
-
 STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
     ("unapplied", "⏳ Unapplied Positions", "No unapplied positions yet."),
     ("applied", "✅ Applied Positions", "No applied positions yet."),
@@ -654,28 +652,28 @@ def job_detail_page(job_id: int) -> None:
         ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
-def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
-    global _shutdown_signal
-    _shutdown_signal = signum
-    app.shutdown()
-
-
-def _install_signal_handlers() -> None:
-    if os.environ.get("NICEGUI_USER_SIMULATION") == "true":
-        return
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            signal.signal(sig, _request_shutdown)
-        except ValueError:
-            pass
-
-
 def run() -> None:
     """CLI entrypoint that launches the CursusTrace NiceGUI dashboard."""
-    global _shutdown_signal
     db.init_db()
     ui.add_css(GLOBAL_CSS, shared=True)
-    app.on_startup(_install_signal_handlers)
+    shutdown_signal: int | None = None
+
+    def handle_shutdown(signum: int, _frame: FrameType | None) -> None:
+        nonlocal shutdown_signal
+        shutdown_signal = signum
+        app.shutdown()
+
+    def install_handlers() -> None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                signal.signal(sig, handle_shutdown)
+            except ValueError:
+                pass
+
+    # Register on startup so our handlers replace uvicorn's (and win).
+    # The test simulator manages its own lifecycle and must not be intercepted.
+    if os.environ.get("NICEGUI_USER_SIMULATION") != "true":
+        app.on_startup(install_handlers)
     try:
         ui.run(
             title=APP_TITLE,
@@ -685,10 +683,10 @@ def run() -> None:
             port=8080,
         )
     except KeyboardInterrupt:
-        _shutdown_signal = signal.SIGINT
-    if _shutdown_signal is not None:
+        shutdown_signal = signal.SIGINT
+    if shutdown_signal is not None:
         print("\nCursusTrace stopped.")
-        raise SystemExit(128 + _shutdown_signal)
+        raise SystemExit(128 + shutdown_signal)
 
 
 if __name__ in {"__main__", "__mp_main__"}:
