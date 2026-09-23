@@ -111,9 +111,7 @@ async def test_empty_url_shows_warning(user: User) -> None:
     await user.should_see("Please enter at least one job URL.")
 
 
-async def test_scrape_error_shows_error(
-    user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_scrape_error_shows_error(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
     def raise_scrape(url: str) -> scraper.ScrapedJob:
         raise ScrapeError(f"boom: {url}")
 
@@ -125,9 +123,7 @@ async def test_scrape_error_shows_error(
     assert db.get_jobs() == []
 
 
-async def test_scan_multiple_urls_saves_all(
-    user: User, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_scan_multiple_urls_saves_all(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
     def scrape(url: str) -> scraper.ScrapedJob:
         slug = url.rstrip("/").rsplit("/", 1)[-1]
         return {
@@ -259,11 +255,13 @@ async def test_unchecking_rejected_returns_to_unapplied(user: User) -> None:
     user.find(kind=ui.checkbox, content="Rejected").click()
     await _wait_for(
         lambda: (
-            db.get_jobs()[0]["applied"],
-            db.get_jobs()[0]["interview"],
-            db.get_jobs()[0]["rejected"],
+            (
+                db.get_jobs()[0]["applied"],
+                db.get_jobs()[0]["interview"],
+                db.get_jobs()[0]["rejected"],
+            )
+            == (0, 0, 0)
         )
-        == (0, 0, 0)
     )
 
     job = db.get_jobs()[0]

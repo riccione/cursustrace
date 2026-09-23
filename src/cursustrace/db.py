@@ -139,7 +139,6 @@ def _migrate_profile(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE profile ADD COLUMN cv_markdown TEXT")
 
 
-
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """Open a connection, creating the parent directory and database on first use."""
     path = db_path if db_path is not None else DEFAULT_DB_PATH
@@ -199,8 +198,7 @@ def _fuzzy_reason(
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT description FROM jobs WHERE company = ? AND id != ? "
-            "ORDER BY id DESC LIMIT ?",
+            "SELECT description FROM jobs WHERE company = ? AND id != ? ORDER BY id DESC LIMIT ?",
             (company, exclude_id, FUZZY_CANDIDATE_LIMIT),
         ).fetchall()
     for row in rows:

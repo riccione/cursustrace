@@ -100,6 +100,7 @@ def scrape_job(url: str) -> ScrapedJob:
             _text_of(soup.title),
         ),
         company=_meta_content(soup, "og:site_name") or _infer_company(url),
-        location=_meta_content(soup, "og:locality", "og:region", "job:location") or DEFAULT_LOCATION,
+        location=_meta_content(soup, "og:locality", "og:region", "job:location")
+        or DEFAULT_LOCATION,
         description=_extract_description(html, url, soup),
     )

@@ -192,7 +192,14 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
     legacy.execute(
         "INSERT INTO jobs (job_url, title, company, location, description, date_added) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        ("https://example.com/old", "Engineer", "Acme", "Remote", "old body", "2024-01-01 00:00:00"),
+        (
+            "https://example.com/old",
+            "Engineer",
+            "Acme",
+            "Remote",
+            "old body",
+            "2024-01-01 00:00:00",
+        ),
     )
     legacy.commit()
     legacy.close()
@@ -340,9 +347,10 @@ def test_update_job_updates_fields_and_fingerprint(db_path: Path) -> None:
     _add("https://example.com/1")
     job_id = db.get_jobs()[0]["id"]
 
-    assert db.update_job(
-        job_id, "https://example.com/2", "New Title", "NewCo", "Berlin", "new body"
-    ) is True
+    assert (
+        db.update_job(job_id, "https://example.com/2", "New Title", "NewCo", "Berlin", "new body")
+        is True
+    )
 
     job = db.get_jobs()[0]
     assert job["job_url"] == "https://example.com/2"
@@ -359,9 +367,12 @@ def test_update_job_rejects_duplicate_url(db_path: Path) -> None:
     _add("https://example.com/2", "Engineer Two")
     target = db.get_jobs()[0]
 
-    assert db.update_job(
-        target["id"], "https://example.com/1", "Engineer Two", "Acme", "Remote", "desc"
-    ) is False
+    assert (
+        db.update_job(
+            target["id"], "https://example.com/1", "Engineer Two", "Acme", "Remote", "desc"
+        )
+        is False
+    )
     assert db.get_jobs()[0]["job_url"] == "https://example.com/2"
 
 
@@ -371,9 +382,10 @@ def test_update_job_rejects_duplicate_fingerprint(db_path: Path) -> None:
     db.add_job("https://b.com/2", "Other", "OtherCo", "Berlin", "body two")
     target = db.get_jobs()[0]
 
-    assert db.update_job(
-        target["id"], "https://b.com/2", "Engineer", "Acme", "Remote", "body two"
-    ) is False
+    assert (
+        db.update_job(target["id"], "https://b.com/2", "Engineer", "Acme", "Remote", "body two")
+        is False
+    )
     assert db.get_jobs()[0]["title"] == "Other"
 
 
@@ -393,7 +405,9 @@ def test_check_duplicate_excludes_given_id(db_path: Path) -> None:
     assert found_without_exclusion is True
 
 
-def _profile_payload(full_name: str = "Jane Doe", cv_markdown: str = "# Jane Doe\n\nEngineer") -> db.Profile:
+def _profile_payload(
+    full_name: str = "Jane Doe", cv_markdown: str = "# Jane Doe\n\nEngineer"
+) -> db.Profile:
     return {
         "full_name": full_name,
         "location": "Remote",
