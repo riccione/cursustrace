@@ -182,24 +182,17 @@ def init_db() -> None:
 
 
 def _duplicate_reason(
-    conn: sqlite3.Connection, url: str, fingerprint: str, exclude_id: int | None = None
+    conn: sqlite3.Connection, url: str, fingerprint: str, exclude_id: int
 ) -> str | None:
     cleaned = clean_url(url)
-    for row in conn.execute("SELECT id, job_url FROM jobs").fetchall():
-        if exclude_id is not None and row["id"] == exclude_id:
-            continue
+    for row in conn.execute("SELECT job_url FROM jobs WHERE id != ?", (exclude_id,)).fetchall():
         if clean_url(row["job_url"]) == cleaned:
             return "Duplicate position already applied/tracked"
     if fingerprint:
-        if exclude_id is None:
-            match = conn.execute(
-                "SELECT 1 FROM jobs WHERE fingerprint = ?", (fingerprint,)
-            ).fetchone()
-        else:
-            match = conn.execute(
-                "SELECT 1 FROM jobs WHERE fingerprint = ? AND id != ?",
-                (fingerprint, exclude_id),
-            ).fetchone()
+        match = conn.execute(
+            "SELECT 1 FROM jobs WHERE fingerprint = ? AND id != ?",
+            (fingerprint, exclude_id),
+        ).fetchone()
         if match is not None:
             return "Duplicate position already applied/tracked"
     return None
@@ -209,20 +202,14 @@ def _fuzzy_reason(
     conn: sqlite3.Connection,
     company: str | None,
     description: str | None,
-    exclude_id: int | None = None,
+    exclude_id: int,
 ) -> str | None:
     if not company or not description:
         return None
-    if exclude_id is None:
-        rows = conn.execute(
-            "SELECT description FROM jobs WHERE company = ? ORDER BY id DESC LIMIT ?",
-            (company, FUZZY_CANDIDATE_LIMIT),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT description FROM jobs WHERE company = ? AND id != ? ORDER BY id DESC LIMIT ?",
-            (company, exclude_id, FUZZY_CANDIDATE_LIMIT),
-        ).fetchall()
+    rows = conn.execute(
+        "SELECT description FROM jobs WHERE company = ? AND id != ? ORDER BY id DESC LIMIT ?",
+        (company, exclude_id, FUZZY_CANDIDATE_LIMIT),
+    ).fetchall()
     for row in rows:
         candidate = row["description"]
         if candidate and fuzz.token_set_ratio(description, candidate) > FUZZY_THRESHOLD:
@@ -241,10 +228,11 @@ def check_duplicate(
 ) -> tuple[bool, str]:
     """Detect duplicates by canonical URL, fingerprint, or fuzzy description match."""
     fingerprint = generate_fingerprint(company, title, location)
+    exclude = exclude_id if exclude_id is not None else -1
     with closing(get_connection()) as conn:
-        reason = _duplicate_reason(conn, url, fingerprint, exclude_id)
+        reason = _duplicate_reason(conn, url, fingerprint, exclude)
         if reason is None:
-            reason = _fuzzy_reason(conn, company, description, exclude_id)
+            reason = _fuzzy_reason(conn, company, description, exclude)
     if reason is None:
         return (False, "")
     return (True, "Duplicate position already applied/tracked")

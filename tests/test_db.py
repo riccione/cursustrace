@@ -551,6 +551,28 @@ def test_check_duplicate_excludes_given_id(db_path: Path) -> None:
     assert found_without_exclusion is True
 
 
+def test_check_duplicate_exclude_id_ignores_own_description(db_path: Path) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/1",
+        "Engineer",
+        "Acme",
+        "Remote",
+        "Build distributed systems and maintain APIs for our platform.",
+    )
+    job_id = db.get_jobs()[0]["id"]
+
+    found, _ = db.check_duplicate(
+        "https://other.com/2",
+        "Engineer",
+        "Acme",
+        "Remote",
+        "Build distributed systems and maintain APIs for our platform.",
+        exclude_id=job_id,
+    )
+    assert found is False
+
+
 def _profile_payload(
     full_name: str = "Jane Doe", cv_markdown: str = "# Jane Doe\n\nEngineer"
 ) -> db.Profile:
