@@ -19,3 +19,6 @@ data/*.db
 
 # Personal data kept only in SQLite
 data/cv.md
+
+# Import files kept out of the repo
+data/*.csv
