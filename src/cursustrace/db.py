@@ -116,17 +116,6 @@ class Profile(TypedDict):
     date_updated: str | None
 
 
-PROFILE_FIELDS = (
-    "full_name",
-    "location",
-    "phone",
-    "email",
-    "linkedin_url",
-    "github_url",
-    "cv_markdown",
-)
-
-
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
