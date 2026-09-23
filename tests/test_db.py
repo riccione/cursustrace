@@ -24,7 +24,7 @@ def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 def _add(url: str, title: str = "Engineer") -> bool:
-    return db.add_job(url, title, "Acme", "Remote", "desc")
+    return db.add_job(url, title, "Acme", "Remote", "desc") is not None
 
 
 def test_get_connection_creates_parent_directory(tmp_path: Path) -> None:
@@ -76,9 +76,40 @@ def test_add_job_duplicate_url_returns_false(db_path: Path) -> None:
     assert len(db.get_jobs()) == 1
 
 
+def test_add_job_returns_new_id(db_path: Path) -> None:
+    db.init_db()
+    job_id = db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "desc")
+
+    assert job_id is not None
+    assert db.get_jobs()[0]["id"] == job_id
+
+
+def test_add_job_duplicate_returns_none(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "desc")
+
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "desc") is None
+
+
+def test_get_job_round_trip(db_path: Path) -> None:
+    db.init_db()
+    job_id = db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "desc")
+    assert job_id is not None
+
+    job = db.get_job(job_id)
+
+    assert job is not None
+    assert job["job_url"] == "https://example.com/1"
+
+
+def test_get_job_unknown_returns_none(db_path: Path) -> None:
+    db.init_db()
+    assert db.get_job(999) is None
+
+
 def test_add_job_accepts_null_fields(db_path: Path) -> None:
     db.init_db()
-    assert db.add_job("https://example.com/1", None, None, None, None) is True
+    assert db.add_job("https://example.com/1", None, None, None, None) is not None
     assert db.get_jobs()[0]["company"] is None
 
 
@@ -322,8 +353,8 @@ def test_add_job_stores_fingerprint(db_path: Path) -> None:
 
 def test_add_job_rejects_same_fingerprint_different_url(db_path: Path) -> None:
     db.init_db()
-    assert db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "desc") is True
-    assert db.add_job("https://b.com/2", "Engineer", "Acme", "Remote", "desc") is False
+    assert db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "desc") is not None
+    assert db.add_job("https://b.com/2", "Engineer", "Acme", "Remote", "desc") is None
     assert len(db.get_jobs()) == 1
 
 

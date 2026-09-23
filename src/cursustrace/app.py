@@ -148,10 +148,6 @@ def _stage_comment(job: db.Job, stage: db.JobFlag) -> str:
     return job["rejected_comment"] or ""
 
 
-def _resolve_job(job_id: int) -> db.Job | None:
-    return next((job for job in db.get_jobs() if job["id"] == job_id), None)
-
-
 def _status_handler(
     job_id: int,
     status: db.JobFlag,
@@ -242,13 +238,14 @@ def _scan_url(url: str) -> tuple[str, str]:
         job["location"],
         job["description"],
     )
-    if duplicate or not db.add_job(
+    job_id = db.add_job(
         url,
         job["title"],
         job["company"],
         job["location"],
         job["description"],
-    ):
+    )
+    if duplicate or job_id is None:
         return ("duplicate", url)
     return ("saved", url)
 
@@ -454,9 +451,10 @@ def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> boo
     duplicate, _reason = db.check_duplicate(
         values.url, values.title, values.company, values.location or None, values.description
     )
-    if duplicate or not db.add_job(
+    job_id = db.add_job(
         values.url, values.title, values.company, values.location or None, values.description
-    ):
+    )
+    if duplicate or job_id is None:
         ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
         return False
     ui.notify("Position added.", type="positive")
@@ -644,7 +642,7 @@ def job_detail_page(job_id: int) -> None:
     ui.page_title(APP_TITLE)
     _apply_dark_mode()
     with ui.column().classes("w-full max-w-4xl mx-auto p-4 gap-2"):
-        job = _resolve_job(job_id)
+        job = db.get_job(job_id)
         with ui.row().classes("items-center gap-2"):
             ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
             if job is not None:

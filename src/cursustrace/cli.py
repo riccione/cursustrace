@@ -47,11 +47,14 @@ def _ingest(
     status: str = "unapplied",
 ) -> dict[str, object]:
     duplicate, _reason = db.check_duplicate(url, title, company, location or None, description)
-    if duplicate or not db.add_job(url, title, company, location or None, description):
+    if duplicate:
         return {"status": "duplicate", "url": url}
 
-    job_id = next((job["id"] for job in db.get_jobs() if job["job_url"] == url), None)
-    if status != "unapplied" and job_id is not None:
+    job_id = db.add_job(url, title, company, location or None, description)
+    if job_id is None:
+        return {"status": "duplicate", "url": url}
+
+    if status != "unapplied":
         db.set_job_status(job_id, cast("db.JobStatus", status))
     return {"status": "added", "id": job_id, "url": url}
 

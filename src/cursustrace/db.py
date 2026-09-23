@@ -246,22 +246,30 @@ def add_job(
     location: str | None,
     description: str | None,
     fingerprint: str | None = None,
-) -> bool:
-    """Insert a job listing; return False when the URL or fingerprint already exists."""
+) -> int | None:
+    """Insert a job listing; return the new id, or None when the URL/fingerprint exists."""
     if fingerprint is None:
         fingerprint = generate_fingerprint(company, title, location)
     try:
         with closing(get_connection()) as conn:
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT INTO jobs "
                 "(job_url, title, company, location, description, date_added, fingerprint) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (url, title, company, location, description, _now(), fingerprint),
             )
+            rowid = cursor.lastrowid
             conn.commit()
     except sqlite3.IntegrityError:
-        return False
-    return True
+        return None
+    return cast("int", rowid)
+
+
+def get_job(job_id: int) -> Job | None:
+    """Return a single job row by id, or None when it does not exist."""
+    with closing(get_connection()) as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    return cast(Job, dict(row)) if row is not None else None
 
 
 def set_job_status(job_id: int, status: JobStatus) -> None:
