@@ -83,5 +83,6 @@ def generate_cv_pdf(profile: Profile, css: str | None = None) -> bytes:
     try:
         pdf = HTML(string=build_html(combined_md, css)).write_pdf()
     except Exception as exc:
-        raise PdfExportError("WeasyPrint could not render the CV") from exc
+        # WeasyPrint exposes no common error base, so catch broadly but keep the cause.
+        raise PdfExportError(f"WeasyPrint could not render the CV: {exc}") from exc
     return cast("bytes", pdf)

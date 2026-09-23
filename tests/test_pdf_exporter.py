@@ -165,3 +165,14 @@ def test_generate_cv_pdf_accepts_custom_styles() -> None:
     pdf = generate_cv_pdf(_profile(), css="body { font-size: 30pt; }")
 
     assert pdf.startswith(b"%PDF")
+
+
+def test_generate_cv_pdf_wraps_render_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("kaboom")
+
+    monkeypatch.setattr("cursustrace.pdf_exporter.HTML", boom)
+
+    with pytest.raises(PdfExportError, match="kaboom") as excinfo:
+        generate_cv_pdf(_profile())
+    assert isinstance(excinfo.value.__cause__, ValueError)
