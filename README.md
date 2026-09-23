@@ -48,6 +48,32 @@ The PDF stylesheet lives at [`styles/cv.css`](styles/cv.css). Edit it to change
 the fonts, margins, colours, spacing, or page footer — the file is read on every
 export, so changes apply immediately without restarting the app.
 
+## Command-line ingestion (for AI agents)
+
+The `cursustrace` command also offers headless subcommands for adding positions
+without the UI (duplicates are skipped, never overwritten). Pass `--json` for
+machine-readable output.
+
+```sh
+# add one position from explicit fields
+uv run cursustrace add --url https://example.com/job/1 \
+  --title "Backend Engineer" --company Acme --description "Build APIs" \
+  --location Remote --status applied --json
+
+# scrape and add one or more URLs
+uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --json
+
+# batch import a JSON array (structured items and/or URL-only items) from a file or stdin
+uv run cursustrace import jobs.json --json
+echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
+
+# list stored positions
+uv run cursustrace list --status applied --json
+```
+
+Each JSON item may be structured (`url`, `title`, `company`, `location`,
+`description`) or URL-only (the URL is scraped to fill the missing fields).
+
 ## Development
 
 ```sh

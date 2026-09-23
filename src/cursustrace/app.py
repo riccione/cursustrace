@@ -8,7 +8,6 @@ from collections.abc import Callable
 from functools import lru_cache
 from types import FrameType
 from typing import Literal
-from urllib.parse import urlparse
 
 from nicegui import app, events, ui
 from nicegui.run import io_bound
@@ -16,6 +15,7 @@ from nicegui.run import io_bound
 from cursustrace import db, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
+from cursustrace.validation import validate_required, validate_url
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
 
@@ -328,23 +328,6 @@ def _delete_job_from_detail(dialog: ui.dialog, job_id: int) -> None:
     ui.navigate.to("/")
 
 
-def _validate_url(value: str | None) -> str | None:
-    text = (value or "").strip()
-    if not text:
-        return "Job URL is required."
-    parsed = urlparse(text)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return "Enter a full URL starting with http:// or https://."
-    return None
-
-
-def _validate_required(label: str) -> Callable[[str | None], str | None]:
-    def check(value: str | None) -> str | None:
-        return None if (value or "").strip() else f"{label} is required."
-
-    return check
-
-
 def _job_form_dialog(
     values: db.Job | None,
     on_save: Callable[[str, str, str, str, str], bool],
@@ -357,19 +340,19 @@ def _job_form_dialog(
 
     with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl"):
         dialog.mark("job-form")
-        url = ui.input("Job URL", value=job_url, validation=_validate_url).classes("w-full")
-        title_input = ui.input(
-            "Title", value=title, validation=_validate_required("Title")
-        ).classes("w-full")
+        url = ui.input("Job URL", value=job_url, validation=validate_url).classes("w-full")
+        title_input = ui.input("Title", value=title, validation=validate_required("Title")).classes(
+            "w-full"
+        )
         company_input = ui.input(
-            "Company", value=company, validation=_validate_required("Company")
+            "Company", value=company, validation=validate_required("Company")
         ).classes("w-full")
         location_input = ui.input("Location", value=location).classes("w-full")
         description_input = (
             ui.textarea(
                 "Description",
                 value=description,
-                validation=_validate_required("Description"),
+                validation=validate_required("Description"),
             )
             .classes("w-full")
             .props('autogrow input-style="min-height: 120px"')
@@ -411,9 +394,7 @@ def _add_job_manually(
 ) -> bool:
     duplicate, _reason = db.check_duplicate(url, title, company, location or None, description)
     if duplicate or not db.add_job(url, title, company, location or None, description):
-        ui.notify(
-            "A position with the same URL or fingerprint already exists.", type="warning"
-        )
+        ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
         return False
     ui.notify("Position added.", type="positive")
     refresh()
@@ -426,12 +407,8 @@ def _update_job_fields(
     duplicate, _reason = db.check_duplicate(
         url, title, company, location or None, description, exclude_id=job_id
     )
-    if duplicate or not db.update_job(
-        job_id, url, title, company, location or None, description
-    ):
-        ui.notify(
-            "A position with the same URL or fingerprint already exists.", type="warning"
-        )
+    if duplicate or not db.update_job(job_id, url, title, company, location or None, description):
+        ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
         return False
     ui.notify("Position updated.", type="positive")
     ui.navigate.to(f"/job/{job_id}")
@@ -455,10 +432,14 @@ def _render_profile_editor() -> None:
     ui.label("Markdown CV").classes("text-h6")
     with ui.row().classes("w-full gap-4"):
         with ui.column().classes("flex-1"):
-            cv = ui.textarea(
-                "Edit your CV in Markdown format",
-                value=profile["cv_markdown"],
-            ).classes("w-full").props('autogrow input-style="min-height: 400px; line-height: 1.7"')
+            cv = (
+                ui.textarea(
+                    "Edit your CV in Markdown format",
+                    value=profile["cv_markdown"],
+                )
+                .classes("w-full")
+                .props('autogrow input-style="min-height: 400px; line-height: 1.7"')
+            )
         with ui.column().classes("flex-1"):
             ui.label("Live preview").classes("font-bold")
             preview = ui.markdown(profile["cv_markdown"] or "_Nothing to preview yet._")
@@ -526,10 +507,14 @@ def dashboard_page() -> None:
 
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
         with ui.column().classes("w-full gap-2"):
-            urls_input = ui.textarea(
-                "Job URLs (one per line)",
-                placeholder="https://example.com/job/1\nhttps://example.com/job/2",
-            ).classes("w-full").props('autogrow input-style="min-height: 80px"')
+            urls_input = (
+                ui.textarea(
+                    "Job URLs (one per line)",
+                    placeholder="https://example.com/job/1\nhttps://example.com/job/2",
+                )
+                .classes("w-full")
+                .props('autogrow input-style="min-height: 80px"')
+            )
             with ui.row().classes("w-full items-center gap-3"):
                 scan_button = ui.button("Scan & Save Positions")
                 status_label = ui.label()
@@ -572,9 +557,7 @@ def job_detail_page(job_id: int) -> None:
             if job is not None:
                 edit_dialog = _job_form_dialog(
                     job,
-                    lambda u, t, c, loc, desc: _update_job_fields(
-                        job["id"], u, t, c, loc, desc
-                    ),
+                    lambda u, t, c, loc, desc: _update_job_fields(job["id"], u, t, c, loc, desc),
                 )
                 ui.button("✏️ Edit", on_click=edit_dialog.open).props("flat color=primary")
         if job is None:
@@ -600,9 +583,9 @@ def job_detail_page(job_id: int) -> None:
         with ui.dialog() as dialog, ui.card():
             dialog.mark(f"delete-dialog-{job['id']}")
             ui.label("Delete this position?")
-            ui.label(f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}").classes(
-                "font-bold"
-            )
+            ui.label(
+                f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}"
+            ).classes("font-bold")
             ui.label("This action cannot be undone.").classes("text-negative")
             with ui.row():
                 ui.button("Cancel", on_click=dialog.close).props("flat")
