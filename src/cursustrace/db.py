@@ -129,6 +129,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "UPDATE jobs SET fingerprint = ? WHERE id = ?",
                 (generate_fingerprint(row["company"], row["title"], row["location"]), row["id"]),
             )
+    # Column names and definitions are fixed internal constants (DDL identifiers
+    # cannot be parameterized), never user input.
     for column, definition in (
         ("interview", "INTEGER DEFAULT 0"),
         ("rejected", "INTEGER DEFAULT 0"),
@@ -309,6 +311,7 @@ def set_job_comment(job_id: int, stage: JobFlag, comment: str) -> None:
     """Store the free-text comment for a pipeline stage."""
     column = _COMMENT_COLUMNS[stage]
     with closing(get_connection()) as conn:
+        # `column` is a fixed internal name from _COMMENT_COLUMNS, never user input.
         conn.execute(f"UPDATE jobs SET {column} = ? WHERE id = ?", (comment, job_id))
         conn.commit()
 
