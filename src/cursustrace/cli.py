@@ -244,9 +244,7 @@ def clear(clear_all: bool, yes: bool, as_json: bool) -> None:
             "profile": True,
             "settings": counts["settings"],
         }
-        message = (
-            f"Removed {counts['positions']} position(s) and cleared profile & settings."
-        )
+        message = f"Removed {counts['positions']} position(s) and cleared profile & settings."
     else:
         positions = db.clear_all_jobs()
         payload = {"positions": positions}

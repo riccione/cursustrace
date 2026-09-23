@@ -87,6 +87,14 @@ Each JSON item may be structured (`url`, `title`, `company`, `location`,
 uv run pytest          # tests
 uv run mypy src tests  # type checking
 uv run ruff check src tests
+uv run ruff format src tests
+```
+
+Install the git hooks (ruff check `--fix`, ruff format, pytest) with:
+
+```sh
+uv run pre-commit install
+uv run pre-commit run --all-files   # run the hooks across the repo
 ```
 
 The database lives at `data/cursustrace.db` and is created on first run.
