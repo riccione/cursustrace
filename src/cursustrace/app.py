@@ -8,6 +8,7 @@ from collections.abc import Callable
 from functools import lru_cache
 from types import FrameType
 from typing import Literal
+from urllib.parse import urlparse
 
 from nicegui import app, events, ui
 from nicegui.run import io_bound
@@ -172,6 +173,7 @@ def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
             checkbox.enabled = status not in _DISABLED_CHECKBOXES[current]
 
         with ui.dialog() as dialog, ui.card():
+            dialog.mark(f"delete-dialog-{job['id']}")
             ui.label("Delete this position?")
             ui.label(f"{title} — {company}").classes("font-bold")
             ui.label("This action cannot be undone.").classes("text-negative")
@@ -326,6 +328,116 @@ def _delete_job_from_detail(dialog: ui.dialog, job_id: int) -> None:
     ui.navigate.to("/")
 
 
+def _validate_url(value: str | None) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return "Job URL is required."
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return "Enter a full URL starting with http:// or https://."
+    return None
+
+
+def _validate_required(label: str) -> Callable[[str | None], str | None]:
+    def check(value: str | None) -> str | None:
+        return None if (value or "").strip() else f"{label} is required."
+
+    return check
+
+
+def _job_form_dialog(
+    values: db.Job | None,
+    on_save: Callable[[str, str, str, str, str], bool],
+) -> ui.dialog:
+    job_url = values["job_url"] if values else ""
+    title = (values["title"] or "") if values else ""
+    company = (values["company"] or "") if values else ""
+    location = (values["location"] or "") if values else ""
+    description = (values["description"] or "") if values else ""
+
+    with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl"):
+        dialog.mark("job-form")
+        url = ui.input("Job URL", value=job_url, validation=_validate_url).classes("w-full")
+        title_input = ui.input(
+            "Title", value=title, validation=_validate_required("Title")
+        ).classes("w-full")
+        company_input = ui.input(
+            "Company", value=company, validation=_validate_required("Company")
+        ).classes("w-full")
+        location_input = ui.input("Location", value=location).classes("w-full")
+        description_input = (
+            ui.textarea(
+                "Description",
+                value=description,
+                validation=_validate_required("Description"),
+            )
+            .classes("w-full")
+            .props('autogrow input-style="min-height: 120px"')
+        )
+
+        def save() -> None:
+            valid = all(
+                [
+                    url.validate(),
+                    title_input.validate(),
+                    company_input.validate(),
+                    description_input.validate(),
+                ]
+            )
+            if not valid:
+                return
+            if on_save(
+                (url.value or "").strip(),
+                (title_input.value or "").strip(),
+                (company_input.value or "").strip(),
+                (location_input.value or "").strip(),
+                (description_input.value or "").strip(),
+            ):
+                dialog.close()
+
+        with ui.row():
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+            ui.button("Save", on_click=save).props("color=primary")
+    return dialog
+
+
+def _add_job_manually(
+    url: str,
+    title: str,
+    company: str,
+    location: str,
+    description: str,
+    refresh: Callable[[], None],
+) -> bool:
+    duplicate, _reason = db.check_duplicate(url, title, company, location or None, description)
+    if duplicate or not db.add_job(url, title, company, location or None, description):
+        ui.notify(
+            "A position with the same URL or fingerprint already exists.", type="warning"
+        )
+        return False
+    ui.notify("Position added.", type="positive")
+    refresh()
+    return True
+
+
+def _update_job_fields(
+    job_id: int, url: str, title: str, company: str, location: str, description: str
+) -> bool:
+    duplicate, _reason = db.check_duplicate(
+        url, title, company, location or None, description, exclude_id=job_id
+    )
+    if duplicate or not db.update_job(
+        job_id, url, title, company, location or None, description
+    ):
+        ui.notify(
+            "A position with the same URL or fingerprint already exists.", type="warning"
+        )
+        return False
+    ui.notify("Position updated.", type="positive")
+    ui.navigate.to(f"/job/{job_id}")
+    return True
+
+
 def _render_profile_editor() -> None:
     profile = db.get_profile()
     ui.label("👤 Profile & CV Configuration").classes("text-h5")
@@ -421,9 +533,14 @@ def dashboard_page() -> None:
             with ui.row().classes("w-full items-center gap-3"):
                 scan_button = ui.button("Scan & Save Positions")
                 status_label = ui.label()
+            add_dialog = _job_form_dialog(
+                None,
+                lambda u, t, c, loc, desc: _add_job_manually(u, t, c, loc, desc, refresh),
+            )
             scan_button.on_click(
                 lambda: _handle_scan(urls_input.value, refresh, status_label, scan_button)
             )
+            ui.button("➕ Add Manually", on_click=add_dialog.open).props("flat color=primary")
 
         with ui.tabs().classes("w-full") as main_tabs:
             dashboard_tab = ui.tab("📋 Dashboard")
@@ -449,9 +566,17 @@ def job_detail_page(job_id: int) -> None:
     ui.page_title(APP_TITLE)
     _apply_dark_mode()
     with ui.column().classes("w-full max-w-4xl mx-auto p-4 gap-2"):
-        ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
-
         job = _resolve_job(job_id)
+        with ui.row().classes("items-center gap-2"):
+            ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
+            if job is not None:
+                edit_dialog = _job_form_dialog(
+                    job,
+                    lambda u, t, c, loc, desc: _update_job_fields(
+                        job["id"], u, t, c, loc, desc
+                    ),
+                )
+                ui.button("✏️ Edit", on_click=edit_dialog.open).props("flat color=primary")
         if job is None:
             ui.label("Position not found.").classes("text-warning")
             return
@@ -473,6 +598,7 @@ def job_detail_page(job_id: int) -> None:
         ui.markdown(job["description"] or "_No description captured._")
 
         with ui.dialog() as dialog, ui.card():
+            dialog.mark(f"delete-dialog-{job['id']}")
             ui.label("Delete this position?")
             ui.label(f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}").classes(
                 "font-bold"

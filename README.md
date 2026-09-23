@@ -33,6 +33,10 @@ Positions**, then use the **Unapplied**, **Applied**, **Interview**, and
 Select **View full details** on a card to open the complete scraped description
 and metadata.
 
+When scraping fails (or for a listing you track by hand), use **➕ Add Manually**
+to enter a position's URL, title, company, and description, and edit those fields
+from the position's detail page.
+
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
 your CV in Markdown with a live preview. Your profile and CV are stored only in
 the SQLite database, and **📄 Export to PDF** downloads a formatted document

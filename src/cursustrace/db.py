@@ -160,27 +160,49 @@ def init_db() -> None:
         conn.commit()
 
 
-def _duplicate_reason(conn: sqlite3.Connection, url: str, fingerprint: str) -> str | None:
+def _duplicate_reason(
+    conn: sqlite3.Connection, url: str, fingerprint: str, exclude_id: int | None = None
+) -> str | None:
     cleaned = clean_url(url)
-    for row in conn.execute("SELECT job_url FROM jobs").fetchall():
+    for row in conn.execute("SELECT id, job_url FROM jobs").fetchall():
+        if exclude_id is not None and row["id"] == exclude_id:
+            continue
         if clean_url(row["job_url"]) == cleaned:
             return "Duplicate position already applied/tracked"
     if fingerprint:
-        match = conn.execute(
-            "SELECT 1 FROM jobs WHERE fingerprint = ?", (fingerprint,)
-        ).fetchone()
+        if exclude_id is None:
+            match = conn.execute(
+                "SELECT 1 FROM jobs WHERE fingerprint = ?", (fingerprint,)
+            ).fetchone()
+        else:
+            match = conn.execute(
+                "SELECT 1 FROM jobs WHERE fingerprint = ? AND id != ?",
+                (fingerprint, exclude_id),
+            ).fetchone()
         if match is not None:
             return "Duplicate position already applied/tracked"
     return None
 
 
-def _fuzzy_reason(conn: sqlite3.Connection, company: str | None, description: str | None) -> str | None:
+def _fuzzy_reason(
+    conn: sqlite3.Connection,
+    company: str | None,
+    description: str | None,
+    exclude_id: int | None = None,
+) -> str | None:
     if not company or not description:
         return None
-    rows = conn.execute(
-        "SELECT description FROM jobs WHERE company = ? ORDER BY id DESC LIMIT ?",
-        (company, FUZZY_CANDIDATE_LIMIT),
-    ).fetchall()
+    if exclude_id is None:
+        rows = conn.execute(
+            "SELECT description FROM jobs WHERE company = ? ORDER BY id DESC LIMIT ?",
+            (company, FUZZY_CANDIDATE_LIMIT),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT description FROM jobs WHERE company = ? AND id != ? "
+            "ORDER BY id DESC LIMIT ?",
+            (company, exclude_id, FUZZY_CANDIDATE_LIMIT),
+        ).fetchall()
     for row in rows:
         candidate = row["description"]
         if candidate and fuzz.token_set_ratio(description, candidate) > FUZZY_THRESHOLD:
@@ -194,13 +216,15 @@ def check_duplicate(
     company: str | None,
     location: str | None,
     description: str | None,
+    *,
+    exclude_id: int | None = None,
 ) -> tuple[bool, str]:
     """Detect duplicates by canonical URL, fingerprint, or fuzzy description match."""
     fingerprint = generate_fingerprint(company, title, location)
     with closing(get_connection()) as conn:
-        reason = _duplicate_reason(conn, url, fingerprint)
+        reason = _duplicate_reason(conn, url, fingerprint, exclude_id)
         if reason is None:
-            reason = _fuzzy_reason(conn, company, description)
+            reason = _fuzzy_reason(conn, company, description, exclude_id)
     if reason is None:
         return (False, "")
     return (True, "Duplicate position already applied/tracked")
@@ -305,6 +329,29 @@ def delete_job(job_id: int) -> None:
     with closing(get_connection()) as conn:
         conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         conn.commit()
+
+
+def update_job(
+    job_id: int,
+    url: str,
+    title: str | None,
+    company: str | None,
+    location: str | None,
+    description: str | None,
+) -> bool:
+    """Update a job's editable fields; return False when the URL or fingerprint collides."""
+    fingerprint = generate_fingerprint(company, title, location)
+    try:
+        with closing(get_connection()) as conn:
+            conn.execute(
+                "UPDATE jobs SET job_url = ?, title = ?, company = ?, location = ?, "
+                "description = ?, fingerprint = ? WHERE id = ?",
+                (url, title, company, location, description, fingerprint, job_id),
+            )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return False
+    return True
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:

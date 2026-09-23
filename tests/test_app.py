@@ -342,11 +342,13 @@ async def test_delete_requires_confirmation(user: User) -> None:
     await _scan(user)
     await user.should_see("Saved 1")
 
+    job_id = db.get_jobs()[0]["id"]
     user.find("🗑️ Delete").click()
-    dialog = user.find(ui.dialog).elements.pop()
-    await _wait_for(lambda: dialog.value is True)
+    with user.scope(marker=f"delete-dialog-{job_id}") as scoped:
+        dialog = cast(ui.dialog, scoped)
+        await _wait_for(lambda: dialog.value is True)
+        user.find("Cancel").click()
 
-    user.find("Cancel").click()
     await _wait_for(lambda: dialog.value is False)
     assert len(db.get_jobs()) == 1
 
@@ -373,6 +375,96 @@ async def test_delete_from_detail_returns_to_dashboard(user: User) -> None:
 
     await user.should_see("Job URL", retries=20)
     assert db.get_jobs() == []
+
+
+async def test_add_job_manually(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/1")
+        user.find("Title").clear().type("Manual Engineer")
+        user.find("Company").clear().type("ManualCo")
+        user.find("Location").clear().type("Remote")
+        user.find("Description").clear().type("Manual body")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    await user.should_see("Position added.")
+    job = db.get_jobs()[0]
+    assert job["job_url"] == "https://manual.example/1"
+    assert job["title"] == "Manual Engineer"
+    assert job["company"] == "ManualCo"
+    assert job["description"] == "Manual body"
+
+
+async def test_add_job_manually_requires_fields(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Save").click()
+    await asyncio.sleep(0.1)
+
+    assert db.get_jobs() == []
+    with user.scope(marker="job-form"):
+        assert cast(ui.input, user.find("Job URL").elements.pop()).error == "Job URL is required."
+        assert cast(ui.input, user.find("Title").elements.pop()).error == "Title is required."
+        assert cast(ui.input, user.find("Company").elements.pop()).error == "Company is required."
+        assert (
+            cast(ui.textarea, user.find("Description").elements.pop()).error
+            == "Description is required."
+        )
+
+
+async def test_add_job_manually_rejects_invalid_url(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("not-a-url")
+        user.find("Title").clear().type("Title")
+        user.find("Company").clear().type("Company")
+        user.find("Description").clear().type("Description")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+    await asyncio.sleep(0.1)
+
+    assert db.get_jobs() == []
+    with user.scope(marker="job-form"):
+        assert cast(ui.input, user.find("Job URL").elements.pop()).error is not None
+
+
+async def test_edit_job_from_detail(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    user.find("✏️ Edit").click()
+    with user.scope(marker="job-form"):
+        user.find("Title").clear().type("Updated Title")
+        user.find("Company").clear().type("UpdatedCo")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: db.get_jobs()[0]["title"] == "Updated Title")
+    await user.should_see("Position updated.")
+    assert db.get_jobs()[0]["company"] == "UpdatedCo"
+
+
+async def test_edit_job_rejects_duplicate_url(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "body one")
+    db.add_job("https://b.com/2", "Other", "OtherCo", "Berlin", "body two")
+    target = db.get_jobs()[0]
+
+    await user.open(f"/job/{target['id']}")
+    user.find("✏️ Edit").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://a.com/1")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+    await asyncio.sleep(0.1)
+
+    await user.should_see("already exists")
+    assert db.get_jobs()[0]["job_url"] == "https://b.com/2"
 
 
 async def test_dashboard_lists_status_tabs(user: User) -> None:

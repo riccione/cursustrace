@@ -335,6 +335,64 @@ def test_delete_job_unknown_id_is_noop(db_path: Path) -> None:
     assert len(db.get_jobs()) == 1
 
 
+def test_update_job_updates_fields_and_fingerprint(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    assert db.update_job(
+        job_id, "https://example.com/2", "New Title", "NewCo", "Berlin", "new body"
+    ) is True
+
+    job = db.get_jobs()[0]
+    assert job["job_url"] == "https://example.com/2"
+    assert job["title"] == "New Title"
+    assert job["company"] == "NewCo"
+    assert job["location"] == "Berlin"
+    assert job["description"] == "new body"
+    assert job["fingerprint"] == generate_fingerprint("NewCo", "New Title", "Berlin")
+
+
+def test_update_job_rejects_duplicate_url(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1", "Engineer One")
+    _add("https://example.com/2", "Engineer Two")
+    target = db.get_jobs()[0]
+
+    assert db.update_job(
+        target["id"], "https://example.com/1", "Engineer Two", "Acme", "Remote", "desc"
+    ) is False
+    assert db.get_jobs()[0]["job_url"] == "https://example.com/2"
+
+
+def test_update_job_rejects_duplicate_fingerprint(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "body one")
+    db.add_job("https://b.com/2", "Other", "OtherCo", "Berlin", "body two")
+    target = db.get_jobs()[0]
+
+    assert db.update_job(
+        target["id"], "https://b.com/2", "Engineer", "Acme", "Remote", "body two"
+    ) is False
+    assert db.get_jobs()[0]["title"] == "Other"
+
+
+def test_check_duplicate_excludes_given_id(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    found, _ = db.check_duplicate(
+        "https://example.com/1", "Engineer", "Acme", "Remote", "desc", exclude_id=job_id
+    )
+    assert found is False
+
+    found_without_exclusion, _ = db.check_duplicate(
+        "https://example.com/1", "Engineer", "Acme", "Remote", "desc"
+    )
+    assert found_without_exclusion is True
+
+
 def _profile_payload(full_name: str = "Jane Doe", cv_markdown: str = "# Jane Doe\n\nEngineer") -> db.Profile:
     return {
         "full_name": full_name,
