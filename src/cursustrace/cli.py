@@ -14,16 +14,6 @@ from cursustrace.validation import required_error, validate_url
 STATUSES = ["unapplied", "applied", "interview", "rejected"]
 
 
-def _status_name(job: db.Job) -> db.JobStatus:
-    if job["interview"]:
-        return "interview"
-    if job["rejected"]:
-        return "rejected"
-    if job["applied"]:
-        return "applied"
-    return "unapplied"
-
-
 def _check_fields(
     url: str, title: str | None, company: str | None, description: str | None
 ) -> str | None:
@@ -223,7 +213,7 @@ def list_jobs(status: str | None, search: str | None, as_json: bool) -> None:
     for job in jobs:
         title = job["title"] or "Untitled position"
         company = job["company"] or "Unknown company"
-        click.echo(f"{job['id']}. {title} — {company} [{_status_name(job)}]")
+        click.echo(f"{job['id']}. {title} — {company} [{db.job_status(job)}]")
 
 
 @cli.command()

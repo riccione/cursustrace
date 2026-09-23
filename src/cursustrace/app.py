@@ -108,16 +108,6 @@ def _cached_pdf(profile: db.Profile) -> bytes:
     )
 
 
-def _job_status(job: db.Job) -> db.JobStatus:
-    if job["interview"]:
-        return "interview"
-    if job["rejected"]:
-        return "rejected"
-    if job["applied"]:
-        return "applied"
-    return "unapplied"
-
-
 _DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobFlag]] = {
     "unapplied": frozenset(),
     "applied": frozenset({"applied"}),
@@ -127,7 +117,7 @@ _DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobFlag]] = {
 
 
 def _checked_flags(job: db.Job) -> frozenset[db.JobFlag]:
-    status = _job_status(job)
+    status = db.job_status(job)
     if status == "applied":
         return frozenset({"applied"})
     if status == "interview":
@@ -168,7 +158,7 @@ def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
         ui.markdown(f"**Added:** {job['date_added']}")
         ui.link("Open job posting", job["job_url"], new_tab=True)
         ui.link("View full details", f"/job/{job['id']}")
-        current = _job_status(job)
+        current = db.job_status(job)
         checked = _checked_flags(job)
         for status, label in STATUS_CHECKBOXES:
             checkbox = ui.checkbox(
@@ -671,7 +661,7 @@ def job_detail_page(job_id: int) -> None:
         ui.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
         ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
         ui.markdown(f"**Added:** {job['date_added']}")
-        ui.markdown(f"**Status:** {_job_status(job).title()}")
+        ui.markdown(f"**Status:** {db.job_status(job).title()}")
         if job["date_applied"]:
             ui.markdown(f"**Applied:** {job['date_applied']}")
         if job["date_interview"]:

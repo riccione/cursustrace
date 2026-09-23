@@ -92,6 +92,17 @@ JobStatus = Literal["unapplied", "applied", "interview", "rejected"]
 JobFlag = Literal["applied", "interview", "rejected"]
 
 
+def job_status(job: Job) -> JobStatus:
+    """Derive a job's current pipeline stage from its status flags."""
+    if job["interview"]:
+        return "interview"
+    if job["rejected"]:
+        return "rejected"
+    if job["applied"]:
+        return "applied"
+    return "unapplied"
+
+
 class Profile(TypedDict):
     """The single user profile row, including the raw Markdown CV."""
 

@@ -251,6 +251,23 @@ def test_set_job_status_unknown_id_is_noop(db_path: Path) -> None:
     assert db.get_jobs() == []
 
 
+def test_job_status_derives_stage(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    assert db.job_status(db.get_jobs()[0]) == "unapplied"
+
+    db.set_job_status(job_id, "applied")
+    assert db.job_status(db.get_jobs()[0]) == "applied"
+
+    db.set_job_status(job_id, "interview")
+    assert db.job_status(db.get_jobs()[0]) == "interview"
+
+    db.set_job_status(job_id, "rejected")
+    assert db.job_status(db.get_jobs()[0]) == "rejected"
+
+
 def test_set_job_comment_round_trip(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
