@@ -153,7 +153,7 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """Open a connection, creating the parent directory and database on first use."""
     path = db_path if db_path is not None else DEFAULT_DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -166,6 +166,7 @@ def init_db() -> None:
         conn.execute(CREATE_SETTINGS_TABLE)
         _migrate(conn)
         _migrate_profile(conn)
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.commit()
 
 

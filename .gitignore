@@ -15,7 +15,7 @@ wheels/
 .pytest_cache/
 
 # Local database
-data/*.db
+data/*.db*
 
 # Personal data kept only in SQLite
 data/cv.md

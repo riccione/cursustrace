@@ -44,6 +44,13 @@ def test_init_db_is_idempotent(db_path: Path) -> None:
     assert len(tables) == 1
 
 
+def test_init_db_enables_wal_and_busy_timeout(db_path: Path) -> None:
+    db.init_db()
+    with db.get_connection() as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] >= 5000
+
+
 def test_add_job_returns_true_and_stamps_date(db_path: Path) -> None:
     db.init_db()
     assert _add("https://example.com/1") is True
