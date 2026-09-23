@@ -49,6 +49,34 @@ def _ingest(
     return {"status": "added", "id": job_id, "url": url}
 
 
+def _ingest_item(item: object, index: int) -> tuple[str, dict[str, str] | None]:
+    """Validate, scrape if needed, and ingest one imported JSON item."""
+    if not isinstance(item, dict):
+        return ("error", {"item": str(index), "error": "expected an object"})
+
+    url = str(item.get("url") or item.get("job_url") or "").strip()
+    url_error = validate_url(url)
+    if url_error is not None:
+        return ("error", {"item": str(index), "error": url_error})
+
+    title = item.get("title")
+    company = item.get("company")
+    location = item.get("location")
+    description = item.get("description")
+    if not (title and company and description):
+        try:
+            scraped = scraper.scrape_job(url)
+        except ScrapeError as exc:
+            return ("error", {"url": url, "error": str(exc)})
+        title = title or scraped["title"]
+        company = company or scraped["company"]
+        location = location or scraped["location"]
+        description = description or scraped["description"]
+
+    result = _ingest(url, title, company, location, description)
+    return ("skipped" if result["status"] == "duplicate" else "added", None)
+
+
 def _report_summary(added: int, skipped: int, errors: list[dict[str, str]], as_json: bool) -> None:
     """Print the batch result and exit non-zero when any item errored."""
     if as_json:
@@ -160,35 +188,13 @@ def import_jobs(source: TextIO, as_json: bool) -> None:
     added = skipped = 0
     errors: list[dict[str, str]] = []
     for index, item in enumerate(items, start=1):
-        if not isinstance(item, dict):
-            errors.append({"item": str(index), "error": "expected an object"})
-            continue
-        url = str(item.get("url") or item.get("job_url") or "").strip()
-        url_error = validate_url(url)
-        if url_error is not None:
-            errors.append({"item": str(index), "error": url_error})
-            continue
-
-        title = item.get("title")
-        company = item.get("company")
-        location = item.get("location")
-        description = item.get("description")
-        if not (title and company and description):
-            try:
-                scraped = scraper.scrape_job(url)
-            except ScrapeError as exc:
-                errors.append({"url": url, "error": str(exc)})
-                continue
-            title = title or scraped["title"]
-            company = company or scraped["company"]
-            location = location or scraped["location"]
-            description = description or scraped["description"]
-
-        result = _ingest(url, title, company, location, description)
-        if result["status"] == "duplicate":
-            skipped += 1
-        else:
+        outcome, error = _ingest_item(item, index)
+        if outcome == "added":
             added += 1
+        elif outcome == "skipped":
+            skipped += 1
+        elif error is not None:
+            errors.append(error)
 
     _report_summary(added, skipped, errors, as_json)
 
