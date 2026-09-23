@@ -6,7 +6,6 @@ import os
 import signal
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import lru_cache
 from types import FrameType
 from typing import Literal
 
@@ -69,43 +68,6 @@ def _dark_mode_name(value: bool | None) -> str:
 def _apply_dark_mode() -> ui.dark_mode:
     name = db.get_setting(DARK_MODE_KEY, "system")
     return ui.dark_mode(value=_dark_mode_value(name))
-
-
-@lru_cache(maxsize=16)
-def _cv_pdf_bytes(
-    full_name: str,
-    location: str,
-    phone: str,
-    email: str,
-    linkedin_url: str,
-    github_url: str,
-    cv_markdown: str,
-    styles: str,
-) -> bytes:
-    profile: db.Profile = {
-        "full_name": full_name,
-        "location": location,
-        "phone": phone,
-        "email": email,
-        "linkedin_url": linkedin_url,
-        "github_url": github_url,
-        "cv_markdown": cv_markdown,
-        "date_updated": None,
-    }
-    return generate_cv_pdf(profile, styles)
-
-
-def _cached_pdf(profile: db.Profile) -> bytes:
-    return _cv_pdf_bytes(
-        profile["full_name"],
-        profile["location"],
-        profile["phone"],
-        profile["email"],
-        profile["linkedin_url"],
-        profile["github_url"],
-        profile["cv_markdown"],
-        load_cv_styles(),
-    )
 
 
 _DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobFlag]] = {
@@ -549,7 +511,7 @@ def _render_profile_editor() -> None:
     def export() -> None:
         current = db.get_profile()
         try:
-            pdf_bytes = _cached_pdf(current)
+            pdf_bytes = generate_cv_pdf(current, load_cv_styles())
         except PdfExportError as exc:
             ui.notify(f"Could not generate PDF: {exc}", type="negative")
             return
