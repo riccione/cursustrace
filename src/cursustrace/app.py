@@ -194,18 +194,10 @@ def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
 
             ui.button("💾 Save comment", on_click=save_comment).props("flat color=primary")
 
-        with ui.dialog() as dialog, ui.card():
-            dialog.mark(f"delete-dialog-{job['id']}")
-            ui.label("Delete this position?")
-            ui.label(f"{title} — {company}").classes("font-bold")
-            ui.label("This action cannot be undone.").classes("text-negative")
-            with ui.row():
-                ui.button("Cancel", on_click=dialog.close).props("flat")
-                ui.button(
-                    "Delete",
-                    on_click=lambda: _delete_job(dialog, job["id"], refresh),
-                ).props("color=negative").mark(f"delete-confirm-{job['id']}")
-        ui.button("🗑️ Delete", on_click=dialog.open).props("flat color=negative")
+        delete_dialog = _confirm_delete_dialog(
+            job, lambda dialog: _delete_job(dialog, job["id"], refresh)
+        )
+        ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
 def _render_job_list(
@@ -349,6 +341,25 @@ def _delete_job(dialog: ui.dialog, job_id: int, refresh: Callable[[], None] | No
 def _delete_job_from_detail(dialog: ui.dialog, job_id: int) -> None:
     _delete_job(dialog, job_id)
     ui.navigate.to("/")
+
+
+def _confirm_delete_dialog(
+    job: db.Job,
+    on_confirm: Callable[[ui.dialog], None],
+) -> ui.dialog:
+    title = job["title"] or "Untitled position"
+    company = job["company"] or "Unknown company"
+    with ui.dialog() as dialog, ui.card():
+        dialog.mark(f"delete-dialog-{job['id']}")
+        ui.label("Delete this position?")
+        ui.label(f"{title} — {company}").classes("font-bold")
+        ui.label("This action cannot be undone.").classes("text-negative")
+        with ui.row():
+            ui.button("Cancel", on_click=dialog.close).props("flat")
+            ui.button("Delete", on_click=lambda: on_confirm(dialog)).props("color=negative").mark(
+                f"delete-confirm-{job['id']}"
+            )
+    return dialog
 
 
 @dataclass(frozen=True)
@@ -676,20 +687,10 @@ def job_detail_page(job_id: int) -> None:
         ui.separator()
         ui.markdown(job["description"] or "_No description captured._")
 
-        with ui.dialog() as dialog, ui.card():
-            dialog.mark(f"delete-dialog-{job['id']}")
-            ui.label("Delete this position?")
-            ui.label(
-                f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}"
-            ).classes("font-bold")
-            ui.label("This action cannot be undone.").classes("text-negative")
-            with ui.row():
-                ui.button("Cancel", on_click=dialog.close).props("flat")
-                ui.button(
-                    "Delete",
-                    on_click=lambda: _delete_job_from_detail(dialog, job["id"]),
-                ).props("color=negative").mark(f"delete-confirm-{job['id']}")
-        ui.button("🗑️ Delete", on_click=dialog.open).props("flat color=negative")
+        delete_dialog = _confirm_delete_dialog(
+            job, lambda dialog: _delete_job_from_detail(dialog, job["id"])
+        )
+        ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
 def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
