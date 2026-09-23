@@ -690,6 +690,11 @@ async def test_settings_drawer_is_wide(user: User) -> None:
     assert drawer.props["width"] == "480"
 
 
+def test_global_css_styles_all_textareas() -> None:
+    assert ".q-textarea .q-field__native" in app.GLOBAL_CSS
+    assert "line-height: 1.7" in app.GLOBAL_CSS
+
+
 async def test_theme_toggle_persists_dark(user: User) -> None:
     await user.open("/")
 

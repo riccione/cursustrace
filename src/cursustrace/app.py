@@ -41,6 +41,7 @@ body { font-size: 22px; }
 .q-btn, .q-field, .q-field__label, .q-tab__label, .q-item, .q-checkbox,
 .q-notification { font-size: inherit; }
 body.body--dark .q-drawer { background: #1d1d1d; }
+.q-textarea .q-field__native { line-height: 1.7; }
 """
 
 DARK_MODE_KEY = "dark_mode"
@@ -516,7 +517,7 @@ def _render_profile_editor() -> None:
                     value=profile["cv_markdown"],
                 )
                 .classes("w-full")
-                .props('autogrow input-style="min-height: 400px; line-height: 1.7"')
+                .props('autogrow input-style="min-height: 400px"')
             )
         with ui.column().classes("flex-1"):
             ui.label("Live preview").classes("font-bold")
