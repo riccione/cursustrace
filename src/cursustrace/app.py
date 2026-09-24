@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import signal
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from types import FrameType
 from typing import Literal
@@ -160,6 +162,19 @@ def _render_delete_controls(job: db.Job, refresh: Callable[[], None]) -> None:
     ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
+def _days_since_applied(job: db.Job) -> int | None:
+    """Return whole days since the job was marked applied, or None when it was not."""
+    if not job["date_applied"]:
+        return None
+    try:
+        parsed = time.strptime(job["date_applied"], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    applied = date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday)
+    now = time.localtime()
+    return (date(now.tm_year, now.tm_mon, now.tm_mday) - applied).days
+
+
 def _render_job_card(
     job: db.Job, refresh: Callable[[], None], *, show_status: bool = False
 ) -> None:
@@ -171,6 +186,11 @@ def _render_job_card(
     with ui.expansion(label).classes("w-full"):
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")
+        days_applied = _days_since_applied(job)
+        if days_applied is not None:
+            ui.label(f"Applied {days_applied} days ago").classes("text-caption").mark(
+                "days-since-applied"
+            )
         ui.link("Open job posting", job["job_url"], new_tab=True)
         ui.link("View full details", f"/job/{job['id']}")
         current = db.job_status(job)
@@ -704,6 +724,17 @@ def job_detail_page(job_id: int) -> None:
             if comment:
                 ui.markdown(f"**{label} comment:** {comment}")
         ui.link("Open original posting", job["job_url"], new_tab=True)
+
+        events = db.get_events(job["id"])
+        if events:
+            ui.separator()
+            ui.label("History").classes("text-h6")
+            with ui.timeline(side="right"):
+                for event in events:
+                    ui.timeline_entry(
+                        title=event["status"].title(),
+                        subtitle=event["created_at"],
+                    )
 
         ui.separator()
         ui.markdown(job["description"] or "_No description captured._")
