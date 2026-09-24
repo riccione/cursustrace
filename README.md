@@ -1,5 +1,7 @@
 # CursusTrace — Job Application Tracker
 
+[![CI](https://github.com/riccione/cursustrace/actions/workflows/ci.yml/badge.svg)](https://github.com/riccione/cursustrace/actions/workflows/ci.yml)
+
 Track job applications by scanning a listing URL and saving its details to a local
 SQLite database.
 
