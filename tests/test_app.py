@@ -6,13 +6,14 @@ import asyncio
 import re
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import cast
 
 import pytest
 from nicegui import ui
 from nicegui.testing import User
 
-from cursustrace import app, db, scraper
+from cursustrace import app, config, db, scraper
 from cursustrace.errors import ScrapeError
 
 JOB_URL = "https://example.com/jobs/1"
@@ -751,3 +752,31 @@ async def test_theme_toggle_persists_dark(user: User) -> None:
     await user.open("/")
     reloaded = user.find(ui.dark_mode).elements.pop()
     assert reloaded.value is True
+
+
+def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
+    monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
+
+    settings = config.Settings(host="127.0.0.1", port=9002, reload=True, show=True)
+    try:
+        app.run(settings)
+        assert captured["host"] == "127.0.0.1"
+        assert captured["port"] == 9002
+        assert captured["reload"] is True
+        assert captured["show"] is True
+        assert app._settings is settings
+    finally:
+        app._settings = None
+
+
+def test_cv_style_path_uses_settings() -> None:
+    app._settings = config.Settings(cv_style_path=Path("custom.css"))
+    try:
+        assert app._cv_style_path() == Path("custom.css")
+        app._settings = None
+        assert app._cv_style_path() is None
+    finally:
+        app._settings = None
