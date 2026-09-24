@@ -493,6 +493,29 @@ async def test_company_search_filters_cards(user: User) -> None:
     await user.should_see("Paysend")
 
 
+async def test_search_is_across_statuses(user: User) -> None:
+    db.init_db()
+    adapty_id = db.add_job("https://a.com/1", "QA Engineer", "Adapty", "Remote", "Body")
+    paysend_id = db.add_job("https://a.com/2", "QA Engineer", "Paysend", "Remote", "Body")
+    assert adapty_id is not None
+    assert paysend_id is not None
+    db.set_job_status(adapty_id, "applied")
+    db.set_job_status(paysend_id, "rejected")
+    await user.open("/")
+    await user.should_see("Adapty")
+
+    user.find("Search company").clear().type("Adapty")
+    await asyncio.sleep(0.4)
+
+    await user.should_see("Adapty")
+    await user.should_see("[Applied]")
+    await user.should_not_see("Paysend")
+
+    user.find("Search company").clear()
+    await asyncio.sleep(0.4)
+    await user.should_see("Paysend")
+
+
 async def test_card_comment_box_for_current_stage(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "applied")

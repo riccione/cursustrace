@@ -31,7 +31,9 @@ Positions**, then use the **Unapplied**, **Applied**, **Interview**, and
 **Rejected** tabs to manage each position through the pipeline. Toggle
 **Applied**, **Interview**, or **Rejected** on a card to move it between tabs.
 Select **View full details** on a card to open the complete scraped description
-and metadata.
+and metadata. The **Search company** box matches fuzzy company names across
+**all** pipeline stages at once (each result shows its status, e.g.
+`[Applied]`).
 
 When scraping fails (or for a listing you track by hand), use **➕ Add Manually**
 to enter a position's URL, title, company, and description, and edit those fields

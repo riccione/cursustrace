@@ -152,10 +152,15 @@ def _render_delete_controls(job: db.Job, refresh: Callable[[], None]) -> None:
     ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
-def _render_job_card(job: db.Job, refresh: Callable[[], None]) -> None:
+def _render_job_card(
+    job: db.Job, refresh: Callable[[], None], *, show_status: bool = False
+) -> None:
     title = job["title"] or "Untitled position"
     company = job["company"] or "Unknown company"
-    with ui.expansion(f"{title} — {company}").classes("w-full"):
+    label = f"{title} — {company}"
+    if show_status:
+        label += f" [{db.job_status(job).title()}]"
+    with ui.expansion(label).classes("w-full"):
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")
         ui.link("Open job posting", job["job_url"], new_tab=True)
@@ -171,12 +176,14 @@ def _render_job_list(
     jobs: list[db.Job],
     empty_message: str,
     refresh: Callable[[], None],
+    *,
+    show_status: bool = False,
 ) -> None:
     if not jobs:
         ui.label(empty_message)
         return
     for job in jobs:
-        _render_job_card(job, refresh)
+        _render_job_card(job, refresh, show_status=show_status)
 
 
 def _render_statistics() -> None:
@@ -554,15 +561,34 @@ def dashboard_page() -> None:
     dark = _apply_dark_mode()
     containers: dict[db.JobStatus, ui.column] = {}
     stats_container: ui.column | None = None
+    results_container: ui.column | None = None
+    status_tabs: ui.tabs | None = None
+    status_panels: ui.tab_panels | None = None
     query = ""
 
     def refresh() -> None:
-        for status, _label, empty_message in STATUS_TABS:
-            container = containers[status]
-            container.clear()
-            message = f'No positions match "{query}".' if query else empty_message
-            with container:
-                _render_job_list(db.search_jobs(query, status=status), message, refresh)
+        searching = bool(query)
+        if status_tabs is not None:
+            status_tabs.set_visibility(not searching)
+        if status_panels is not None:
+            status_panels.set_visibility(not searching)
+        for status, _label, _empty in STATUS_TABS:
+            containers[status].clear()
+        if results_container is not None:
+            results_container.clear()
+            results_container.set_visibility(searching)
+            if searching:
+                with results_container:
+                    _render_job_list(
+                        db.search_jobs(query),
+                        f'No positions match "{query}".',
+                        refresh,
+                        show_status=True,
+                    )
+        if not searching:
+            for status, _label, empty_message in STATUS_TABS:
+                with containers[status]:
+                    _render_job_list(db.search_jobs(query, status=status), empty_message, refresh)
         if stats_container is not None:
             stats_container.clear()
             with stats_container:
@@ -620,10 +646,13 @@ def dashboard_page() -> None:
                 with ui.tabs().classes("w-full") as status_tabs:
                     for status, label, _message in STATUS_TABS:
                         ui.tab(status, label=label)
-                with ui.tab_panels(status_tabs, value="unapplied").classes("w-full"):
+                with ui.tab_panels(status_tabs, value="unapplied").classes(
+                    "w-full"
+                ) as status_panels:
                     for status, _label, _message in STATUS_TABS:
                         with ui.tab_panel(status):
                             containers[status] = ui.column().classes("w-full")
+                results_container = ui.column().classes("w-full")
             with ui.tab_panel(stats_tab):
                 stats_container = ui.column().classes("w-full")
             with ui.tab_panel(profile_tab):
