@@ -133,3 +133,44 @@ uv run pre-commit run --all-files   # run the hooks across the repo
 ```
 
 The database lives at `data/cursustrace.db` and is created on first run.
+
+## Contributing
+
+Contributions are welcome as pull requests against `main`.
+
+### Commit messages
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/):
+`<type>(<scope>): <summary>` — for example, `feat(app): add history timeline`.
+Use the imperative mood, lower case, no trailing period. The scope is optional.
+
+Types in use:
+
+- `feat` — a new feature
+- `fix` — a bug fix
+- `refactor` — a change that neither fixes a bug nor adds a feature
+- `perf` — a performance improvement
+- `docs` — documentation only
+- `style` — formatting or whitespace, no behaviour change
+- `chore` — maintenance, tooling, dependencies
+- `ci` — CI/CD workflows
+- `build` — build system or packaging
+
+### Pull requests
+
+Every pull request should explain:
+
+- **Why** — the purpose and the problem it solves.
+- **What changed** — a short summary of the changes.
+- **Technical details** — brief notes on the approach, key files, and trade-offs.
+
+Before requesting review, confirm:
+
+- [ ] `uv run ruff check src tests`
+- [ ] `uv run ruff format src tests`
+- [ ] `uv run mypy src tests`
+- [ ] `uv run pytest`
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
