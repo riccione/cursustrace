@@ -6,18 +6,26 @@ import os
 import signal
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from types import FrameType
 from typing import Literal
 
 from nicegui import app, events, ui
 from nicegui.run import io_bound
 
-from cursustrace import db, scraper
+from cursustrace import config, db, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
 from cursustrace.validation import validate_required, validate_url
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
+
+_settings: config.Settings | None = None
+
+
+def _cv_style_path() -> Path | None:
+    return _settings.cv_style_path if _settings is not None else None
+
 
 STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
     ("unapplied", "⏳ Unapplied Positions", "No unapplied positions yet."),
@@ -542,7 +550,7 @@ def _render_profile_editor() -> None:
     def export() -> None:
         current = db.get_profile()
         try:
-            pdf_bytes = generate_cv_pdf(current, load_cv_styles())
+            pdf_bytes = generate_cv_pdf(current, load_cv_styles(_cv_style_path()))
         except PdfExportError as exc:
             ui.notify(f"Could not generate PDF: {exc}", type="negative")
             return
@@ -706,8 +714,10 @@ def job_detail_page(job_id: int) -> None:
         ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
-def run() -> None:
+def run(settings: config.Settings | None = None) -> None:
     """CLI entrypoint that launches the CursusTrace NiceGUI dashboard."""
+    global _settings
+    _settings = settings or config.load_settings()
     db.init_db()
     ui.add_css(GLOBAL_CSS, shared=True)
     shutdown_signal: int | None = None
@@ -732,9 +742,10 @@ def run() -> None:
         ui.run(
             title=APP_TITLE,
             favicon="📋",
-            show=False,
-            reload=False,
-            port=8080,
+            host=_settings.host,
+            port=_settings.port,
+            show=_settings.show,
+            reload=_settings.reload,
         )
     except KeyboardInterrupt:
         shutdown_signal = signal.SIGINT

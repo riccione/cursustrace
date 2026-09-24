@@ -26,7 +26,32 @@ uv run cursustrace
 ```
 
 The [NiceGUI](https://nicegui.io/) server starts on
-[http://localhost:8080](http://localhost:8080).
+[http://localhost:8080](http://localhost:8080). Use `cursustrace run` to pass
+options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
+
+## Configuration
+
+Settings are resolved with the precedence **CLI flags > environment variables >
+`cursustrace.toml` > defaults**:
+
+- **`cursustrace.toml`** in the working directory (or a path via `--config`):
+
+  ```toml
+  [cursustrace]
+  host = "127.0.0.1"
+  port = 8090
+  reload = false
+  show = false
+  cv_style = "styles/cv.css"
+  ```
+
+- **Environment variables:** `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
+  `CURSUS_SHOW`, `CURSUS_CV_STYLE`.
+- **`cursustrace run` flags:** `--host`, `--port`, `--reload/--no-reload`,
+  `--show/--no-show`, `--css PATH`, `--config PATH`.
+
+`cv_style` / `--css` points at the PDF stylesheet used by **📄 Export to PDF**
+(see below).
 
 Paste one or more job listing URLs (one per line), click **Scan & Save
 Positions**, then use the **Unapplied**, **Applied**, **Interview**, and
