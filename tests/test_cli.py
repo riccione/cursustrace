@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from cursustrace import cli as cli_module
-from cursustrace import db, scraper
+from cursustrace import config, db, scraper
 from cursustrace.errors import ScrapeError
 
 ADD_ARGS = [
@@ -24,10 +24,21 @@ ADD_ARGS = [
     "Body",
 ]
 
+_CURSUS_ENV = (
+    "CURSUS_HOST",
+    "CURSUS_PORT",
+    "CURSUS_RELOAD",
+    "CURSUS_SHOW",
+    "CURSUS_CV_STYLE",
+)
+
 
 @pytest.fixture
 def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "cursustrace.toml")
+    for name in _CURSUS_ENV:
+        monkeypatch.delenv(name, raising=False)
     return CliRunner()
 
 
@@ -259,6 +270,61 @@ def test_version_flags(runner: CliRunner) -> None:
 
         assert result.exit_code == 0
         assert "cursustrace 0.1.0" in result.output
+
+
+def test_run_command_passes_settings(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[config.Settings] = []
+    monkeypatch.setattr("cursustrace.app.run", captured.append)
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["run", "--host", "127.0.0.1", "--port", "9001", "--reload", "--show"],
+    )
+
+    assert result.exit_code == 0
+    settings = captured[0]
+    assert settings.host == "127.0.0.1"
+    assert settings.port == 9001
+    assert settings.reload is True
+    assert settings.show is True
+
+
+def test_run_command_css_flag(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    css = tmp_path / "custom.css"
+    css.write_text("body {}", encoding="utf-8")
+    captured: list[config.Settings] = []
+    monkeypatch.setattr("cursustrace.app.run", captured.append)
+
+    result = runner.invoke(cli_module.cli, ["run", "--css", str(css)])
+
+    assert result.exit_code == 0
+    assert captured[0].cv_style_path == css
+
+
+def test_run_command_invalid_port_type(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["run", "--port", "abc"])
+
+    assert result.exit_code == 2
+
+
+def test_run_command_out_of_range_port(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("cursustrace.app.run", lambda settings: None)
+
+    result = runner.invoke(cli_module.cli, ["run", "--port", "70000"])
+
+    assert result.exit_code == 1
+    assert "port" in result.stderr
+
+
+def test_run_command_help(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["run", "--help"])
+
+    assert result.exit_code == 0
+    assert "--host" in result.output
+    assert "--port" in result.output
+    assert "--config" in result.output
 
 
 def test_clear_requires_confirmation(runner: CliRunner) -> None:

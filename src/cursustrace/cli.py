@@ -8,7 +8,8 @@ from typing import TextIO, cast
 import click
 
 from cursustrace import db, scraper
-from cursustrace.errors import ScrapeError
+from cursustrace.config import load_settings
+from cursustrace.errors import ConfigError, ScrapeError
 from cursustrace.validation import required_error, validate_url
 
 STATUSES = ["unapplied", "applied", "interview", "rejected"]
@@ -106,6 +107,45 @@ def cli(ctx: click.Context) -> None:
         from cursustrace.app import run
 
         run()
+
+
+@cli.command()
+@click.option("--host", default=None, help="Host to bind (default from config/env).")
+@click.option("--port", type=int, default=None, help="Port to bind.")
+@click.option("--reload/--no-reload", "reload", default=None, help="Auto-reload on file changes.")
+@click.option("--show/--no-show", "show", default=None, help="Open a browser tab.")
+@click.option(
+    "--css",
+    "cv_style",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Path to the CV stylesheet.",
+)
+@click.option("--config", "config_path", type=click.Path(dir_okay=False), default=None)
+def run_command(
+    host: str | None,
+    port: int | None,
+    reload: bool | None,
+    show: bool | None,
+    cv_style: str | None,
+    config_path: str | None,
+) -> None:
+    """Launch the dashboard (host/port/config overrides)."""
+    try:
+        settings = load_settings(
+            host=host,
+            port=port,
+            reload=reload,
+            show=show,
+            cv_style_path=cv_style,
+            config_path=config_path,
+        )
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    from cursustrace.app import run
+
+    run(settings)
 
 
 @cli.command()
