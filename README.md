@@ -42,6 +42,9 @@ your CV in Markdown with a live preview. Your profile and CV are stored only in
 the SQLite database, and **📄 Export to PDF** downloads a formatted document
 combining your contact header with the CV body.
 
+The **📊 Statistics** tab shows how many positions you have in total and in each
+pipeline stage (unapplied, applied, interview, rejected).
+
 ## Customizing the CV PDF style
 
 The PDF stylesheet lives at [`styles/cv.css`](styles/cv.css). Edit it to change
@@ -69,6 +72,9 @@ echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
 
 # list stored positions
 uv run cursustrace list --status applied --json
+
+# position counts per pipeline stage
+uv run cursustrace stats --json
 
 # show the version
 uv run cursustrace -V

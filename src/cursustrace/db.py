@@ -346,6 +346,28 @@ def get_jobs(status: JobStatus | None = None) -> list[Job]:
     return [cast(Job, dict(row)) for row in rows]
 
 
+def job_counts() -> dict[str, int]:
+    """Return position totals per pipeline stage (plus 'total')."""
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "COALESCE(SUM(applied), 0) AS applied, "
+            "COALESCE(SUM(interview), 0) AS interview, "
+            "COALESCE(SUM(rejected), 0) AS rejected FROM jobs"
+        ).fetchone()
+    total = int(row["total"])
+    applied = int(row["applied"])
+    interview = int(row["interview"])
+    rejected = int(row["rejected"])
+    return {
+        "total": total,
+        "unapplied": total - applied - interview - rejected,
+        "applied": applied,
+        "interview": interview,
+        "rejected": rejected,
+    }
+
+
 def search_jobs(
     query: str,
     status: JobStatus | None = None,

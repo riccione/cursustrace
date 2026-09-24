@@ -268,6 +268,32 @@ def test_job_status_derives_stage(db_path: Path) -> None:
     assert db.job_status(db.get_jobs()[0]) == "rejected"
 
 
+def test_job_counts(db_path: Path) -> None:
+    db.init_db()
+    assert db.job_counts() == {
+        "total": 0,
+        "unapplied": 0,
+        "applied": 0,
+        "interview": 0,
+        "rejected": 0,
+    }
+
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/3", "Three", "Acme", "Remote", "desc")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "rejected")
+
+    assert db.job_counts() == {
+        "total": 3,
+        "unapplied": 1,
+        "applied": 1,
+        "interview": 0,
+        "rejected": 1,
+    }
+
+
 def test_set_job_comment_round_trip(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")

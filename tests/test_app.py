@@ -537,6 +537,27 @@ async def test_edit_dialog_updates_comments(user: User) -> None:
     assert db.get_jobs()[0]["interview_comment"] == "great team"
 
 
+async def test_statistics_tab_shows_counts(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/3", "Three", "Acme", "Remote", "desc")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "rejected")
+    await user.open("/")
+
+    def stat(key: str) -> str:
+        label = cast(ui.label, user.find(marker=f"stat-{key}").elements.pop())
+        return str(label.text)
+
+    assert stat("total") == "3"
+    assert stat("unapplied") == "1"
+    assert stat("applied") == "1"
+    assert stat("interview") == "0"
+    assert stat("rejected") == "1"
+
+
 async def test_card_has_full_details_link(user: User) -> None:
     await user.open("/")
     await _scan(user)

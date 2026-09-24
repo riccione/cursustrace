@@ -220,6 +220,22 @@ def list_jobs(status: str | None, search: str | None, as_json: bool) -> None:
 
 
 @cli.command()
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON object.")
+def stats(as_json: bool) -> None:
+    """Show position counts per pipeline stage."""
+    db.init_db()
+    counts = db.job_counts()
+    if as_json:
+        click.echo(json_module.dumps(counts))
+        return
+    click.echo(f"Total: {counts['total']}")
+    click.echo(f"Unapplied: {counts['unapplied']}")
+    click.echo(f"Applied: {counts['applied']}")
+    click.echo(f"Interview: {counts['interview']}")
+    click.echo(f"Rejected: {counts['rejected']}")
+
+
+@cli.command()
 @click.option("--all", "clear_all", is_flag=True, help="Also delete profile/CV and settings.")
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")

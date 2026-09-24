@@ -232,6 +232,27 @@ def test_list_json_includes_comments(runner: CliRunner) -> None:
     assert jobs[0]["applied_comment"] == "note"
 
 
+def test_stats(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "desc")
+    db.set_job_status(db.get_jobs()[0]["id"], "applied")
+
+    json_result = runner.invoke(cli_module.cli, ["stats", "--json"])
+    assert json.loads(json_result.output) == {
+        "total": 2,
+        "unapplied": 1,
+        "applied": 1,
+        "interview": 0,
+        "rejected": 0,
+    }
+
+    human_result = runner.invoke(cli_module.cli, ["stats"])
+    assert human_result.exit_code == 0
+    assert "Total: 2" in human_result.output
+    assert "Applied: 1" in human_result.output
+
+
 def test_version_flags(runner: CliRunner) -> None:
     for flag in ("--version", "-V"):
         result = runner.invoke(cli_module.cli, [flag])

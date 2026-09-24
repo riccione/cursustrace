@@ -32,6 +32,14 @@ STATUS_CHECKBOXES: tuple[tuple[db.JobFlag, str], ...] = (
     ("rejected", "Rejected"),
 )
 
+STAT_CARDS: tuple[tuple[str, str], ...] = (
+    ("total", "📋 Total positions"),
+    ("unapplied", "⏳ Unapplied"),
+    ("applied", "✅ Applied"),
+    ("interview", "🗣️ Interview"),
+    ("rejected", "❌ Rejected"),
+)
+
 GLOBAL_CSS = """
 html { font-size: 22px; }
 body { font-size: 22px; }
@@ -169,6 +177,15 @@ def _render_job_list(
         return
     for job in jobs:
         _render_job_card(job, refresh)
+
+
+def _render_statistics() -> None:
+    counts = db.job_counts()
+    with ui.grid(columns=2).classes("w-full gap-4"):
+        for key, label in STAT_CARDS:
+            with ui.card().classes("w-full items-center"):
+                ui.label(str(counts[key])).classes("text-h4").mark(f"stat-{key}")
+                ui.label(label)
 
 
 def _parse_urls(text: str | None) -> list[str]:
@@ -536,6 +553,7 @@ def dashboard_page() -> None:
     ui.page_title(APP_TITLE)
     dark = _apply_dark_mode()
     containers: dict[db.JobStatus, ui.column] = {}
+    stats_container: ui.column | None = None
     query = ""
 
     def refresh() -> None:
@@ -545,6 +563,10 @@ def dashboard_page() -> None:
             message = f'No positions match "{query}".' if query else empty_message
             with container:
                 _render_job_list(db.search_jobs(query, status=status), message, refresh)
+        if stats_container is not None:
+            stats_container.clear()
+            with stats_container:
+                _render_statistics()
 
     with ui.header().classes("items-center justify-between"):
         ui.label(APP_TITLE).classes("text-h6")
@@ -578,6 +600,7 @@ def dashboard_page() -> None:
 
         with ui.tabs().classes("w-full") as main_tabs:
             dashboard_tab = ui.tab("📋 Dashboard")
+            stats_tab = ui.tab("📊 Statistics")
             profile_tab = ui.tab("👤 Profile & CV Editor")
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
@@ -601,6 +624,8 @@ def dashboard_page() -> None:
                     for status, _label, _message in STATUS_TABS:
                         with ui.tab_panel(status):
                             containers[status] = ui.column().classes("w-full")
+            with ui.tab_panel(stats_tab):
+                stats_container = ui.column().classes("w-full")
             with ui.tab_panel(profile_tab):
                 _render_profile_editor()
 
