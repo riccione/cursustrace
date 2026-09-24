@@ -65,6 +65,17 @@ CREATE_FINGERPRINT_INDEX = (
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint)"
 )
 
+CREATE_EVENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)
+"""
+
+CREATE_EVENTS_INDEX = "CREATE INDEX IF NOT EXISTS idx_events_job_id ON events(job_id)"
+
 
 class Job(TypedDict):
     """A stored job listing row."""
@@ -90,6 +101,15 @@ class Job(TypedDict):
 
 JobStatus = Literal["unapplied", "applied", "interview", "rejected"]
 JobFlag = Literal["applied", "interview", "rejected"]
+
+
+class Event(TypedDict):
+    """A logged pipeline status change for a job."""
+
+    id: int
+    job_id: int
+    status: JobStatus
+    created_at: str
 
 
 def job_status(job: Job) -> JobStatus:
@@ -151,24 +171,54 @@ def _migrate_profile(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE profile ADD COLUMN cv_markdown TEXT")
 
 
+def _backfill_events(conn: sqlite3.Connection) -> None:
+    """Seed events from stored stage dates for jobs created before logging existed."""
+    rows = conn.execute(
+        "SELECT id, date_applied, date_interview, date_rejected FROM jobs"
+    ).fetchall()
+    for job in rows:
+        stamps = [
+            (job["date_applied"], "applied"),
+            (job["date_interview"], "interview"),
+            (job["date_rejected"], "rejected"),
+        ]
+        for created_at, status in sorted(entry for entry in stamps if entry[0] is not None):
+            conn.execute(
+                "INSERT INTO events (job_id, status, created_at) VALUES (?, ?, ?)",
+                (job["id"], status, created_at),
+            )
+
+
 def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """Open a connection, creating the parent directory and database on first use."""
     path = db_path if db_path is not None else DEFAULT_DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
 def init_db() -> None:
     """Create the jobs and profile tables if needed and apply schema migrations."""
     with closing(get_connection()) as conn:
+        events_existed = (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+            ).fetchone()
+            is not None
+        )
         conn.execute(CREATE_JOBS_TABLE)
         conn.execute(CREATE_PROFILE_TABLE)
         conn.execute(CREATE_SETTINGS_TABLE)
+        conn.execute(CREATE_EVENTS_TABLE)
         _migrate(conn)
         _migrate_profile(conn)
+        conn.execute(CREATE_EVENTS_INDEX)
+        conn.commit()
         conn.execute("PRAGMA journal_mode=WAL")
+        if not events_existed:
+            _backfill_events(conn)
         conn.commit()
 
 
@@ -238,15 +288,20 @@ def add_job(
 ) -> int | None:
     """Insert a job listing; return the new id, or None when the URL/fingerprint exists."""
     fingerprint = generate_fingerprint(company, title, location)
+    now = _now()
     try:
         with closing(get_connection()) as conn:
             cursor = conn.execute(
                 "INSERT INTO jobs "
                 "(job_url, title, company, location, description, date_added, fingerprint) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (url, title, company, location, description, _now(), fingerprint),
+                (url, title, company, location, description, now, fingerprint),
             )
             rowid = cursor.lastrowid
+            conn.execute(
+                "INSERT INTO events (job_id, status, created_at) VALUES (?, ?, ?)",
+                (rowid, "unapplied", now),
+            )
             conn.commit()
     except sqlite3.IntegrityError:
         return None
@@ -260,16 +315,23 @@ def get_job(job_id: int) -> Job | None:
     return cast(Job, dict(row)) if row is not None else None
 
 
+def get_events(job_id: int) -> list[Event]:
+    """Return a job's logged status changes in chronological order."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT * FROM events WHERE job_id = ? ORDER BY id", (job_id,)
+        ).fetchall()
+    return [cast(Event, dict(row)) for row in rows]
+
+
 def set_job_status(job_id: int, status: JobStatus) -> None:
     """Move a job to a pipeline stage, stamping its date and preserving earlier ones."""
     with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT date_applied, date_interview, date_rejected FROM jobs WHERE id = ?",
-            (job_id,),
-        ).fetchone()
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         if row is None:
             return
 
+        previous = job_status(cast(Job, dict(row)))
         now = _now()
         if status == "unapplied":
             applied = interview = rejected = 0
@@ -297,6 +359,11 @@ def set_job_status(job_id: int, status: JobStatus) -> None:
                 job_id,
             ),
         )
+        if previous != status:
+            conn.execute(
+                "INSERT INTO events (job_id, status, created_at) VALUES (?, ?, ?)",
+                (job_id, status, now),
+            )
         conn.commit()
 
 
@@ -399,6 +466,7 @@ def clear_all_jobs() -> int:
         count = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
         conn.execute("DELETE FROM jobs")
         conn.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'events'")
         conn.commit()
     return count
 
@@ -417,6 +485,7 @@ def clear_all_data() -> dict[str, int]:
         settings = int(conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0])
         conn.execute("DELETE FROM jobs")
         conn.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'events'")
         conn.execute("DELETE FROM profile")
         conn.execute("DELETE FROM settings")
         conn.commit()
