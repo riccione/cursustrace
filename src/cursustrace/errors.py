@@ -13,3 +13,7 @@ class ScrapeError(CursustraceError):
 
 class PdfExportError(CursustraceError):
     """Raised when a Markdown CV cannot be rendered to PDF."""
+
+
+class ConfigError(CursustraceError):
+    """Raised when configuration is missing, unreadable, or invalid."""
