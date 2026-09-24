@@ -6,6 +6,7 @@ import asyncio
 import re
 import time
 from collections.abc import Callable
+from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -614,6 +615,43 @@ async def test_details_view_unknown_id_warns(user: User) -> None:
     await user.open("/job/999")
 
     await user.should_see("Position not found.")
+
+
+async def test_detail_shows_history_timeline(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "interview")
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("History")
+    titles = {entry.props["title"] for entry in user.find(ui.timeline_entry).elements}
+    assert titles == {"Unapplied", "Applied", "Interview"}
+
+
+def test_days_since_applied_handles_missing_and_bad_dates() -> None:
+    assert app._days_since_applied(cast(db.Job, {"date_applied": None})) is None
+    assert app._days_since_applied(cast(db.Job, {"date_applied": "not-a-date"})) is None
+
+    now = time.localtime()
+    today = date(now.tm_year, now.tm_mon, now.tm_mday)
+    three_days_ago = (today - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    assert app._days_since_applied(cast(db.Job, {"date_applied": three_days_ago})) == 3
+
+
+async def test_card_shows_days_since_applied(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    await user.open("/")
+
+    badge = cast(ui.label, user.find(marker="days-since-applied").elements.pop())
+    assert str(badge.text) == "Applied 0 days ago"
+
+
+async def test_card_hides_days_since_applied_when_unapplied(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    await user.should_not_see(marker="days-since-applied")
 
 
 async def test_details_back_button_returns_to_list(user: User) -> None:

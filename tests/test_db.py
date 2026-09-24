@@ -268,6 +268,125 @@ def test_job_status_derives_stage(db_path: Path) -> None:
     assert db.job_status(db.get_jobs()[0]) == "rejected"
 
 
+def test_add_job_logs_creation_event(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    events = db.get_events(job_id)
+
+    assert [(event["job_id"], event["status"]) for event in events] == [(job_id, "unapplied")]
+    assert TIMESTAMP_RE.match(events[0]["created_at"])
+
+
+def test_set_job_status_logs_transitions(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "interview")
+    db.set_job_status(job_id, "rejected")
+    db.set_job_status(job_id, "unapplied")
+
+    assert [event["status"] for event in db.get_events(job_id)] == [
+        "unapplied",
+        "applied",
+        "interview",
+        "rejected",
+        "unapplied",
+    ]
+
+
+def test_set_job_status_same_stage_logs_nothing(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "unapplied")
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "applied")
+
+    assert [event["status"] for event in db.get_events(job_id)] == ["unapplied", "applied"]
+
+
+def test_set_job_status_unknown_id_logs_nothing(db_path: Path) -> None:
+    db.init_db()
+    db.set_job_status(999, "applied")
+    with db.get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    assert count == 0
+
+
+def test_delete_job_cascades_events(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+    db.set_job_status(job_id, "applied")
+
+    db.delete_job(job_id)
+
+    assert db.get_events(job_id) == []
+    with db.get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    assert count == 0
+
+
+def test_clear_all_jobs_cascades_events(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    db.set_job_status(db.get_jobs()[0]["id"], "applied")
+
+    db.clear_all_jobs()
+
+    with db.get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    assert count == 0
+
+
+def test_clear_all_data_cascades_events(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    db.set_job_status(db.get_jobs()[0]["id"], "applied")
+
+    db.clear_all_data()
+
+    with db.get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    assert count == 0
+
+
+def _drop_event_history() -> None:
+    with db.get_connection() as conn:
+        conn.execute("DROP TABLE events")
+        conn.commit()
+
+
+def test_init_db_backfills_events_from_dates(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "interview")
+    _drop_event_history()
+
+    db.init_db()
+
+    assert [event["status"] for event in db.get_events(job_id)] == ["applied", "interview"]
+
+
+def test_init_db_backfill_runs_once(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    db.set_job_status(db.get_jobs()[0]["id"], "applied")
+    _drop_event_history()
+
+    db.init_db()
+    db.init_db()
+
+    assert len(db.get_events(db.get_jobs()[0]["id"])) == 1
+
+
 def test_job_counts(db_path: Path) -> None:
     db.init_db()
     assert db.job_counts() == {
