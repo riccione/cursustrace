@@ -190,6 +190,42 @@ def test_add_json_output(runner: CliRunner) -> None:
     assert isinstance(payload["id"], int)
 
 
+def test_add_with_salary(runner: CliRunner) -> None:
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            *ADD_ARGS,
+            "--salary-min",
+            "60000",
+            "--salary-max",
+            "80000",
+            "--salary-currency",
+            "EUR",
+            "--salary-period",
+            "year",
+            "--salary-note",
+            "plus bonus",
+        ],
+    )
+
+    assert result.exit_code == 0
+    job = db.get_jobs()[0]
+    assert job["salary_min"] == 60000
+    assert job["salary_max"] == 80000
+    assert job["salary_currency"] == "EUR"
+    assert job["salary_period"] == "year"
+    assert job["salary_note"] == "plus bonus"
+
+
+def test_add_salary_requires_currency_and_period(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, [*ADD_ARGS, "--salary-min", "60000"])
+
+    assert result.exit_code == 1
+    assert "salary-currency" in result.stderr
+    db.init_db()
+    assert db.get_jobs() == []
+
+
 def test_scan_adds_positions(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
 
@@ -246,6 +282,28 @@ def test_import_from_stdin(runner: CliRunner) -> None:
 
     assert result.exit_code == 0
     assert len(db.get_jobs()) == 1
+
+
+def test_import_reads_salary(runner: CliRunner) -> None:
+    payload = [
+        {
+            "url": "https://a.com/1",
+            "title": "Paid",
+            "company": "Acme",
+            "description": "Body",
+            "salary_min": 3000,
+            "salary_currency": "USD",
+            "salary_period": "month",
+        },
+    ]
+
+    result = runner.invoke(cli_module.cli, ["import"], input=json.dumps(payload))
+
+    assert result.exit_code == 0
+    job = db.get_jobs()[0]
+    assert job["salary_min"] == 3000
+    assert job["salary_currency"] == "USD"
+    assert job["salary_period"] == "month"
 
 
 def test_import_skips_duplicates(runner: CliRunner) -> None:
@@ -311,6 +369,49 @@ def test_list_json_includes_comments(runner: CliRunner) -> None:
 
     jobs = json.loads(result.output)
     assert jobs[0]["applied_comment"] == "note"
+
+
+def test_list_filters_by_salary(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Unknown", "Acme", "Remote", "Body")
+    db.add_job(
+        "https://a.com/2",
+        "Paid",
+        "Acme",
+        "Remote",
+        "Body",
+        salary_min=100000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+
+    result = runner.invoke(
+        cli_module.cli, ["list", "--min-salary", "50000", "--salary-currency", "EUR", "--json"]
+    )
+
+    jobs = json.loads(result.output)
+    assert [job["title"] for job in jobs] == ["Paid"]
+    assert jobs[0]["salary_min"] == 100000
+
+
+def test_stats_includes_salary(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job(
+        "https://a.com/1",
+        "Paid",
+        "Acme",
+        "Remote",
+        "Body",
+        salary_min=60000,
+        salary_max=80000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+
+    result = runner.invoke(cli_module.cli, ["stats", "--json"])
+
+    payload = json.loads(result.output)
+    assert payload["salary"]["EUR"]["median"] == 70000
 
 
 def test_stats(runner: CliRunner) -> None:

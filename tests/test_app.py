@@ -476,6 +476,89 @@ async def test_add_job_manually_shows_similar_notice(user: User) -> None:
     await user.should_see("Looks similar to")
 
 
+async def test_add_job_manually_with_salary(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/3")
+        user.find("Title").clear().type("Paid Engineer")
+        user.find("Company").clear().type("Acme")
+        user.find("Description").clear().type("Body")
+        cast(ui.number, user.find("Salary min").elements.pop()).set_value(60000)
+        cast(ui.number, user.find("Salary max").elements.pop()).set_value(80000)
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    job = db.get_jobs()[0]
+    assert job["salary_min"] == 60000
+    assert job["salary_max"] == 80000
+    assert job["salary_currency"] == "EUR"
+    assert job["salary_period"] == "year"
+
+
+async def test_add_job_manually_rejects_inverted_salary(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/4")
+        user.find("Title").clear().type("Paid Engineer")
+        user.find("Company").clear().type("Acme")
+        user.find("Description").clear().type("Body")
+        cast(ui.number, user.find("Salary min").elements.pop()).set_value(90000)
+        cast(ui.number, user.find("Salary max").elements.pop()).set_value(50000)
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await asyncio.sleep(0.1)
+    assert db.get_jobs() == []
+
+
+async def test_card_and_detail_show_salary(user: User) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/paid",
+        "Paid Engineer",
+        "Acme",
+        "Remote",
+        "Body",
+        salary_min=60000,
+        salary_max=80000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+    job_id = db.get_jobs()[0]["id"]
+
+    await user.open("/")
+    await user.should_see("€60,000 – €80,000 / year")
+
+    await user.open(f"/job/{job_id}")
+    await user.should_see("€60,000 – €80,000 / year")
+
+
+async def test_salary_filter_narrows_status_lists(user: User) -> None:
+    db.init_db()
+    db.add_job("https://example.com/unknown", "Unknown Salary", "Acme", "Remote", "Body")
+    db.add_job(
+        "https://example.com/paid",
+        "Paid Role",
+        "Acme",
+        "Remote",
+        "Body",
+        salary_min=100000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+    await user.open("/")
+    await user.should_see("Unknown Salary")
+    await user.should_see("Paid Role")
+
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
+
+    await user.should_not_see("Unknown Salary")
+    await user.should_see("Paid Role")
+
+
 async def test_add_job_manually_requires_fields(user: User) -> None:
     await user.open("/")
     user.find("➕ Add Manually").click()
@@ -659,6 +742,35 @@ async def test_statistics_tab_shows_counts(user: User) -> None:
     assert stat("applied") == "1"
     assert stat("interview") == "0"
     assert stat("rejected") == "1"
+
+
+async def test_statistics_tab_shows_salary_chart(user: User) -> None:
+    db.init_db()
+    db.add_job(
+        "https://a.com/1",
+        "Paid",
+        "Acme",
+        "Remote",
+        "desc",
+        salary_min=70000,
+        salary_max=90000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+    await user.open("/")
+    user.find("📊 Statistics").click()
+
+    await user.should_see("1 of 1 positions have salary data")
+    chart = cast(ui.echart, user.find(marker="salary-chart").elements.pop())
+    assert chart.options["series"][0]["data"] == [1]
+
+
+async def test_statistics_without_salary_shows_hint(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+    user.find("📊 Statistics").click()
+
+    await user.should_see("Add salary to positions to see the distribution.")
 
 
 async def test_card_has_full_details_link(user: User) -> None:

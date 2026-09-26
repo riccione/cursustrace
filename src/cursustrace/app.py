@@ -11,12 +11,12 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from types import FrameType
-from typing import Literal
+from typing import Literal, TypedDict
 
 from nicegui import app, events, ui
 from nicegui.run import io_bound
 
-from cursustrace import config, db, scraper
+from cursustrace import config, db, salary, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.logsetup import setup_logging
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
@@ -214,6 +214,9 @@ def _render_job_card(
     with ui.expansion(label).classes("w-full"):
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")
+        salary_text = salary.format_salary(job)
+        if salary_text:
+            ui.markdown(f"**Salary:** {salary_text}").mark("salary")
         days_applied = _days_since_applied(job)
         if days_applied is not None:
             ui.label(f"Applied {days_applied} days ago").classes("text-caption").mark(
@@ -249,6 +252,37 @@ def _render_statistics() -> None:
             with ui.card().classes("w-full items-center"):
                 ui.label(str(counts[key])).classes("text-h4").mark(f"stat-{key}")
                 ui.label(label)
+
+    jobs = db.get_jobs()
+    summary = salary.salary_summary(jobs)
+    with_salary = sum(entry["count"] for entry in summary.values())
+    ui.label(f"{with_salary} of {counts['total']} positions have salary data").classes(
+        "text-caption"
+    )
+    if not summary:
+        ui.label("Add salary to positions to see the distribution.").classes("text-caption")
+        return
+
+    currency = ui.toggle(list(salary.CURRENCIES), value=next(iter(summary))).classes("w-full")
+    chart_container = ui.column().classes("w-full")
+
+    def render_chart() -> None:
+        chart_container.clear()
+        labels, values = salary.salary_histogram(jobs, currency.value or "EUR")
+        with chart_container:
+            if not labels:
+                ui.label("No salary data for this currency.").classes("text-caption")
+                return
+            options = {
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {"type": "category", "data": labels},
+                "yAxis": {"type": "value", "name": "Positions"},
+                "series": [{"type": "bar", "name": "Positions", "data": values}],
+            }
+            ui.echart(options).classes("w-full").mark("salary-chart")
+
+    currency.on_value_change(lambda _: render_chart())
+    render_chart()
 
 
 def _parse_urls(text: str | None) -> list[str]:
@@ -438,9 +472,35 @@ class JobFormValues:
     company: str
     location: str
     description: str
+    salary_min: int | None = None
+    salary_max: int | None = None
+    salary_currency: str = ""
+    salary_period: str = ""
+    salary_note: str = ""
     applied_comment: str = ""
     interview_comment: str = ""
     rejected_comment: str = ""
+
+
+class SalaryKwargs(TypedDict):
+    """Keyword arguments passed through to the database salary columns."""
+
+    salary_min: int | None
+    salary_max: int | None
+    salary_currency: str | None
+    salary_period: str | None
+    salary_note: str | None
+
+
+def _salary_kwargs(values: JobFormValues) -> SalaryKwargs:
+    has_amount = values.salary_min is not None or values.salary_max is not None
+    return SalaryKwargs(
+        salary_min=values.salary_min if has_amount else None,
+        salary_max=values.salary_max if has_amount else None,
+        salary_currency=(values.salary_currency or None) if has_amount else None,
+        salary_period=(values.salary_period or None) if has_amount else None,
+        salary_note=values.salary_note or None,
+    )
 
 
 def _job_form_dialog(
@@ -454,6 +514,11 @@ def _job_form_dialog(
     company = (values["company"] or "") if values else ""
     location = (values["location"] or "") if values else ""
     description = (values["description"] or "") if values else ""
+    salary_min = values["salary_min"] if values else None
+    salary_max = values["salary_max"] if values else None
+    salary_currency = (values["salary_currency"] or "") if values else "EUR"
+    salary_period = (values["salary_period"] or "") if values else "year"
+    salary_note = (values["salary_note"] or "") if values else ""
 
     with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl"):
         dialog.mark("job-form")
@@ -465,6 +530,21 @@ def _job_form_dialog(
             "Company", value=company, validation=validate_required("Company")
         ).classes("w-full")
         location_input = ui.input("Location", value=location).classes("w-full")
+        with ui.row().classes("w-full gap-2"):
+            salary_min_input = ui.number(
+                "Salary min", value=salary_min, min=0, step=1000, format="%.0f"
+            ).classes("flex-1")
+            salary_max_input = ui.number(
+                "Salary max", value=salary_max, min=0, step=1000, format="%.0f"
+            ).classes("flex-1")
+        with ui.row().classes("w-full gap-2"):
+            salary_currency_input = ui.select(
+                list(salary.CURRENCIES), value=salary_currency or None, label="Currency"
+            ).classes("flex-1")
+            salary_period_input = ui.select(
+                list(salary.PERIODS), value=salary_period or None, label="Period"
+            ).classes("flex-1")
+        salary_note_input = ui.input("Salary note", value=salary_note).classes("w-full")
         description_input = (
             ui.textarea(
                 "Description",
@@ -498,6 +578,15 @@ def _job_form_dialog(
             )
             if not valid:
                 return
+            low, high = salary_min_input.value, salary_max_input.value
+            if low is not None and high is not None and low > high:
+                ui.notify("Salary min cannot exceed salary max.", type="warning")
+                return
+            if (low is not None or high is not None) and not (
+                salary_currency_input.value and salary_period_input.value
+            ):
+                ui.notify("Choose a currency and period for the salary.", type="warning")
+                return
             result = on_save(
                 JobFormValues(
                     url=(url.value or "").strip(),
@@ -505,6 +594,11 @@ def _job_form_dialog(
                     company=(company_input.value or "").strip(),
                     location=(location_input.value or "").strip(),
                     description=(description_input.value or "").strip(),
+                    salary_min=int(low) if low is not None else None,
+                    salary_max=int(high) if high is not None else None,
+                    salary_currency=salary_currency_input.value or "",
+                    salary_period=salary_period_input.value or "",
+                    salary_note=(salary_note_input.value or "").strip(),
                     applied_comment=(comment_inputs["applied"].value or "")
                     if with_comments
                     else "",
@@ -531,7 +625,12 @@ def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> boo
         ui.notify("A position with the same URL already exists.", type="warning")
         return False
     job_id = db.add_job(
-        values.url, values.title, values.company, values.location or None, values.description
+        values.url,
+        values.title,
+        values.company,
+        values.location or None,
+        values.description,
+        **_salary_kwargs(values),
     )
     if job_id is None:
         logger.warning("Rejected duplicate manual add: %s", values.url)
@@ -553,6 +652,7 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.company,
         values.location or None,
         values.description,
+        **_salary_kwargs(values),
     ):
         logger.warning("Rejected duplicate update: %s", values.url)
         ui.notify("A position with the same URL already exists.", type="warning")
@@ -646,7 +746,11 @@ def dashboard_page() -> None:
     results_container: ui.column | None = None
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
+    salary_filter_row: ui.row | None = None
     query = ""
+    salary_currency = ""
+    salary_min: int | None = None
+    salary_max: int | None = None
 
     def refresh() -> None:
         searching = bool(query)
@@ -654,6 +758,8 @@ def dashboard_page() -> None:
             status_tabs.set_visibility(not searching)
         if status_panels is not None:
             status_panels.set_visibility(not searching)
+        if salary_filter_row is not None:
+            salary_filter_row.set_visibility(not searching)
         for status, _label, _empty in STATUS_TABS:
             containers[status].clear()
         if results_container is not None:
@@ -670,7 +776,13 @@ def dashboard_page() -> None:
         if not searching:
             for status, _label, empty_message in STATUS_TABS:
                 with containers[status]:
-                    _render_job_list(db.search_jobs(query, status=status), empty_message, refresh)
+                    jobs = salary.filter_by_salary(
+                        db.search_jobs(query, status=status),
+                        min_annual=salary_min,
+                        max_annual=salary_max,
+                        currency=salary_currency or None,
+                    )
+                    _render_job_list(jobs, empty_message, refresh)
         if stats_container is not None:
             stats_container.clear()
             with stats_container:
@@ -726,6 +838,23 @@ def dashboard_page() -> None:
                     refresh()
 
                 search_input.on_value_change(on_search)
+                with ui.row().classes("w-full items-center gap-2") as salary_filter_row:
+                    currency_filter = ui.select(
+                        ["", *salary.CURRENCIES], value="", label="Salary currency"
+                    ).classes("w-48")
+                    min_filter = ui.number("Min salary", min=0, step=1000).classes("w-40")
+                    max_filter = ui.number("Max salary", min=0, step=1000).classes("w-40")
+
+                def update_salary_filter() -> None:
+                    nonlocal salary_currency, salary_min, salary_max
+                    salary_currency = currency_filter.value or ""
+                    salary_min = int(min_filter.value) if min_filter.value is not None else None
+                    salary_max = int(max_filter.value) if max_filter.value is not None else None
+                    refresh()
+
+                currency_filter.on_value_change(lambda _: update_salary_filter())
+                min_filter.on_value_change(lambda _: update_salary_filter())
+                max_filter.on_value_change(lambda _: update_salary_filter())
                 with ui.tabs().classes("w-full") as status_tabs:
                     for status, label, _message in STATUS_TABS:
                         ui.tab(status, label=label)
@@ -768,6 +897,9 @@ def job_detail_page(job_id: int) -> None:
         ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
         ui.markdown(f"**Added:** {job['date_added']}")
         ui.markdown(f"**Status:** {db.job_status(job).title()}")
+        salary_text = salary.format_salary(job)
+        if salary_text:
+            ui.markdown(f"**Salary:** {salary_text}")
         if job["date_applied"]:
             ui.markdown(f"**Applied:** {job['date_applied']}")
         if job["date_interview"]:
