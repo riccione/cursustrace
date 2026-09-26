@@ -57,6 +57,13 @@ body { font-size: 22px; }
 .q-notification { font-size: inherit; }
 body.body--dark .q-drawer { background: #1d1d1d; }
 .q-textarea .q-field__native { line-height: 1.7; }
+.nicegui-markdown { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.nicegui-markdown pre,
+.nicegui-markdown code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.nicegui-markdown pre { overflow-x: auto; }
+.nicegui-markdown img,
+.nicegui-markdown table { max-width: 100%; }
+.nicegui-markdown table { display: block; overflow-x: auto; }
 """
 
 DARK_MODE_KEY = "dark_mode"
@@ -737,7 +744,9 @@ def job_detail_page(job_id: int) -> None:
                     )
 
         ui.separator()
-        ui.markdown(job["description"] or "_No description captured._")
+        ui.markdown(job["description"] or "_No description captured._").classes(
+            "job-description w-full min-w-0"
+        ).mark("job-description")
 
         delete_dialog = _confirm_delete_dialog(
             job, lambda dialog: _delete_job_from_detail(dialog, job["id"])
