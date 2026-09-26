@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import time
@@ -17,10 +18,13 @@ from nicegui.run import io_bound
 
 from cursustrace import config, db, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
+from cursustrace.logsetup import setup_logging
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
 from cursustrace.validation import validate_required, validate_url
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
+
+logger = logging.getLogger(__name__)
 
 _settings: config.Settings | None = None
 
@@ -239,6 +243,7 @@ def _scan_url(url: str) -> tuple[str, str]:
     try:
         job = scraper.scrape_job(url)
     except ScrapeError as exc:
+        logger.error("Scrape failed for %s: %s", url, exc)
         return ("error", f"{url}: {exc}")
 
     duplicate, _reason = db.check_duplicate(
@@ -484,6 +489,7 @@ def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> boo
         values.url, values.title, values.company, values.location or None, values.description
     )
     if duplicate or job_id is None:
+        logger.warning("Rejected duplicate manual add: %s", values.url)
         ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
         return False
     ui.notify("Position added.", type="positive")
@@ -508,6 +514,7 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.location or None,
         values.description,
     ):
+        logger.warning("Rejected duplicate update: %s", values.url)
         ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
         return False
     db.update_job_comments(
@@ -758,7 +765,12 @@ def run(settings: config.Settings | None = None) -> None:
     """CLI entrypoint that launches the CursusTrace NiceGUI dashboard."""
     global _settings
     _settings = settings or config.load_settings()
-    db.init_db()
+    setup_logging(_settings.log_level, retention_days=_settings.log_retention_days)
+    try:
+        db.init_db()
+    except Exception:
+        logger.exception("Failed to initialize the database")
+        raise
     ui.add_css(GLOBAL_CSS, shared=True)
     shutdown_signal: int | None = None
 

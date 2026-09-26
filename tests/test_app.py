@@ -14,7 +14,7 @@ import pytest
 from nicegui import ui
 from nicegui.testing import User
 
-from cursustrace import app, config, db, scraper
+from cursustrace import app, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
 
 JOB_URL = "https://example.com/jobs/1"
@@ -807,6 +807,7 @@ async def test_theme_toggle_persists_dark(user: User) -> None:
 
 def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
     captured: dict[str, object] = {}
     monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
@@ -819,6 +820,27 @@ def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         assert captured["reload"] is True
         assert captured["show"] is True
         assert app._settings is settings
+        assert (tmp_path / "logs" / f"cursustrace-{logsetup._today().isoformat()}.log").exists()
+    finally:
+        app._settings = None
+
+
+def test_run_configures_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
+    monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
+    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: None)
+    captured: dict[str, object] = {}
+
+    def fake_setup(level: str, log_dir: Path | None = None, retention_days: int = 7) -> None:
+        captured["level"] = level
+        captured["retention"] = retention_days
+
+    monkeypatch.setattr("cursustrace.app.setup_logging", fake_setup)
+
+    settings = config.Settings(log_level="debug", log_retention_days=3)
+    try:
+        app.run(settings)
+        assert captured == {"level": "debug", "retention": 3}
     finally:
         app._settings = None
 
