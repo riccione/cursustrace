@@ -31,7 +31,7 @@ async def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None
 
 
 async def _scan(user: User, url: str = JOB_URL) -> None:
-    user.find("Job URL").clear().type(url)
+    user.find(marker="scan-urls").clear().type(url)
     await asyncio.sleep(0.05)
     user.find("Scan & Save Positions").click()
     await asyncio.sleep(0.05)
@@ -162,7 +162,7 @@ async def test_scan_multiple_urls_saves_all(user: User, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
     await user.open("/")
-    user.find("Job URL").clear().type(
+    user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/1\nhttps://example.com/jobs/2\nhttps://example.com/jobs/3"
     )
     await asyncio.sleep(0.05)
@@ -191,7 +191,7 @@ async def test_scan_multiple_reports_mixed_outcomes(
     await _scan(user, "https://example.com/jobs/1")
     await user.should_see("Saved 1")
 
-    user.find("Job URL").clear().type(
+    user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/2\nhttps://example.com/jobs/1\nhttps://example.com/jobs/bad"
     )
     await asyncio.sleep(0.05)
@@ -203,7 +203,7 @@ async def test_scan_multiple_reports_mixed_outcomes(
 
 
 def _scan_input(user: User) -> ui.textarea:
-    return user.find(ui.textarea).elements.pop()
+    return cast(ui.textarea, user.find(marker="scan-urls").elements.pop())
 
 
 async def test_scan_clears_input_on_success(user: User) -> None:
@@ -227,7 +227,9 @@ async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
     await user.open("/")
-    user.find("Job URL").clear().type("https://example.com/jobs/1\nhttps://example.com/jobs/bad")
+    user.find(marker="scan-urls").clear().type(
+        "https://example.com/jobs/1\nhttps://example.com/jobs/bad"
+    )
     await asyncio.sleep(0.05)
     user.find("Scan & Save Positions").click()
 

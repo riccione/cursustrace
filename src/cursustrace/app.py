@@ -693,6 +693,7 @@ def dashboard_page() -> None:
                 )
                 .classes("w-full")
                 .props('autogrow input-style="min-height: 80px"')
+                .mark("scan-urls")
             )
             with ui.row().classes("w-full items-center gap-3"):
                 scan_button = ui.button("Scan & Save Positions")
