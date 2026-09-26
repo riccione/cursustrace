@@ -43,15 +43,27 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   reload = false
   show = false
   cv_style = "styles/cv.css"
+  log_level = "error"
+  log_retention_days = 7
   ```
 
 - **Environment variables:** `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
-  `CURSUS_SHOW`, `CURSUS_CV_STYLE`.
+  `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`.
 - **`cursustrace run` flags:** `--host`, `--port`, `--reload/--no-reload`,
   `--show/--no-show`, `--css PATH`, `--config PATH`.
+- **Group flag (all commands):** `--log-level`, e.g.
+  `cursustrace --log-level debug scan URL`.
 
 `cv_style` / `--css` points at the PDF stylesheet used by **📄 Export to PDF**
 (see below).
+
+### Logging
+
+Errors are written to a daily file under `logs/cursustrace-YYYY-MM-DD.log`
+(appended across runs). The default level is `error`; set `log_level`
+(one of `debug`, `info`, `warning`, `error`, `critical`) via `cursustrace.toml`,
+`CURSUS_LOG_LEVEL`, or the group-level `--log-level` flag. Files older than
+`log_retention_days` (default `7`, `0` disables pruning) are deleted on startup.
 
 Paste one or more job listing URLs (one per line), click **Scan & Save
 Positions**, then use the **Unapplied**, **Applied**, **Interview**, and
