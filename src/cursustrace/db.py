@@ -10,13 +10,16 @@ from typing import Literal, TypedDict, cast
 
 from rapidfuzz import fuzz, process, utils
 
-from cursustrace.utils import clean_url, generate_fingerprint
+from cursustrace.utils import clean_url, generate_fingerprint, role_key
 
 DEFAULT_DB_PATH = Path("data/cursustrace.db")
 
 FUZZY_THRESHOLD = 85
 FUZZY_CANDIDATE_LIMIT = 50
 COMPANY_SEARCH_THRESHOLD = 70
+SIMILAR_LIMIT = 3
+
+FINGERPRINT_SCHEME_VERSION = 1
 
 CREATE_JOBS_TABLE = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -140,15 +143,25 @@ def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
 
+def _recompute_fingerprints(conn: sqlite3.Connection) -> None:
+    """Recompute job fingerprints once when the fingerprint scheme changes."""
+    version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if version >= FINGERPRINT_SCHEME_VERSION:
+        return
+    rows = conn.execute("SELECT id, job_url, company, title FROM jobs").fetchall()
+    for row in rows:
+        conn.execute(
+            "UPDATE jobs SET fingerprint = ? WHERE id = ?",
+            (generate_fingerprint(row["job_url"], row["company"], row["title"]), row["id"]),
+        )
+    # `user_version` is a fixed internal integer constant (PRAGMAs cannot be parameterized).
+    conn.execute(f"PRAGMA user_version = {FINGERPRINT_SCHEME_VERSION}")
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
     if "fingerprint" not in columns:
         conn.execute("ALTER TABLE jobs ADD COLUMN fingerprint TEXT")
-        for row in conn.execute("SELECT id, company, title, location FROM jobs").fetchall():
-            conn.execute(
-                "UPDATE jobs SET fingerprint = ? WHERE id = ?",
-                (generate_fingerprint(row["company"], row["title"], row["location"]), row["id"]),
-            )
     # Column names and definitions are fixed internal constants (DDL identifiers
     # cannot be parameterized), never user input.
     for column, definition in (
@@ -163,6 +176,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if column not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
     conn.execute(CREATE_FINGERPRINT_INDEX)
+    _recompute_fingerprints(conn)
 
 
 def _migrate_profile(conn: sqlite3.Connection) -> None:
@@ -222,61 +236,59 @@ def init_db() -> None:
         conn.commit()
 
 
-def _duplicate_reason(
-    conn: sqlite3.Connection, url: str, fingerprint: str, exclude_id: int
-) -> str | None:
+def _canonical_url_exists(conn: sqlite3.Connection, url: str, exclude_id: int) -> bool:
     cleaned = clean_url(url)
     for row in conn.execute("SELECT job_url FROM jobs WHERE id != ?", (exclude_id,)).fetchall():
         if clean_url(row["job_url"]) == cleaned:
-            return "Duplicate position already applied/tracked"
-    if fingerprint:
-        match = conn.execute(
-            "SELECT 1 FROM jobs WHERE fingerprint = ? AND id != ?",
-            (fingerprint, exclude_id),
-        ).fetchone()
-        if match is not None:
-            return "Duplicate position already applied/tracked"
-    return None
+            return True
+    return False
 
 
-def _fuzzy_reason(
-    conn: sqlite3.Connection,
+def check_duplicate(url: str, *, exclude_id: int | None = None) -> bool:
+    """Return True when another job already uses the same canonical URL."""
+    exclude = exclude_id if exclude_id is not None else -1
+    with closing(get_connection()) as conn:
+        return _canonical_url_exists(conn, url, exclude)
+
+
+def find_similar(
     company: str | None,
-    description: str | None,
-    exclude_id: int,
-) -> str | None:
-    if not company or not description:
-        return None
-    rows = conn.execute(
-        "SELECT description FROM jobs WHERE company = ? AND id != ? ORDER BY id DESC LIMIT ?",
-        (company, exclude_id, FUZZY_CANDIDATE_LIMIT),
-    ).fetchall()
-    for row in rows:
-        candidate = row["description"]
-        if candidate and fuzz.token_set_ratio(description, candidate) > FUZZY_THRESHOLD:
-            return "Duplicate position already applied/tracked"
-    return None
-
-
-def check_duplicate(
-    url: str,
     title: str | None,
-    company: str | None,
-    location: str | None,
     description: str | None,
     *,
     exclude_id: int | None = None,
-) -> tuple[bool, str]:
-    """Detect duplicates by canonical URL, fingerprint, or fuzzy description match."""
-    fingerprint = generate_fingerprint(company, title, location)
+    limit: int = SIMILAR_LIMIT,
+) -> list[Job]:
+    """Return jobs that look like the same role on another link (advisory only)."""
+    if not company and not description:
+        return []
     exclude = exclude_id if exclude_id is not None else -1
+    target_role = role_key(company, title) if company and title else None
+    matches: list[Job] = []
     with closing(get_connection()) as conn:
-        reason = _duplicate_reason(conn, url, fingerprint, exclude)
-        if reason is None:
-            reason = _fuzzy_reason(conn, company, description, exclude)
-    if reason is None:
-        return (False, "")
-    return (True, "Duplicate position already applied/tracked")
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE id != ? ORDER BY id DESC", (exclude,)
+        ).fetchall()
+        for row in rows:
+            job = cast(Job, dict(row))
+            same_role = (
+                target_role is not None
+                and bool(job["company"] and job["title"])
+                and role_key(job["company"], job["title"]) == target_role
+            )
+            candidate_description = job["description"]
+            similar_description = (
+                company is not None
+                and job["company"] == company
+                and description is not None
+                and candidate_description is not None
+                and fuzz.token_set_ratio(description, candidate_description) > FUZZY_THRESHOLD
+            )
+            if same_role or similar_description:
+                matches.append(job)
+                if len(matches) >= limit:
+                    break
+    return matches
 
 
 def add_job(
@@ -287,7 +299,7 @@ def add_job(
     description: str | None,
 ) -> int | None:
     """Insert a job listing; return the new id, or None when the URL/fingerprint exists."""
-    fingerprint = generate_fingerprint(company, title, location)
+    fingerprint = generate_fingerprint(url, company, title)
     now = _now()
     try:
         with closing(get_connection()) as conn:
@@ -501,7 +513,7 @@ def update_job(
     description: str | None,
 ) -> bool:
     """Update a job's editable fields; return False when the URL or fingerprint collides."""
-    fingerprint = generate_fingerprint(company, title, location)
+    fingerprint = generate_fingerprint(url, company, title)
     try:
         with closing(get_connection()) as conn:
             conn.execute(

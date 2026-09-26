@@ -83,7 +83,7 @@ async def test_duplicate_url_shows_warning(user: User) -> None:
     assert len(db.get_jobs()) == 1
 
 
-async def test_duplicate_fingerprint_shows_warning(
+async def test_similar_position_added_with_notice(
     user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await user.open("/")
@@ -102,8 +102,33 @@ async def test_duplicate_fingerprint_shows_warning(
     )
     await _scan(user, "https://other.com/jobs/999")
 
-    await user.should_see("Duplicates 1")
-    assert len(db.get_jobs()) == 1
+    await user.should_see("Saved 1")
+    await user.should_see("look similar")
+    assert len(db.get_jobs()) == 2
+
+
+async def test_similar_notice_can_be_disabled(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    db.set_setting("similar_notice", "off")
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Saved 1")
+
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "Senior Engineer",
+            "company": "Acme",
+            "location": "Remote",
+            "description": "Body text",
+        },
+    )
+    await _scan(user, "https://other.com/jobs/999")
+
+    await user.should_see("Saved 1")
+    await user.should_not_see("look similar")
+    assert len(db.get_jobs()) == 2
 
 
 async def test_empty_url_shows_warning(user: User) -> None:
@@ -396,6 +421,24 @@ async def test_add_job_manually(user: User) -> None:
     assert job["title"] == "Manual Engineer"
     assert job["company"] == "ManualCo"
     assert job["description"] == "Manual body"
+
+
+async def test_add_job_manually_shows_similar_notice(user: User) -> None:
+    _seed_job(title="Manual Engineer")
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/2")
+        user.find("Title").clear().type("Manual Engineer")
+        user.find("Company").clear().type("Acme")
+        user.find("Location").clear().type("Remote")
+        user.find("Description").clear().type("Manual body")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 2)
+    await user.should_see("Position added.")
+    await user.should_see("Looks similar to")
 
 
 async def test_add_job_manually_requires_fields(user: User) -> None:

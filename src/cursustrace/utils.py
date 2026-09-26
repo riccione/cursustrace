@@ -23,7 +23,16 @@ def _normalize(text: str | None) -> str:
     return _NON_ALNUM.sub("", text.lower())
 
 
-def generate_fingerprint(company: str | None, title: str | None, location: str | None) -> str:
-    """Hash the normalized company/title/location triple into a stable fingerprint."""
-    payload = f"{_normalize(company)}:{_normalize(title)}:{_normalize(location)}"
+def _fingerprint(*parts: str) -> str:
+    payload = ":".join(parts)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def generate_fingerprint(url: str, company: str | None, title: str | None) -> str:
+    """Hash the canonical URL with the normalized company and title into a fingerprint."""
+    return _fingerprint(clean_url(url), _normalize(company), _normalize(title))
+
+
+def role_key(company: str | None, title: str | None) -> str:
+    """Hash the normalized company and title, used to spot the same role on another link."""
+    return _fingerprint(_normalize(company), _normalize(title))

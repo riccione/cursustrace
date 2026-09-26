@@ -15,8 +15,23 @@ from cursustrace.logsetup import setup_logging
 from cursustrace.validation import required_error, validate_url
 
 STATUSES = ["unapplied", "applied", "interview", "rejected"]
+SIMILAR_NOTICE_KEY = "similar_notice"
 
 logger = logging.getLogger(__name__)
+
+
+def _similar_enabled() -> bool:
+    return db.get_setting(SIMILAR_NOTICE_KEY, "on") != "off"
+
+
+def _similar_payload(job: db.Job) -> dict[str, object]:
+    return {
+        "id": job["id"],
+        "title": job["title"],
+        "company": job["company"],
+        "url": job["job_url"],
+        "status": db.job_status(job),
+    }
 
 
 def _check_fields(
@@ -41,8 +56,7 @@ def _ingest(
     description: str | None,
     status: str = "unapplied",
 ) -> dict[str, object]:
-    duplicate, _reason = db.check_duplicate(url, title, company, location or None, description)
-    if duplicate:
+    if db.check_duplicate(url):
         logger.info("Skipped duplicate: %s", url)
         return {"status": "duplicate", "url": url}
 
@@ -53,18 +67,25 @@ def _ingest(
 
     if status != "unapplied":
         db.set_job_status(job_id, cast("db.JobStatus", status))
-    return {"status": "added", "id": job_id, "url": url}
+    result: dict[str, object] = {"status": "added", "id": job_id, "url": url}
+    if _similar_enabled():
+        matches = db.find_similar(company, title, description, exclude_id=job_id)
+        if matches:
+            result["similar"] = [_similar_payload(job) for job in matches]
+    return result
 
 
-def _ingest_item(item: object, index: int) -> tuple[str, dict[str, str] | None]:
+def _ingest_item(
+    item: object, index: int
+) -> tuple[str, dict[str, str] | None, list[dict[str, object]]]:
     """Validate, scrape if needed, and ingest one imported JSON item."""
     if not isinstance(item, dict):
-        return ("error", {"item": str(index), "error": "expected an object"})
+        return ("error", {"item": str(index), "error": "expected an object"}, [])
 
     url = str(item.get("url") or item.get("job_url") or "").strip()
     url_error = validate_url(url)
     if url_error is not None:
-        return ("error", {"item": str(index), "error": url_error})
+        return ("error", {"item": str(index), "error": url_error}, [])
 
     title = item.get("title")
     company = item.get("company")
@@ -74,28 +95,46 @@ def _ingest_item(item: object, index: int) -> tuple[str, dict[str, str] | None]:
         try:
             scraped = scraper.scrape_job(url)
         except ScrapeError as exc:
-            return ("error", {"url": url, "error": str(exc)})
+            return ("error", {"url": url, "error": str(exc)}, [])
         title = title or scraped["title"]
         company = company or scraped["company"]
         location = location or scraped["location"]
         description = description or scraped["description"]
 
     result = _ingest(url, title, company, location, description)
-    return ("skipped" if result["status"] == "duplicate" else "added", None)
+    similar = cast("list[dict[str, object]]", result.get("similar", []))
+    return ("skipped" if result["status"] == "duplicate" else "added", None, similar)
 
 
-def _report_summary(added: int, skipped: int, errors: list[dict[str, str]], as_json: bool) -> None:
+def _report_summary(
+    added: int,
+    skipped: int,
+    errors: list[dict[str, str]],
+    as_json: bool,
+    similar: list[dict[str, object]] | None = None,
+) -> None:
     """Print the batch result and exit non-zero when any item errored."""
+    similar = similar or []
     for error in errors:
         label = error.get("url", error.get("item", "?"))
         logger.error("Ingestion error (%s): %s", label, error["error"])
+    for match in similar:
+        logger.info("Added position looks similar to '%s' (%s)", match["title"], match["url"])
     if as_json:
-        click.echo(json_module.dumps({"added": added, "skipped": skipped, "errors": errors}))
+        payload: dict[str, object] = {"added": added, "skipped": skipped, "errors": errors}
+        if similar:
+            payload["similar"] = similar
+        click.echo(json_module.dumps(payload))
     else:
         for error in errors:
             label = error.get("url", error.get("item", "?"))
             click.echo(f"Error ({label}): {error['error']}", err=True)
         click.echo(f"Added {added}, skipped {skipped}, errors {len(errors)}.")
+        for match in similar:
+            click.echo(
+                f"Note: added position looks similar to '{match['title']}' ({match['url']})",
+                err=True,
+            )
     if errors:
         raise click.exceptions.Exit(1)
 
@@ -215,6 +254,13 @@ def add(
         click.echo(f"Skipped (already tracked): {clean_url}")
     else:
         click.echo(f"Added '{clean_title}' (id {result['id']}).")
+    for match in cast("list[dict[str, object]]", result.get("similar", [])):
+        logger.info("Added position looks similar to '%s' (%s)", match["title"], match["url"])
+        if not as_json:
+            click.echo(
+                f"Note: looks similar to '{match['title']}' ({match['url']})",
+                err=True,
+            )
 
 
 @cli.command()
@@ -225,6 +271,7 @@ def scan(urls: tuple[str, ...], as_json: bool) -> None:
     db.init_db()
     added = skipped = 0
     errors: list[dict[str, str]] = []
+    similar: list[dict[str, object]] = []
     for url in urls:
         try:
             job = scraper.scrape_job(url)
@@ -237,7 +284,8 @@ def scan(urls: tuple[str, ...], as_json: bool) -> None:
             click.echo(f"Skipped (already tracked): {url}", err=True)
         else:
             added += 1
-    _report_summary(added, skipped, errors, as_json)
+            similar.extend(cast("list[dict[str, object]]", result.get("similar", [])))
+    _report_summary(added, skipped, errors, as_json, similar)
 
 
 @cli.command(name="import")
@@ -255,16 +303,18 @@ def import_jobs(source: TextIO, as_json: bool) -> None:
 
     added = skipped = 0
     errors: list[dict[str, str]] = []
+    similar: list[dict[str, object]] = []
     for index, item in enumerate(items, start=1):
-        outcome, error = _ingest_item(item, index)
+        outcome, error, item_similar = _ingest_item(item, index)
         if outcome == "added":
             added += 1
+            similar.extend(item_similar)
         elif outcome == "skipped":
             skipped += 1
         elif error is not None:
             errors.append(error)
 
-    _report_summary(added, skipped, errors, as_json)
+    _report_summary(added, skipped, errors, as_json, similar)
 
 
 @cli.command(name="list")
