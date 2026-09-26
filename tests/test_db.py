@@ -491,7 +491,9 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
 
     jobs = db.get_jobs()
     assert len(jobs) == 1
-    assert jobs[0]["fingerprint"] == generate_fingerprint("Acme", "Engineer", "Remote")
+    assert jobs[0]["fingerprint"] == generate_fingerprint(
+        "https://example.com/old", "Acme", "Engineer"
+    )
     assert jobs[0]["interview"] == 0
     assert jobs[0]["rejected"] == 0
     with db.get_connection() as conn:
@@ -510,37 +512,39 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
 def test_add_job_stores_fingerprint(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
-    assert db.get_jobs()[0]["fingerprint"] == generate_fingerprint("Acme", "Engineer", "Remote")
+    assert db.get_jobs()[0]["fingerprint"] == generate_fingerprint(
+        "https://example.com/1", "Acme", "Engineer"
+    )
 
 
-def test_add_job_rejects_same_fingerprint_different_url(db_path: Path) -> None:
+def test_add_job_allows_same_role_different_url(db_path: Path) -> None:
     db.init_db()
     assert db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "desc") is not None
-    assert db.add_job("https://b.com/2", "Engineer", "Acme", "Remote", "desc") is None
-    assert len(db.get_jobs()) == 1
+    assert db.add_job("https://b.com/2", "Engineer", "Acme", "Remote", "desc") is not None
+    assert len(db.get_jobs()) == 2
 
 
 def test_check_duplicate_matches_url_ignoring_trackers(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
-    found, reason = db.check_duplicate(
-        "https://example.com/1?utm_source=x&ref=y", "Other", "OtherCo", "Berlin", "body"
-    )
-    assert found is True
-    assert reason == "Duplicate position already applied/tracked"
+    assert db.check_duplicate("https://example.com/1?utm_source=x&ref=y") is True
 
 
-def test_check_duplicate_matches_fingerprint_from_other_url(db_path: Path) -> None:
+def test_check_duplicate_ignores_same_role_on_different_url(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
-    found, reason = db.check_duplicate(
-        "https://example.com/1-variant", "Engineer", "Acme", "Remote", "body"
-    )
-    assert found is True
-    assert reason == "Duplicate position already applied/tracked"
+    assert db.check_duplicate("https://example.com/1-variant") is False
 
 
-def test_check_duplicate_matches_similar_description(db_path: Path) -> None:
+def test_find_similar_matches_same_company_and_title(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    _add("https://example.com/2")
+    matches = db.find_similar("Acme", "Engineer", "desc", exclude_id=2)
+    assert [job["job_url"] for job in matches] == ["https://example.com/1"]
+
+
+def test_find_similar_matches_similar_description(db_path: Path) -> None:
     db.init_db()
     db.add_job(
         "https://example.com/1",
@@ -549,17 +553,15 @@ def test_check_duplicate_matches_similar_description(db_path: Path) -> None:
         "Remote",
         "Build distributed systems and maintain APIs for our platform.",
     )
-    found, _ = db.check_duplicate(
-        "https://example.com/new",
-        "Platform Engineer",
+    matches = db.find_similar(
         "Acme",
-        "Berlin",
+        "Platform Engineer",
         "Build distributed systems and maintain the APIs for our platform!",
     )
-    assert found is True
+    assert [job["job_url"] for job in matches] == ["https://example.com/1"]
 
 
-def test_check_duplicate_ignores_different_company(db_path: Path) -> None:
+def test_find_similar_ignores_different_company(db_path: Path) -> None:
     db.init_db()
     db.add_job(
         "https://example.com/1",
@@ -568,24 +570,48 @@ def test_check_duplicate_ignores_different_company(db_path: Path) -> None:
         "Remote",
         "Build distributed systems and maintain APIs for our platform.",
     )
-    found, reason = db.check_duplicate(
-        "https://example.com/new",
-        "Backend Developer",
-        "Globex",
-        "Remote",
-        "Build distributed systems and maintain APIs for our platform.",
-    )
-    assert found is False
-    assert reason == ""
+    assert db.find_similar("Globex", "Backend Developer", "totally unrelated body") == []
+
+
+def test_find_similar_excludes_given_id(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    assert db.find_similar("Acme", "Engineer", "desc", exclude_id=1) == []
+
+
+def test_find_similar_honors_limit(db_path: Path) -> None:
+    db.init_db()
+    for index in range(1, 4):
+        db.add_job(f"https://example.com/{index}", "Engineer", "Acme", "Remote", "desc")
+    assert len(db.find_similar("Acme", "Engineer", "desc", limit=2)) == 2
+
+
+def test_find_similar_no_match(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    assert db.find_similar("Other", "Manager", "unrelated") == []
 
 
 def test_check_duplicate_returns_false_for_new_job(db_path: Path) -> None:
     db.init_db()
-    found, reason = db.check_duplicate(
-        "https://example.com/1", "Engineer", "Acme", "Remote", "unique body"
+    assert db.check_duplicate("https://example.com/1") is False
+
+
+def test_init_db_recomputes_fingerprints_once(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET fingerprint = 'stale'")
+        conn.execute("PRAGMA user_version = 0")
+        conn.commit()
+
+    db.init_db()
+
+    assert db.get_jobs()[0]["fingerprint"] == generate_fingerprint(
+        "https://example.com/1", "Acme", "Engineer"
     )
-    assert found is False
-    assert reason == ""
+    with db.get_connection() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == db.FINGERPRINT_SCHEME_VERSION
 
 
 def test_clear_all_jobs_on_empty_db_returns_zero(db_path: Path) -> None:
@@ -649,7 +675,7 @@ def test_update_job_updates_fields_and_fingerprint(db_path: Path) -> None:
     assert job["company"] == "NewCo"
     assert job["location"] == "Berlin"
     assert job["description"] == "new body"
-    assert job["fingerprint"] == generate_fingerprint("NewCo", "New Title", "Berlin")
+    assert job["fingerprint"] == generate_fingerprint("https://example.com/2", "NewCo", "New Title")
 
 
 def test_update_job_rejects_duplicate_url(db_path: Path) -> None:
@@ -667,11 +693,11 @@ def test_update_job_rejects_duplicate_url(db_path: Path) -> None:
     assert db.get_jobs()[0]["job_url"] == "https://example.com/2"
 
 
-def test_update_job_rejects_duplicate_fingerprint(db_path: Path) -> None:
+def test_update_job_rejects_url_used_by_another_row(db_path: Path) -> None:
     db.init_db()
     db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "body one")
     db.add_job("https://b.com/2", "Other", "OtherCo", "Berlin", "body two")
-    target = db.get_jobs()[0]
+    target = db.get_jobs()[1]
 
     assert (
         db.update_job(target["id"], "https://b.com/2", "Engineer", "Acme", "Remote", "body two")
@@ -680,23 +706,28 @@ def test_update_job_rejects_duplicate_fingerprint(db_path: Path) -> None:
     assert db.get_jobs()[0]["title"] == "Other"
 
 
+def test_update_job_allows_same_role_different_url(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "body one")
+    db.add_job("https://b.com/2", "Engineer", "Acme", "Remote", "body two")
+    target = db.get_jobs()[1]
+
+    assert (
+        db.update_job(target["id"], "https://c.com/3", "Engineer", "Acme", "Remote", "body two")
+        is True
+    )
+
+
 def test_check_duplicate_excludes_given_id(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
     job_id = db.get_jobs()[0]["id"]
 
-    found, _ = db.check_duplicate(
-        "https://example.com/1", "Engineer", "Acme", "Remote", "desc", exclude_id=job_id
-    )
-    assert found is False
-
-    found_without_exclusion, _ = db.check_duplicate(
-        "https://example.com/1", "Engineer", "Acme", "Remote", "desc"
-    )
-    assert found_without_exclusion is True
+    assert db.check_duplicate("https://example.com/1", exclude_id=job_id) is False
+    assert db.check_duplicate("https://example.com/1") is True
 
 
-def test_check_duplicate_exclude_id_ignores_own_description(db_path: Path) -> None:
+def test_find_similar_exclude_id_ignores_own_description(db_path: Path) -> None:
     db.init_db()
     db.add_job(
         "https://example.com/1",
@@ -707,15 +738,15 @@ def test_check_duplicate_exclude_id_ignores_own_description(db_path: Path) -> No
     )
     job_id = db.get_jobs()[0]["id"]
 
-    found, _ = db.check_duplicate(
-        "https://other.com/2",
-        "Engineer",
-        "Acme",
-        "Remote",
-        "Build distributed systems and maintain APIs for our platform.",
-        exclude_id=job_id,
+    assert (
+        db.find_similar(
+            "Acme",
+            "Engineer",
+            "Build distributed systems and maintain APIs for our platform.",
+            exclude_id=job_id,
+        )
+        == []
     )
-    assert found is False
 
 
 def _profile_payload(

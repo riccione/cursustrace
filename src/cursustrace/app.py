@@ -71,11 +71,28 @@ body.body--dark .q-drawer { background: #1d1d1d; }
 """
 
 DARK_MODE_KEY = "dark_mode"
+SIMILAR_NOTICE_KEY = "similar_notice"
 DARK_MODE_OPTIONS: dict[str, str] = {
     "light": "☀️ Light",
     "dark": "🌙 Dark",
     "system": "🖥️ System",
 }
+
+
+def _similar_notice_enabled() -> bool:
+    return db.get_setting(SIMILAR_NOTICE_KEY, "on") != "off"
+
+
+def _job_label(job: db.Job) -> str:
+    return f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}"
+
+
+def _similar_summary(matches: list[db.Job], shown: int = 2) -> str:
+    parts = [f"'{_job_label(job)}' ({job['job_url']})" for job in matches[:shown]]
+    text = "; ".join(parts)
+    if len(matches) > shown:
+        text += f" (+{len(matches) - shown} more)"
+    return text
 
 
 def _dark_mode_value(name: str | None) -> bool | None:
@@ -239,20 +256,15 @@ def _parse_urls(text: str | None) -> list[str]:
     return list(dict.fromkeys(line for line in lines if line))
 
 
-def _scan_url(url: str) -> tuple[str, str]:
+def _scan_url(url: str) -> tuple[str, str, list[db.Job]]:
     try:
         job = scraper.scrape_job(url)
     except ScrapeError as exc:
         logger.error("Scrape failed for %s: %s", url, exc)
-        return ("error", f"{url}: {exc}")
+        return ("error", f"{url}: {exc}", [])
 
-    duplicate, _reason = db.check_duplicate(
-        url,
-        job["title"],
-        job["company"],
-        job["location"],
-        job["description"],
-    )
+    if db.check_duplicate(url):
+        return ("duplicate", url, [])
     job_id = db.add_job(
         url,
         job["title"],
@@ -260,9 +272,10 @@ def _scan_url(url: str) -> tuple[str, str]:
         job["location"],
         job["description"],
     )
-    if duplicate or job_id is None:
-        return ("duplicate", url)
-    return ("saved", url)
+    if job_id is None:
+        return ("duplicate", url, [])
+    matches = db.find_similar(job["company"], job["title"], job["description"], exclude_id=job_id)
+    return ("saved", url, matches)
 
 
 def _scan_summary(saved: int, duplicates: int, errors: int, failures: list[str]) -> str:
@@ -290,13 +303,17 @@ async def _handle_scan(
     button.enabled = False
     saved = duplicates = errors = 0
     failures: list[str] = []
+    similar: list[list[db.Job]] = []
     try:
         for index, url in enumerate(urls, start=1):
             status_label.set_text(f"Scanning {index}/{len(urls)}: {url}")
             outcome = await io_bound(_scan_url, url)
-            kind, message = outcome if outcome is not None else ("error", f"{url}: cancelled")
+            cancelled: tuple[str, str, list[db.Job]] = ("error", f"{url}: cancelled", [])
+            kind, message, matches = outcome if outcome is not None else cancelled
             if kind == "saved":
                 saved += 1
+                if matches:
+                    similar.append(matches)
             elif kind == "duplicate":
                 duplicates += 1
             else:
@@ -314,6 +331,12 @@ async def _handle_scan(
         _scan_summary(saved, duplicates, errors, failures),
         type=notify_type,
     )
+    if similar and _similar_notice_enabled():
+        flat = [job for matches in similar for job in matches]
+        ui.notify(
+            f"Added {saved} — {len(similar)} look similar: {_similar_summary(flat)}",
+            type="info",
+        )
 
 
 def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
@@ -326,6 +349,17 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
         db.set_setting(DARK_MODE_KEY, name)
 
     theme.on_value_change(update_theme)
+
+    ui.separator()
+    ui.label("Notifications").classes("text-h6")
+    similar_toggle = ui.switch(
+        "Notify about similar positions", value=_similar_notice_enabled()
+    ).classes("w-full")
+
+    def update_similar(event: events.ValueChangeEventArguments[bool | None]) -> None:
+        db.set_setting(SIMILAR_NOTICE_KEY, "on" if event.value else "off")
+
+    similar_toggle.on_value_change(update_similar)
 
     ui.separator()
     ui.label("⚙️ Settings & Maintenance").classes("text-h6")
@@ -482,31 +516,27 @@ def _job_form_dialog(
 
 
 def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> bool:
-    duplicate, _reason = db.check_duplicate(
-        values.url, values.title, values.company, values.location or None, values.description
-    )
+    if db.check_duplicate(values.url):
+        logger.warning("Rejected duplicate manual add: %s", values.url)
+        ui.notify("A position with the same URL already exists.", type="warning")
+        return False
     job_id = db.add_job(
         values.url, values.title, values.company, values.location or None, values.description
     )
-    if duplicate or job_id is None:
+    if job_id is None:
         logger.warning("Rejected duplicate manual add: %s", values.url)
-        ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
+        ui.notify("A position with the same URL already exists.", type="warning")
         return False
     ui.notify("Position added.", type="positive")
+    matches = db.find_similar(values.company, values.title, values.description, exclude_id=job_id)
+    if matches and _similar_notice_enabled():
+        ui.notify(f"Looks similar to {_similar_summary(matches)}", type="info")
     refresh()
     return True
 
 
 def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
-    duplicate, _reason = db.check_duplicate(
-        values.url,
-        values.title,
-        values.company,
-        values.location or None,
-        values.description,
-        exclude_id=job_id,
-    )
-    if duplicate or not db.update_job(
+    if db.check_duplicate(values.url, exclude_id=job_id) or not db.update_job(
         job_id,
         values.url,
         values.title,
@@ -515,7 +545,7 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.description,
     ):
         logger.warning("Rejected duplicate update: %s", values.url)
-        ui.notify("A position with the same URL or fingerprint already exists.", type="warning")
+        ui.notify("A position with the same URL already exists.", type="warning")
         return False
     db.update_job_comments(
         job_id,

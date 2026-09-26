@@ -89,6 +89,73 @@ def test_add_skips_duplicate(runner: CliRunner) -> None:
     assert len(db.get_jobs()) == 1
 
 
+def test_add_reports_similar_position_json(runner: CliRunner) -> None:
+    runner.invoke(cli_module.cli, ADD_ARGS)
+
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "add",
+            "--url",
+            "https://b.com/2",
+            "--title",
+            "Engineer",
+            "--company",
+            "Acme",
+            "--description",
+            "Body",
+            "--json",
+        ],
+    )
+
+    payload = json.loads(result.output)
+    assert payload["status"] == "added"
+    assert payload["similar"][0]["url"] == "https://a.com/1"
+    assert len(db.get_jobs()) == 2
+
+
+def test_add_prints_similar_note(runner: CliRunner) -> None:
+    runner.invoke(cli_module.cli, ADD_ARGS)
+
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "add",
+            "--url",
+            "https://b.com/2",
+            "--title",
+            "Engineer",
+            "--company",
+            "Acme",
+            "--description",
+            "Body",
+        ],
+    )
+
+    assert "Note: looks similar to" in result.output
+    assert len(db.get_jobs()) == 2
+
+
+def test_scan_json_includes_similar(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner.invoke(cli_module.cli, ADD_ARGS)
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "Engineer",
+            "company": "Acme",
+            "location": "Remote",
+            "description": "Body",
+        },
+    )
+
+    result = runner.invoke(cli_module.cli, ["scan", "https://b.com/2", "--json"])
+
+    payload = json.loads(result.output)
+    assert payload["added"] == 1
+    assert payload["similar"][0]["url"] == "https://a.com/1"
+
+
 def test_add_rejects_invalid_url(runner: CliRunner) -> None:
     result = runner.invoke(cli_module.cli, ["add", "--url", "not-a-url", *ADD_ARGS[3:]])
 
