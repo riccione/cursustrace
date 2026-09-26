@@ -600,6 +600,14 @@ async def test_details_view_shows_full_description(user: User) -> None:
     await user.should_see("**Location:** Remote")
 
 
+async def test_detail_description_is_constrained(user: User) -> None:
+    job_id = _seed_job(description="A very long description that should not overflow.")
+    await user.open(f"/job/{job_id}")
+
+    element = user.find(marker="job-description").elements.pop()
+    assert "job-description" in element.classes
+
+
 async def test_details_view_shows_tracking_fields(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "interview")
@@ -776,6 +784,11 @@ async def test_settings_drawer_is_wide(user: User) -> None:
 def test_global_css_styles_all_textareas() -> None:
     assert ".q-textarea .q-field__native" in app.GLOBAL_CSS
     assert "line-height: 1.7" in app.GLOBAL_CSS
+
+
+def test_global_css_wraps_markdown_pre() -> None:
+    assert ".nicegui-markdown pre" in app.GLOBAL_CSS
+    assert "white-space: pre-wrap" in app.GLOBAL_CSS
 
 
 async def test_theme_toggle_persists_dark(user: User) -> None:
