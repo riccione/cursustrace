@@ -290,26 +290,32 @@ def _scan_summary(saved: int, duplicates: int, errors: int, failures: list[str])
 
 
 async def _handle_scan(
-    text: str | None,
+    urls_input: ui.textarea,
     refresh: Callable[[], None],
     status_label: ui.label,
     button: ui.button,
 ) -> None:
-    urls = _parse_urls(text)
+    urls = _parse_urls(urls_input.value)
     if not urls:
         ui.notify("Please enter at least one job URL.", type="warning")
         return
 
     button.enabled = False
     saved = duplicates = errors = 0
+    cancelled = False
     failures: list[str] = []
+    failed_urls: list[str] = []
     similar: list[list[db.Job]] = []
     try:
         for index, url in enumerate(urls, start=1):
             status_label.set_text(f"Scanning {index}/{len(urls)}: {url}")
+            matches: list[db.Job]
             outcome = await io_bound(_scan_url, url)
-            cancelled: tuple[str, str, list[db.Job]] = ("error", f"{url}: cancelled", [])
-            kind, message, matches = outcome if outcome is not None else cancelled
+            if outcome is None:
+                cancelled = True
+                kind, message, matches = "error", f"{url}: cancelled", []
+            else:
+                kind, message, matches = outcome
             if kind == "saved":
                 saved += 1
                 if matches:
@@ -319,6 +325,7 @@ async def _handle_scan(
             else:
                 errors += 1
                 failures.append(message)
+                failed_urls.append(url)
     finally:
         status_label.set_text("")
         button.enabled = True
@@ -337,6 +344,9 @@ async def _handle_scan(
             f"Added {saved} — {len(similar)} look similar: {_similar_summary(flat)}",
             type="info",
         )
+    if cancelled:
+        return
+    urls_input.value = "\n".join(failed_urls) if errors else ""
 
 
 def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
@@ -692,7 +702,7 @@ def dashboard_page() -> None:
                 lambda values: _add_job_manually(values, refresh),
             )
             scan_button.on_click(
-                lambda: _handle_scan(urls_input.value, refresh, status_label, scan_button)
+                lambda: _handle_scan(urls_input, refresh, status_label, scan_button)
             )
             ui.button("➕ Add Manually", on_click=add_dialog.open).props("flat color=primary")
 

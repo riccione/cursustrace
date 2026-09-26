@@ -202,6 +202,39 @@ async def test_scan_multiple_reports_mixed_outcomes(
     assert db.get_jobs()[0]["job_url"] == "https://example.com/jobs/2"
 
 
+def _scan_input(user: User) -> ui.textarea:
+    return user.find(ui.textarea).elements.pop()
+
+
+async def test_scan_clears_input_on_success(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await user.should_see("Saved 1")
+
+    await _wait_for(lambda: _scan_input(user).value == "")
+
+
+async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
+    def scrape(url: str) -> scraper.ScrapedJob:
+        if url.endswith("/bad"):
+            raise ScrapeError("nope")
+        return {
+            "title": "Engineer",
+            "company": "Acme",
+            "location": "Remote",
+            "description": "Body",
+        }
+
+    monkeypatch.setattr(scraper, "scrape_job", scrape)
+    await user.open("/")
+    user.find("Job URL").clear().type("https://example.com/jobs/1\nhttps://example.com/jobs/bad")
+    await asyncio.sleep(0.05)
+    user.find("Scan & Save Positions").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    await _wait_for(lambda: _scan_input(user).value == "https://example.com/jobs/bad")
+
+
 def test_parse_urls_splits_and_dedupes() -> None:
     text = "https://a.com/1\n\n  https://a.com/2  \nhttps://a.com/1\n"
 
