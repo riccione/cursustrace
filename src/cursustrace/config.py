@@ -18,10 +18,16 @@ ENV_PORT = "CURSUS_PORT"
 ENV_RELOAD = "CURSUS_RELOAD"
 ENV_SHOW = "CURSUS_SHOW"
 ENV_CV_STYLE = "CURSUS_CV_STYLE"
+ENV_LOG_LEVEL = "CURSUS_LOG_LEVEL"
+ENV_LOG_RETENTION_DAYS = "CURSUS_LOG_RETENTION_DAYS"
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
 DEFAULT_CV_STYLE = Path("styles/cv.css")
+DEFAULT_LOG_LEVEL = "error"
+DEFAULT_LOG_RETENTION_DAYS = 7
+LOG_DIR = Path("logs")
+LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
@@ -36,6 +42,8 @@ class Settings:
     reload: bool = False
     show: bool = False
     cv_style_path: Path = DEFAULT_CV_STYLE
+    log_level: str = DEFAULT_LOG_LEVEL
+    log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
 
 
 def load_settings(
@@ -45,6 +53,8 @@ def load_settings(
     reload: bool | None = None,
     show: bool | None = None,
     cv_style_path: str | Path | None = None,
+    log_level: str | None = None,
+    log_retention_days: int | str | None = None,
     config_path: str | Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Settings:
@@ -58,6 +68,8 @@ def load_settings(
         ("reload", ENV_RELOAD),
         ("show", ENV_SHOW),
         ("cv_style", ENV_CV_STYLE),
+        ("log_level", ENV_LOG_LEVEL),
+        ("log_retention_days", ENV_LOG_RETENTION_DAYS),
     ):
         raw = environ.get(env_name)
         if raw is not None:
@@ -73,6 +85,10 @@ def load_settings(
         values["show"] = show
     if cv_style_path is not None:
         values["cv_style"] = cv_style_path
+    if log_level is not None:
+        values["log_level"] = log_level
+    if log_retention_days is not None:
+        values["log_retention_days"] = log_retention_days
 
     return Settings(
         host=_as_str(values, "host", DEFAULT_HOST),
@@ -80,6 +96,10 @@ def load_settings(
         reload=_as_bool(values, "reload", False),
         show=_as_bool(values, "show", False),
         cv_style_path=Path(_as_str(values, "cv_style", str(DEFAULT_CV_STYLE))),
+        log_level=_as_log_level(values, "log_level", DEFAULT_LOG_LEVEL),
+        log_retention_days=_as_retention_days(
+            values.get("log_retention_days", DEFAULT_LOG_RETENTION_DAYS)
+        ),
     )
 
 
@@ -133,3 +153,24 @@ def _as_bool(values: dict[str, object], key: str, default: bool) -> bool:
         if lowered in _FALSE:
             return False
     raise ConfigError(f"'{key}' must be a boolean")
+
+
+def _as_log_level(values: dict[str, object], key: str, default: str) -> str:
+    if key not in values:
+        return default
+    value = values[key]
+    if isinstance(value, str) and value.strip().lower() in LOG_LEVELS:
+        return value.strip().lower()
+    raise ConfigError(f"'{key}' must be one of: {', '.join(LOG_LEVELS)}")
+
+
+def _as_retention_days(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ConfigError("'log_retention_days' must be a non-negative integer")
+    try:
+        days = int(value)
+    except ValueError as exc:
+        raise ConfigError("'log_retention_days' must be a non-negative integer") from exc
+    if days < 0:
+        raise ConfigError("'log_retention_days' must be a non-negative integer")
+    return days

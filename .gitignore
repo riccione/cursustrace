@@ -14,6 +14,9 @@ wheels/
 .ruff_cache/
 .pytest_cache/
 
+# Local logs
+logs/
+
 # Local database
 data/*.db*
 
