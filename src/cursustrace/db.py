@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     applied_comment TEXT,
     interview_comment TEXT,
     rejected_comment TEXT,
+    salary_min INTEGER,
+    salary_max INTEGER,
+    salary_currency TEXT,
+    salary_period TEXT,
+    salary_note TEXT,
     fingerprint TEXT UNIQUE
 )
 """
@@ -99,6 +104,11 @@ class Job(TypedDict):
     applied_comment: str | None
     interview_comment: str | None
     rejected_comment: str | None
+    salary_min: int | None
+    salary_max: int | None
+    salary_currency: str | None
+    salary_period: str | None
+    salary_note: str | None
     fingerprint: str | None
 
 
@@ -172,6 +182,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("applied_comment", "TEXT"),
         ("interview_comment", "TEXT"),
         ("rejected_comment", "TEXT"),
+        ("salary_min", "INTEGER"),
+        ("salary_max", "INTEGER"),
+        ("salary_currency", "TEXT"),
+        ("salary_period", "TEXT"),
+        ("salary_note", "TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
@@ -297,6 +312,12 @@ def add_job(
     company: str | None,
     location: str | None,
     description: str | None,
+    *,
+    salary_min: int | None = None,
+    salary_max: int | None = None,
+    salary_currency: str | None = None,
+    salary_period: str | None = None,
+    salary_note: str | None = None,
 ) -> int | None:
     """Insert a job listing; return the new id, or None when the URL/fingerprint exists."""
     fingerprint = generate_fingerprint(url, company, title)
@@ -305,9 +326,23 @@ def add_job(
         with closing(get_connection()) as conn:
             cursor = conn.execute(
                 "INSERT INTO jobs "
-                "(job_url, title, company, location, description, date_added, fingerprint) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (url, title, company, location, description, now, fingerprint),
+                "(job_url, title, company, location, description, date_added, fingerprint, "
+                "salary_min, salary_max, salary_currency, salary_period, salary_note) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    url,
+                    title,
+                    company,
+                    location,
+                    description,
+                    now,
+                    fingerprint,
+                    salary_min,
+                    salary_max,
+                    salary_currency,
+                    salary_period,
+                    salary_note,
+                ),
             )
             rowid = cursor.lastrowid
             conn.execute(
@@ -511,6 +546,12 @@ def update_job(
     company: str | None,
     location: str | None,
     description: str | None,
+    *,
+    salary_min: int | None = None,
+    salary_max: int | None = None,
+    salary_currency: str | None = None,
+    salary_period: str | None = None,
+    salary_note: str | None = None,
 ) -> bool:
     """Update a job's editable fields; return False when the URL or fingerprint collides."""
     fingerprint = generate_fingerprint(url, company, title)
@@ -518,8 +559,22 @@ def update_job(
         with closing(get_connection()) as conn:
             conn.execute(
                 "UPDATE jobs SET job_url = ?, title = ?, company = ?, location = ?, "
-                "description = ?, fingerprint = ? WHERE id = ?",
-                (url, title, company, location, description, fingerprint, job_id),
+                "description = ?, fingerprint = ?, salary_min = ?, salary_max = ?, "
+                "salary_currency = ?, salary_period = ?, salary_note = ? WHERE id = ?",
+                (
+                    url,
+                    title,
+                    company,
+                    location,
+                    description,
+                    fingerprint,
+                    salary_min,
+                    salary_max,
+                    salary_currency,
+                    salary_period,
+                    salary_note,
+                    job_id,
+                ),
             )
             conn.commit()
     except sqlite3.IntegrityError:

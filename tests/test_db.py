@@ -517,6 +517,42 @@ def test_add_job_stores_fingerprint(db_path: Path) -> None:
     )
 
 
+def test_add_job_stores_salary(db_path: Path) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/1",
+        "Engineer",
+        "Acme",
+        "Remote",
+        "body",
+        salary_min=60000,
+        salary_max=80000,
+        salary_currency="EUR",
+        salary_period="year",
+        salary_note="plus bonus",
+    )
+
+    job = db.get_jobs()[0]
+    assert job["salary_min"] == 60000
+    assert job["salary_max"] == 80000
+    assert job["salary_currency"] == "EUR"
+    assert job["salary_period"] == "year"
+    assert job["salary_note"] == "plus bonus"
+
+
+def test_init_db_adds_salary_columns(db_path: Path) -> None:
+    db.init_db()
+    with db.get_connection() as conn:
+        columns = set(_fingerprint_columns(conn))
+    assert {
+        "salary_min",
+        "salary_max",
+        "salary_currency",
+        "salary_period",
+        "salary_note",
+    } <= columns
+
+
 def test_add_job_allows_same_role_different_url(db_path: Path) -> None:
     db.init_db()
     assert db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "desc") is not None
@@ -676,6 +712,33 @@ def test_update_job_updates_fields_and_fingerprint(db_path: Path) -> None:
     assert job["location"] == "Berlin"
     assert job["description"] == "new body"
     assert job["fingerprint"] == generate_fingerprint("https://example.com/2", "NewCo", "New Title")
+
+
+def test_update_job_updates_salary(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    assert (
+        db.update_job(
+            job_id,
+            "https://example.com/1",
+            "Engineer",
+            "Acme",
+            "Remote",
+            "body",
+            salary_min=3000,
+            salary_currency="USD",
+            salary_period="month",
+        )
+        is True
+    )
+
+    job = db.get_jobs()[0]
+    assert job["salary_min"] == 3000
+    assert job["salary_max"] is None
+    assert job["salary_currency"] == "USD"
+    assert job["salary_period"] == "month"
 
 
 def test_update_job_rejects_duplicate_url(db_path: Path) -> None:
