@@ -8,7 +8,7 @@ from typing import TextIO, cast
 
 import click
 
-from cursustrace import db, scraper
+from cursustrace import db, salary, scraper
 from cursustrace.config import LOG_LEVELS, load_settings
 from cursustrace.errors import ConfigError, ScrapeError
 from cursustrace.logsetup import setup_logging
@@ -55,12 +55,29 @@ def _ingest(
     location: str | None,
     description: str | None,
     status: str = "unapplied",
+    *,
+    salary_min: int | None = None,
+    salary_max: int | None = None,
+    salary_currency: str | None = None,
+    salary_period: str | None = None,
+    salary_note: str | None = None,
 ) -> dict[str, object]:
     if db.check_duplicate(url):
         logger.info("Skipped duplicate: %s", url)
         return {"status": "duplicate", "url": url}
 
-    job_id = db.add_job(url, title, company, location or None, description)
+    job_id = db.add_job(
+        url,
+        title,
+        company,
+        location or None,
+        description,
+        salary_min=salary_min,
+        salary_max=salary_max,
+        salary_currency=salary_currency,
+        salary_period=salary_period,
+        salary_note=salary_note,
+    )
     if job_id is None:
         logger.info("Skipped duplicate: %s", url)
         return {"status": "duplicate", "url": url}
@@ -73,6 +90,22 @@ def _ingest(
         if matches:
             result["similar"] = [_similar_payload(job) for job in matches]
     return result
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(str(value))
+    except ValueError:
+        return None
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _ingest_item(
@@ -101,7 +134,18 @@ def _ingest_item(
         location = location or scraped["location"]
         description = description or scraped["description"]
 
-    result = _ingest(url, title, company, location, description)
+    result = _ingest(
+        url,
+        title,
+        company,
+        location,
+        description,
+        salary_min=_optional_int(item.get("salary_min")),
+        salary_max=_optional_int(item.get("salary_max")),
+        salary_currency=_optional_str(item.get("salary_currency")),
+        salary_period=_optional_str(item.get("salary_period")),
+        salary_note=_optional_str(item.get("salary_note")),
+    )
     similar = cast("list[dict[str, object]]", result.get("similar", []))
     return ("skipped" if result["status"] == "duplicate" else "added", None, similar)
 
@@ -222,6 +266,11 @@ def run_command(
 @click.option("--description", required=True)
 @click.option("--location", default=None)
 @click.option("--status", type=click.Choice(STATUSES), default="unapplied", show_default=True)
+@click.option("--salary-min", type=int, default=None, help="Minimum salary amount.")
+@click.option("--salary-max", type=int, default=None, help="Maximum salary amount.")
+@click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
+@click.option("--salary-period", type=click.Choice(salary.PERIODS), default=None)
+@click.option("--salary-note", default=None, help="Free-text salary note.")
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
 def add(
     url: str,
@@ -230,6 +279,11 @@ def add(
     description: str,
     location: str | None,
     status: str,
+    salary_min: int | None,
+    salary_max: int | None,
+    salary_currency: str | None,
+    salary_period: str | None,
+    salary_note: str | None,
     as_json: bool,
 ) -> None:
     """Add a position from explicit fields."""
@@ -237,6 +291,11 @@ def add(
     error = _check_fields(url, title, company, description)
     if error is not None:
         raise click.ClickException(error)
+    has_amount = salary_min is not None or salary_max is not None
+    if has_amount and not (salary_currency and salary_period):
+        raise click.ClickException(
+            "--salary-currency and --salary-period are required with amounts."
+        )
 
     clean_url = url.strip()
     clean_title = title.strip()
@@ -247,6 +306,11 @@ def add(
         location,
         description.strip(),
         status,
+        salary_min=salary_min if has_amount else None,
+        salary_max=salary_max if has_amount else None,
+        salary_currency=salary_currency if has_amount else None,
+        salary_period=salary_period if has_amount else None,
+        salary_note=salary_note,
     )
     if as_json:
         click.echo(json_module.dumps(result))
@@ -320,11 +384,24 @@ def import_jobs(source: TextIO, as_json: bool) -> None:
 @cli.command(name="list")
 @click.option("--status", type=click.Choice(STATUSES), default=None)
 @click.option("--search", default=None, help="Fuzzy company search.")
+@click.option("--min-salary", type=int, default=None, help="Minimum annualized salary.")
+@click.option("--max-salary", type=int, default=None, help="Maximum annualized salary.")
+@click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON array.")
-def list_jobs(status: str | None, search: str | None, as_json: bool) -> None:
+def list_jobs(
+    status: str | None,
+    search: str | None,
+    min_salary: int | None,
+    max_salary: int | None,
+    salary_currency: str | None,
+    as_json: bool,
+) -> None:
     """List stored positions."""
     db.init_db()
     jobs = db.search_jobs(search or "", status=cast("db.JobStatus | None", status))
+    jobs = salary.filter_by_salary(
+        jobs, min_annual=min_salary, max_annual=max_salary, currency=salary_currency
+    )
     if as_json:
         click.echo(json_module.dumps([dict(job) for job in jobs]))
         return
@@ -340,17 +417,28 @@ def list_jobs(status: str | None, search: str | None, as_json: bool) -> None:
 @cli.command()
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON object.")
 def stats(as_json: bool) -> None:
-    """Show position counts per pipeline stage."""
+    """Show position counts per pipeline stage and salary statistics."""
     db.init_db()
     counts = db.job_counts()
+    summary = salary.salary_summary(db.get_jobs())
     if as_json:
-        click.echo(json_module.dumps(counts))
+        payload: dict[str, object] = dict(counts)
+        if summary:
+            payload["salary"] = summary
+        click.echo(json_module.dumps(payload))
         return
     click.echo(f"Total: {counts['total']}")
     click.echo(f"Unapplied: {counts['unapplied']}")
     click.echo(f"Applied: {counts['applied']}")
     click.echo(f"Interview: {counts['interview']}")
     click.echo(f"Rejected: {counts['rejected']}")
+    if not summary:
+        return
+    for currency, entry in summary.items():
+        click.echo(
+            f"Salary ({currency}, annualized): {entry['count']} positions, "
+            f"min {entry['minimum']:,}, median {entry['median']:,}, max {entry['maximum']:,}"
+        )
 
 
 @cli.command()
