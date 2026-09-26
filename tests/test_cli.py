@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from cursustrace import cli as cli_module
-from cursustrace import config, db, scraper
+from cursustrace import config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
 
 ADD_ARGS = [
@@ -30,6 +30,8 @@ _CURSUS_ENV = (
     "CURSUS_RELOAD",
     "CURSUS_SHOW",
     "CURSUS_CV_STYLE",
+    "CURSUS_LOG_LEVEL",
+    "CURSUS_LOG_RETENTION_DAYS",
 )
 
 
@@ -37,6 +39,7 @@ _CURSUS_ENV = (
 def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "cursustrace.toml")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     for name in _CURSUS_ENV:
         monkeypatch.delenv(name, raising=False)
     return CliRunner()
@@ -325,6 +328,43 @@ def test_run_command_help(runner: CliRunner) -> None:
     assert "--host" in result.output
     assert "--port" in result.output
     assert "--config" in result.output
+
+
+def test_run_command_inherits_group_log_level(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[config.Settings] = []
+    monkeypatch.setattr("cursustrace.app.run", captured.append)
+
+    result = runner.invoke(cli_module.cli, ["--log-level", "debug", "run"])
+
+    assert result.exit_code == 0
+    assert captured[0].log_level == "debug"
+
+
+def test_bare_invocation_uses_group_log_level(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[config.Settings] = []
+    monkeypatch.setattr("cursustrace.app.run", captured.append)
+
+    result = runner.invoke(cli_module.cli, ["--log-level", "info"])
+
+    assert result.exit_code == 0
+    assert captured[0].log_level == "info"
+
+
+def test_cli_writes_daily_log_file(runner: CliRunner, tmp_path: Path) -> None:
+    result = runner.invoke(cli_module.cli, ["list"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "logs" / f"cursustrace-{logsetup._today().isoformat()}.log").exists()
+
+
+def test_invalid_log_level_exits_2(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["--log-level", "verbose", "list"])
+
+    assert result.exit_code == 2
 
 
 def test_clear_requires_confirmation(runner: CliRunner) -> None:

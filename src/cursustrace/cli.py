@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json as json_module
+import logging
 from typing import TextIO, cast
 
 import click
 
 from cursustrace import db, scraper
-from cursustrace.config import load_settings
+from cursustrace.config import LOG_LEVELS, load_settings
 from cursustrace.errors import ConfigError, ScrapeError
+from cursustrace.logsetup import setup_logging
 from cursustrace.validation import required_error, validate_url
 
 STATUSES = ["unapplied", "applied", "interview", "rejected"]
+
+logger = logging.getLogger(__name__)
 
 
 def _check_fields(
@@ -39,10 +43,12 @@ def _ingest(
 ) -> dict[str, object]:
     duplicate, _reason = db.check_duplicate(url, title, company, location or None, description)
     if duplicate:
+        logger.info("Skipped duplicate: %s", url)
         return {"status": "duplicate", "url": url}
 
     job_id = db.add_job(url, title, company, location or None, description)
     if job_id is None:
+        logger.info("Skipped duplicate: %s", url)
         return {"status": "duplicate", "url": url}
 
     if status != "unapplied":
@@ -80,6 +86,9 @@ def _ingest_item(item: object, index: int) -> tuple[str, dict[str, str] | None]:
 
 def _report_summary(added: int, skipped: int, errors: list[dict[str, str]], as_json: bool) -> None:
     """Print the batch result and exit non-zero when any item errored."""
+    for error in errors:
+        label = error.get("url", error.get("item", "?"))
+        logger.error("Ingestion error (%s): %s", label, error["error"])
     if as_json:
         click.echo(json_module.dumps({"added": added, "skipped": skipped, "errors": errors}))
     else:
@@ -100,13 +109,29 @@ def _report_summary(added: int, skipped: int, errors: list[dict[str, str]], as_j
     prog_name="cursustrace",
     message="cursustrace %(version)s",
 )
+@click.option(
+    "--log-level",
+    type=click.Choice(LOG_LEVELS, case_sensitive=False),
+    default=None,
+    help="Logging verbosity (default from config/env).",
+)
 @click.pass_context
-def cli(ctx: click.Context) -> None:
+def cli(ctx: click.Context, log_level: str | None) -> None:
     """CursusTrace — job application tracker."""
+    try:
+        settings = load_settings(log_level=log_level)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+    setup_logging(
+        settings.log_level,
+        retention_days=settings.log_retention_days,
+        console=False,
+    )
+    ctx.obj = settings.log_level
     if ctx.invoked_subcommand is None:
         from cursustrace.app import run
 
-        run()
+        run(settings)
 
 
 @cli.command()
@@ -122,7 +147,9 @@ def cli(ctx: click.Context) -> None:
     help="Path to the CV stylesheet.",
 )
 @click.option("--config", "config_path", type=click.Path(dir_okay=False), default=None)
+@click.pass_context
 def run_command(
+    ctx: click.Context,
     host: str | None,
     port: int | None,
     reload: bool | None,
@@ -138,6 +165,7 @@ def run_command(
             reload=reload,
             show=show,
             cv_style_path=cv_style,
+            log_level=ctx.obj,
             config_path=config_path,
         )
     except ConfigError as exc:
