@@ -143,6 +143,10 @@ echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
 # list stored positions
 uv run cursustrace list --status applied --json
 
+# sort (newest, oldest, company, company_desc, status) and paginate
+uv run cursustrace list --sort company --limit 50 --json
+uv run cursustrace list --sort status --limit 50 --offset 50 --json
+
 # export positions as import-compatible JSON (stdout by default) or CSV
 uv run cursustrace export
 uv run cursustrace export jobs.json

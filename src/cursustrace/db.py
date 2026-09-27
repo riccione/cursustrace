@@ -136,6 +136,39 @@ def job_status(job: Job) -> JobStatus:
     return "unapplied"
 
 
+JobSort = Literal["newest", "oldest", "company", "company_desc", "status"]
+
+STATUS_ORDER: dict[JobStatus, int] = {
+    "unapplied": 0,
+    "applied": 1,
+    "interview": 2,
+    "rejected": 3,
+}
+
+
+def sort_jobs(jobs: list[Job], order: JobSort = "newest") -> list[Job]:
+    """Return a new list ordered by ``order``, keeping ``id`` descending on ties.
+
+    ``newest``/``oldest`` sort by ``date_added`` (an ISO-like timestamp, so
+    lexicographic order is chronological); ``company`` is case-insensitive;
+    ``status`` groups by pipeline stage, newest first inside each stage.
+    """
+    if order in ("newest", "oldest"):
+        return sorted(
+            jobs,
+            key=lambda job: (job["date_added"], job["id"]),
+            reverse=order == "newest",
+        )
+    ordered = sorted(jobs, key=lambda job: job["id"], reverse=True)
+    if order == "status":
+        return sorted(ordered, key=lambda job: STATUS_ORDER[job_status(job)])
+    return sorted(
+        ordered,
+        key=lambda job: (job["company"] or "").casefold(),
+        reverse=order == "company_desc",
+    )
+
+
 class Profile(TypedDict):
     """The single user profile row, including the raw Markdown CV."""
 
