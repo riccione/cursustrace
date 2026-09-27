@@ -398,6 +398,82 @@ def test_list_filters_by_salary(runner: CliRunner) -> None:
     assert jobs[0]["salary_min"] == 100000
 
 
+def test_list_default_is_unsorted_and_unpaginated(runner: CliRunner) -> None:
+    db.init_db()
+    for i in range(3):
+        db.add_job(f"https://a.com/{i}", f"Job {i}", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["list", "--json"])
+
+    jobs = json.loads(result.output)
+    assert [job["title"] for job in jobs] == ["Job 2", "Job 1", "Job 0"]
+
+
+def test_list_sort_company(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Zeta", "Remote", "Body")
+    db.add_job("https://a.com/2", "Two", "Alpha", "Remote", "Body")
+    db.add_job("https://a.com/3", "Three", "Mid", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["list", "--sort", "company", "--json"])
+
+    jobs = json.loads(result.output)
+    assert [job["company"] for job in jobs] == ["Alpha", "Mid", "Zeta"]
+
+
+def test_list_sort_status_groups_pipeline(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/3", "Three", "Acme", "Remote", "Body")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "rejected")
+    db.set_job_status(jobs[1]["id"], "applied")
+
+    result = runner.invoke(cli_module.cli, ["list", "--sort", "status", "--json"])
+
+    parsed = json.loads(result.output)
+    assert [job["title"] for job in parsed] == ["One", "Two", "Three"]
+
+
+def test_list_limit_and_offset(runner: CliRunner) -> None:
+    db.init_db()
+    for i in range(3):
+        db.add_job(f"https://a.com/{i}", f"Job {i}", "Acme", "Remote", "Body")
+
+    page_one = runner.invoke(cli_module.cli, ["list", "--limit", "2", "--json"])
+    page_two = runner.invoke(cli_module.cli, ["list", "--limit", "2", "--offset", "2", "--json"])
+    beyond = runner.invoke(cli_module.cli, ["list", "--offset", "99", "--json"])
+
+    assert [job["title"] for job in json.loads(page_one.output)] == ["Job 2", "Job 1"]
+    assert [job["title"] for job in json.loads(page_two.output)] == ["Job 0"]
+    assert json.loads(beyond.output) == []
+
+
+def test_list_sort_applies_before_limit(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Zeta", "Remote", "Body")
+    db.add_job("https://a.com/2", "Two", "Alpha", "Remote", "Body")
+    db.add_job("https://a.com/3", "Three", "Mid", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["list", "--sort", "company", "--limit", "2", "--json"])
+
+    jobs = json.loads(result.output)
+    assert [job["company"] for job in jobs] == ["Alpha", "Mid"]
+
+
+def test_export_is_never_paginated(runner: CliRunner) -> None:
+    db.init_db()
+    for i in range(3):
+        db.add_job(f"https://a.com/{i}", f"Job {i}", "Acme", "Remote", "Body")
+
+    listed = runner.invoke(cli_module.cli, ["list", "--limit", "1", "--json"])
+    exported = runner.invoke(cli_module.cli, ["export"])
+
+    assert len(json.loads(listed.output)) == 1
+    assert len(json.loads(exported.output)) == 3
+
+
 def test_stats_includes_salary(runner: CliRunner) -> None:
     db.init_db()
     db.add_job(

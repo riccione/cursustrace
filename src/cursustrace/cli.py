@@ -17,6 +17,7 @@ from cursustrace.logsetup import setup_logging
 from cursustrace.validation import required_error, validate_url
 
 STATUSES = ["unapplied", "applied", "interview", "rejected"]
+SORT_ORDERS = ["newest", "oldest", "company", "company_desc", "status"]
 SIMILAR_NOTICE_KEY = "similar_notice"
 
 logger = logging.getLogger(__name__)
@@ -424,6 +425,25 @@ def _filtered_jobs(
 @click.option("--min-salary", type=int, default=None, help="Minimum annualized salary.")
 @click.option("--max-salary", type=int, default=None, help="Maximum annualized salary.")
 @click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
+@click.option(
+    "--sort",
+    "sort_order",
+    type=click.Choice(SORT_ORDERS),
+    default=None,
+    help="Order the output (default: insertion order, newest first).",
+)
+@click.option(
+    "--limit",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Print at most this many positions, after sorting.",
+)
+@click.option(
+    "--offset",
+    type=click.IntRange(min=0),
+    default=0,
+    help="Skip this many positions after sorting.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON array.")
 def list_jobs(
     status: str | None,
@@ -431,11 +451,20 @@ def list_jobs(
     min_salary: int | None,
     max_salary: int | None,
     salary_currency: str | None,
+    sort_order: str | None,
+    limit: int | None,
+    offset: int,
     as_json: bool,
 ) -> None:
     """List stored positions."""
     db.init_db()
     jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency)
+    if sort_order is not None:
+        jobs = db.sort_jobs(jobs, cast("db.JobSort", sort_order))
+    if offset:
+        jobs = jobs[offset:]
+    if limit is not None:
+        jobs = jobs[:limit]
     if as_json:
         click.echo(json_module.dumps([dict(job) for job in jobs]))
         return
