@@ -193,6 +193,116 @@ def test_search_jobs_orders_by_score(db_path: Path) -> None:
     assert [job["company"] for job in matches] == ["Adapty", "Ada"]
 
 
+def _job(
+    job_id: int,
+    *,
+    company: str | None = "Acme",
+    date_added: str = "2026-01-01 00:00:00",
+    applied: bool = False,
+    interview: bool = False,
+    rejected: bool = False,
+) -> db.Job:
+    return {
+        "id": job_id,
+        "job_url": f"https://example.com/{job_id}",
+        "title": "Engineer",
+        "company": company,
+        "location": "Remote",
+        "description": "desc",
+        "applied": int(applied),
+        "interview": int(interview),
+        "rejected": int(rejected),
+        "date_added": date_added,
+        "date_applied": None,
+        "date_interview": None,
+        "date_rejected": None,
+        "applied_comment": None,
+        "interview_comment": None,
+        "rejected_comment": None,
+        "salary_min": None,
+        "salary_max": None,
+        "salary_currency": None,
+        "salary_period": None,
+        "salary_note": None,
+        "fingerprint": None,
+    }
+
+
+def test_sort_jobs_newest_and_oldest() -> None:
+    jobs = [
+        _job(1, date_added="2026-01-03 10:00:00"),
+        _job(2, date_added="2026-01-01 10:00:00"),
+        _job(3, date_added="2026-01-02 10:00:00"),
+    ]
+
+    assert [job["id"] for job in db.sort_jobs(jobs)] == [1, 3, 2]
+    assert [job["id"] for job in db.sort_jobs(jobs, "newest")] == [1, 3, 2]
+    assert [job["id"] for job in db.sort_jobs(jobs, "oldest")] == [2, 3, 1]
+
+
+def test_sort_jobs_date_ties_break_by_id() -> None:
+    same = "2026-01-01 10:00:00"
+    jobs = [_job(1, date_added=same), _job(2, date_added=same), _job(3, date_added=same)]
+
+    assert [job["id"] for job in db.sort_jobs(jobs, "newest")] == [3, 2, 1]
+    assert [job["id"] for job in db.sort_jobs(jobs, "oldest")] == [1, 2, 3]
+
+
+def test_sort_jobs_company_is_case_insensitive() -> None:
+    jobs = [_job(1, company="beta"), _job(2, company="Alpha"), _job(3, company="acme")]
+
+    assert [job["company"] for job in db.sort_jobs(jobs, "company")] == [
+        "acme",
+        "Alpha",
+        "beta",
+    ]
+    assert [job["company"] for job in db.sort_jobs(jobs, "company_desc")] == [
+        "beta",
+        "Alpha",
+        "acme",
+    ]
+
+
+def test_sort_jobs_company_ties_keep_id_descending() -> None:
+    jobs = [_job(1), _job(2), _job(3)]
+
+    assert [job["id"] for job in db.sort_jobs(jobs, "company")] == [3, 2, 1]
+    assert [job["id"] for job in db.sort_jobs(jobs, "company_desc")] == [3, 2, 1]
+
+
+def test_sort_jobs_company_handles_missing_company() -> None:
+    jobs = [_job(1, company="Acme"), _job(2, company=None)]
+
+    assert [job["id"] for job in db.sort_jobs(jobs, "company")] == [2, 1]
+
+
+def test_sort_jobs_status_uses_pipeline_order() -> None:
+    jobs = [
+        _job(1, rejected=True),
+        _job(2, applied=True),
+        _job(3),
+        _job(4, interview=True),
+        _job(5, applied=True),
+    ]
+
+    statuses = [db.job_status(job) for job in db.sort_jobs(jobs, "status")]
+    assert statuses == ["unapplied", "applied", "applied", "interview", "rejected"]
+    applied_ids = [
+        job["id"] for job in db.sort_jobs(jobs, "status") if db.job_status(job) == "applied"
+    ]
+    assert applied_ids == [5, 2]
+
+
+def test_sort_jobs_returns_new_list() -> None:
+    jobs = [_job(1, date_added="2026-01-02 10:00:00"), _job(2, date_added="2026-01-01 10:00:00")]
+    original = list(jobs)
+
+    result = db.sort_jobs(jobs, "oldest")
+
+    assert jobs == original
+    assert result is not jobs
+
+
 def test_set_job_status_is_mutually_exclusive(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
