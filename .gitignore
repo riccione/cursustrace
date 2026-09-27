@@ -25,3 +25,6 @@ data/cv.md
 
 # Import files kept out of the repo
 data/*.csv
+
+# Database backups (contain personal data)
+backups/
