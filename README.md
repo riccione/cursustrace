@@ -5,6 +5,8 @@
 Track job applications by scanning a listing URL and saving its details to a local
 SQLite database.
 
+Curated job board lists by region live in [`job-sources/`](job-sources/).
+
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/). Install dependencies:
