@@ -142,3 +142,64 @@ def test_invalid_log_level_raises(config_file: Path, value: str) -> None:
 def test_invalid_log_retention_raises(config_file: Path, value: str) -> None:
     with pytest.raises(ConfigError, match="log_retention_days"):
         config.load_settings(env={"CURSUS_LOG_RETENTION_DAYS": value})
+
+
+def test_backup_defaults(config_file: Path) -> None:
+    settings = config.load_settings(env={})
+
+    assert settings.backup_dir == Path("backups")
+    assert settings.backup_keep == 14
+    assert settings.backup_on_start is True
+
+
+def test_backup_file_overrides_defaults(config_file: Path) -> None:
+    config_file.write_text(
+        '[cursustrace]\nbackup_dir = "/srv/backups"\nbackup_keep = 3\nbackup_on_start = false\n',
+        encoding="utf-8",
+    )
+
+    settings = config.load_settings(env={})
+
+    assert settings.backup_dir == Path("/srv/backups")
+    assert settings.backup_keep == 3
+    assert settings.backup_on_start is False
+
+
+def test_backup_env_and_flags_override(config_file: Path, tmp_path: Path) -> None:
+    config_file.write_text('[cursustrace]\nbackup_dir = "/srv/backups"\n', encoding="utf-8")
+
+    settings = config.load_settings(
+        backup_dir=tmp_path / "flagged",
+        backup_keep=5,
+        backup_on_start=True,
+        env={
+            "CURSUS_BACKUP_DIR": "/srv/env",
+            "CURSUS_BACKUP_KEEP": "9",
+            "CURSUS_BACKUP_ON_START": "0",
+        },
+    )
+
+    assert settings.backup_dir == tmp_path / "flagged"
+    assert settings.backup_keep == 5
+    assert settings.backup_on_start is True
+
+
+def test_backup_env_only(config_file: Path, tmp_path: Path) -> None:
+    settings = config.load_settings(
+        env={"CURSUS_BACKUP_DIR": str(tmp_path / "env"), "CURSUS_BACKUP_KEEP": "2"}
+    )
+
+    assert settings.backup_dir == tmp_path / "env"
+    assert settings.backup_keep == 2
+
+
+def test_empty_backup_dir_falls_back_to_default(config_file: Path) -> None:
+    config_file.write_text('[cursustrace]\nbackup_dir = ""\n', encoding="utf-8")
+
+    assert config.load_settings(env={}).backup_dir == Path("backups")
+
+
+@pytest.mark.parametrize("value", ["-1", "abc"])
+def test_invalid_backup_keep_raises(config_file: Path, value: str) -> None:
+    with pytest.raises(ConfigError, match="backup_keep"):
+        config.load_settings(env={"CURSUS_BACKUP_KEEP": value})

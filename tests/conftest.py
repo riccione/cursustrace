@@ -38,6 +38,9 @@ async def user(
 ) -> AsyncGenerator[User, None]:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(config, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
+    for name in ("CURSUS_BACKUP_DIR", "CURSUS_BACKUP_KEEP", "CURSUS_BACKUP_ON_START"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(scraper, "scrape_job", fake_scrape)
     async with user_simulation(main_file=APP_PATH) as simulated_user:
         yield simulated_user

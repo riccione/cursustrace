@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json as json_module
 import logging
+import sqlite3
+from pathlib import Path
 from typing import TextIO, cast
 
 import click
 
-from cursustrace import db, salary, scraper
+from cursustrace import backup, db, exporters, salary, scraper
 from cursustrace.config import LOG_LEVELS, load_settings
 from cursustrace.errors import ConfigError, ScrapeError
 from cursustrace.logsetup import setup_logging
@@ -124,6 +126,9 @@ def _ingest_item(
     company = item.get("company")
     location = item.get("location")
     description = item.get("description")
+    status = _optional_str(item.get("status")) or "unapplied"
+    if status not in STATUSES:
+        return ("error", {"item": str(index), "error": f"invalid status: {status}"}, [])
     if not (title and company and description):
         try:
             scraped = scraper.scrape_job(url)
@@ -140,6 +145,7 @@ def _ingest_item(
         company,
         location,
         description,
+        status,
         salary_min=_optional_int(item.get("salary_min")),
         salary_max=_optional_int(item.get("salary_max")),
         salary_currency=_optional_str(item.get("salary_currency")),
@@ -147,7 +153,24 @@ def _ingest_item(
         salary_note=_optional_str(item.get("salary_note")),
     )
     similar = cast("list[dict[str, object]]", result.get("similar", []))
+    if result["status"] == "added":
+        _restore_comments(item, cast("int", result["id"]))
     return ("skipped" if result["status"] == "duplicate" else "added", None, similar)
+
+
+def _restore_comments(item: dict[object, object], job_id: int) -> None:
+    """Copy stage comments back onto a freshly imported position when present."""
+    comments = {
+        stage: _optional_str(item.get(f"{stage}_comment"))
+        for stage in ("applied", "interview", "rejected")
+    }
+    if any(comment is not None for comment in comments.values()):
+        db.update_job_comments(
+            job_id,
+            comments["applied"] or "",
+            comments["interview"] or "",
+            comments["rejected"] or "",
+        )
 
 
 def _report_summary(
@@ -381,6 +404,20 @@ def import_jobs(source: TextIO, as_json: bool) -> None:
     _report_summary(added, skipped, errors, as_json, similar)
 
 
+def _filtered_jobs(
+    status: str | None,
+    search: str | None,
+    min_salary: int | None,
+    max_salary: int | None,
+    salary_currency: str | None,
+) -> list[db.Job]:
+    """Apply the shared status/company/salary filters used by list and export."""
+    jobs = db.search_jobs(search or "", status=cast("db.JobStatus | None", status))
+    return salary.filter_by_salary(
+        jobs, min_annual=min_salary, max_annual=max_salary, currency=salary_currency
+    )
+
+
 @cli.command(name="list")
 @click.option("--status", type=click.Choice(STATUSES), default=None)
 @click.option("--search", default=None, help="Fuzzy company search.")
@@ -398,10 +435,7 @@ def list_jobs(
 ) -> None:
     """List stored positions."""
     db.init_db()
-    jobs = db.search_jobs(search or "", status=cast("db.JobStatus | None", status))
-    jobs = salary.filter_by_salary(
-        jobs, min_annual=min_salary, max_annual=max_salary, currency=salary_currency
-    )
+    jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency)
     if as_json:
         click.echo(json_module.dumps([dict(job) for job in jobs]))
         return
@@ -412,6 +446,41 @@ def list_jobs(
         title = job["title"] or "Untitled position"
         company = job["company"] or "Unknown company"
         click.echo(f"{job['id']}. {title} — {company} [{db.job_status(job)}]")
+
+
+@cli.command()
+@click.argument("output", type=str, default="-")
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["json", "csv"]),
+    default=None,
+    help="Output format (default: from the file extension, else json).",
+)
+@click.option("--status", type=click.Choice(STATUSES), default=None)
+@click.option("--search", default=None, help="Fuzzy company search.")
+@click.option("--min-salary", type=int, default=None, help="Minimum annualized salary.")
+@click.option("--max-salary", type=int, default=None, help="Maximum annualized salary.")
+@click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
+def export(
+    output: str,
+    fmt: str | None,
+    status: str | None,
+    search: str | None,
+    min_salary: int | None,
+    max_salary: int | None,
+    salary_currency: str | None,
+) -> None:
+    """Export positions to JSON (import-compatible) or CSV, on stdout by default."""
+    db.init_db()
+    jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency)
+    chosen = fmt or ("csv" if output.lower().endswith(".csv") else "json")
+    payload = exporters.render_csv(jobs) if chosen == "csv" else exporters.render_json(jobs)
+    if output == "-":
+        click.echo(payload)
+        return
+    Path(output).write_text(payload + "\n", encoding="utf-8")
+    click.echo(f"Exported {len(jobs)} position(s) to {output}.")
 
 
 @cli.command()
@@ -439,6 +508,45 @@ def stats(as_json: bool) -> None:
             f"Salary ({currency}, annualized): {entry['count']} positions, "
             f"min {entry['minimum']:,}, median {entry['median']:,}, max {entry['maximum']:,}"
         )
+
+
+@cli.command()
+@click.option(
+    "--dir",
+    "target_dir",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Backup directory (default from config/env).",
+)
+@click.option("--keep", type=int, default=None, help="Backups to retain (0 = keep all).")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
+def backup_command(target_dir: str | None, keep: int | None, as_json: bool) -> None:
+    """Write a consistent copy of the database and prune older backups."""
+    db.init_db()
+    try:
+        settings = load_settings(backup_dir=target_dir, backup_keep=keep)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        result = backup.backup_database(settings.backup_dir, keep=settings.backup_keep)
+    except (OSError, sqlite3.Error) as exc:
+        raise click.ClickException(f"Backup failed: {exc}") from exc
+    if result is None:
+        raise click.ClickException("No database to back up yet.")
+
+    payload: dict[str, object] = {
+        "status": "ok",
+        "path": str(result.path),
+        "positions": db.job_counts()["total"],
+        "pruned": list(result.pruned),
+    }
+    if as_json:
+        click.echo(json_module.dumps(payload))
+        return
+    click.echo(f"Backed up {payload['positions']} position(s) to {result.path}.")
+    if result.pruned:
+        click.echo(f"Pruned {len(result.pruned)} older backup(s).")
 
 
 @cli.command()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from typing import Literal, TypedDict
 from nicegui import app, events, ui
 from nicegui.run import io_bound
 
-from cursustrace import config, db, salary, scraper
+from cursustrace import backup, config, db, salary, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.logsetup import setup_logging
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
@@ -934,6 +935,17 @@ def job_detail_page(job_id: int) -> None:
         ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
+def _backup_on_startup(settings: config.Settings) -> None:
+    """Write a startup copy of the database; failures are logged, never fatal."""
+    try:
+        result = backup.backup_database(settings.backup_dir, keep=settings.backup_keep)
+    except (OSError, sqlite3.Error):
+        logger.exception("Database backup failed")
+        return
+    if result is not None:
+        logger.info("Database backup written to %s", result.path)
+
+
 def run(settings: config.Settings | None = None) -> None:
     """CLI entrypoint that launches the CursusTrace NiceGUI dashboard."""
     global _settings
@@ -944,6 +956,8 @@ def run(settings: config.Settings | None = None) -> None:
     except Exception:
         logger.exception("Failed to initialize the database")
         raise
+    if _settings.backup_on_start:
+        _backup_on_startup(_settings)
     ui.add_css(GLOBAL_CSS, shared=True)
     shutdown_signal: int | None = None
 

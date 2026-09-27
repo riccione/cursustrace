@@ -45,10 +45,14 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   cv_style = "styles/cv.css"
   log_level = "error"
   log_retention_days = 7
+  backup_dir = "backups"
+  backup_keep = 14
+  backup_on_start = true
   ```
 
 - **Environment variables:** `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
-  `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`.
+  `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`,
+  `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`.
 - **`cursustrace run` flags:** `--host`, `--port`, `--reload/--no-reload`,
   `--show/--no-show`, `--css PATH`, `--config PATH`.
 - **Group flag (all commands):** `--log-level`, e.g.
@@ -64,6 +68,29 @@ Errors are written to a daily file under `logs/cursustrace-YYYY-MM-DD.log`
 (one of `debug`, `info`, `warning`, `error`, `critical`) via `cursustrace.toml`,
 `CURSUS_LOG_LEVEL`, or the group-level `--log-level` flag. Files older than
 `log_retention_days` (default `7`, `0` disables pruning) are deleted on startup.
+
+### Backups
+
+Every dashboard start writes a consistent copy of the SQLite database into
+`backup_dir` (default `backups/`) as `cursustrace-YYYYMMDD-HHMMSS.db`, using
+SQLite's online backup API. Only the newest `backup_keep` copies are retained
+(default `14`, `0` keeps everything), and only files matching our
+`cursustrace-*.db` pattern are ever pruned. Set `backup_on_start = false` (or
+`CURSUS_BACKUP_ON_START=0`) to skip the startup copy; a failed backup is logged
+and never stops the app.
+
+Use `cursustrace backup` for an on-demand copy — it honours the same settings,
+with `--dir` and `--keep` as overrides. Schedule it from cron if you also run
+the app as a service:
+
+```sh
+# every day at 03:15
+15 3 * * * cd /path/to/cursustrace && uv run cursustrace backup --json
+```
+
+**Restore:** stop the app, copy the chosen backup over `data/cursustrace.db`,
+delete leftover `data/cursustrace.db-wal` / `data/cursustrace.db-shm` files,
+then start the app again.
 
 Paste one or more job listing URLs (one per line), click **Scan & Save
 Positions**, then use the **Unapplied**, **Applied**, **Interview**, and
@@ -114,8 +141,18 @@ echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
 # list stored positions
 uv run cursustrace list --status applied --json
 
+# export positions as import-compatible JSON (stdout by default) or CSV
+uv run cursustrace export
+uv run cursustrace export jobs.json
+uv run cursustrace export --format csv --status applied
+uv run cursustrace export --min-salary 60000 --salary-currency EUR
+
 # position counts per pipeline stage
 uv run cursustrace stats --json
+
+# write a database backup (retention settings are documented under Backups)
+uv run cursustrace backup --json
+uv run cursustrace backup --dir /mnt/backup --keep 30
 
 # show the version
 uv run cursustrace -V
@@ -126,7 +163,11 @@ uv run cursustrace clear --all --yes
 ```
 
 Each JSON item may be structured (`url`, `title`, `company`, `location`,
-`description`) or URL-only (the URL is scraped to fill the missing fields).
+`description`, `status`, `salary_*`) or URL-only (the URL is scraped to fill the
+missing fields). `export` writes that same shape, so
+`cursustrace export jobs.json` can be edited and fed back into `import`: status
+and stage comments survive the round trip, timestamps are re-stamped on import.
+The CSV variant is a flat spreadsheet view — `import` reads JSON only.
 
 ## Development
 

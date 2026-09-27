@@ -1002,7 +1002,9 @@ def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     captured: dict[str, object] = {}
     monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
 
-    settings = config.Settings(host="127.0.0.1", port=9002, reload=True, show=True)
+    settings = config.Settings(
+        host="127.0.0.1", port=9002, reload=True, show=True, backup_on_start=False
+    )
     try:
         app.run(settings)
         assert captured["host"] == "127.0.0.1"
@@ -1027,7 +1029,7 @@ def test_run_configures_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr("cursustrace.app.setup_logging", fake_setup)
 
-    settings = config.Settings(log_level="debug", log_retention_days=3)
+    settings = config.Settings(log_level="debug", log_retention_days=3, backup_on_start=False)
     try:
         app.run(settings)
         assert captured == {"level": "debug", "retention": 3}
@@ -1041,5 +1043,51 @@ def test_cv_style_path_uses_settings() -> None:
         assert app._cv_style_path() == Path("custom.css")
         app._settings = None
         assert app._cv_style_path() is None
+    finally:
+        app._settings = None
+
+
+def _prepare_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
+    return captured
+
+
+def test_run_writes_startup_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_run(tmp_path, monkeypatch)
+    dest = tmp_path / "backups"
+    settings = config.Settings(backup_dir=dest, backup_keep=5)
+    try:
+        app.run(settings)
+        assert len(list(dest.glob("cursustrace-*.db"))) == 1
+    finally:
+        app._settings = None
+
+
+def test_run_skips_backup_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_run(tmp_path, monkeypatch)
+    dest = tmp_path / "backups"
+    settings = config.Settings(backup_dir=dest, backup_on_start=False)
+    try:
+        app.run(settings)
+        assert dest.is_dir() is False
+    finally:
+        app._settings = None
+
+
+def test_run_survives_backup_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _prepare_run(tmp_path, monkeypatch)
+
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("cursustrace.app.backup.backup_database", explode)
+    settings = config.Settings(backup_dir=tmp_path / "backups", backup_on_start=True)
+    try:
+        app.run(settings)
+        assert "host" in captured
     finally:
         app._settings = None

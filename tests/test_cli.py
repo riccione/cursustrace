@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -32,6 +33,9 @@ _CURSUS_ENV = (
     "CURSUS_CV_STYLE",
     "CURSUS_LOG_LEVEL",
     "CURSUS_LOG_RETENTION_DAYS",
+    "CURSUS_BACKUP_DIR",
+    "CURSUS_BACKUP_KEEP",
+    "CURSUS_BACKUP_ON_START",
 )
 
 
@@ -414,6 +418,132 @@ def test_stats_includes_salary(runner: CliRunner) -> None:
     assert payload["salary"]["EUR"]["median"] == 70000
 
 
+def test_export_json_stdout(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["export"])
+
+    assert result.exit_code == 0
+    records = json.loads(result.output)
+    assert len(records) == 1
+    record = records[0]
+    assert record["url"] == "https://a.com/1"
+    assert record["title"] == "Engineer"
+    assert record["status"] == "unapplied"
+    assert record["salary_min"] is None
+    assert "fingerprint" not in record
+
+
+def test_export_json_round_trips_through_import(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    job_id = db.add_job(
+        "https://a.com/1",
+        "Engineer",
+        "Acme",
+        "Remote",
+        "Body",
+        salary_min=60000,
+        salary_max=80000,
+        salary_currency="EUR",
+        salary_period="year",
+        salary_note="plus bonus",
+    )
+    assert job_id is not None
+    db.set_job_status(job_id, "interview")
+    db.set_job_comment(job_id, "interview", "tech round")
+    dump = tmp_path / "jobs.json"
+
+    assert runner.invoke(cli_module.cli, ["export", str(dump)]).exit_code == 0
+    assert runner.invoke(cli_module.cli, ["clear", "--yes"]).exit_code == 0
+
+    import_result = runner.invoke(cli_module.cli, ["import", str(dump), "--json"])
+    assert json.loads(import_result.output)["added"] == 1
+
+    job = db.get_jobs()[0]
+    assert job["job_url"] == "https://a.com/1"
+    assert job["title"] == "Engineer"
+    assert job["location"] == "Remote"
+    assert job["description"] == "Body"
+    assert job["salary_min"] == 60000
+    assert job["salary_max"] == 80000
+    assert job["salary_currency"] == "EUR"
+    assert job["salary_note"] == "plus bonus"
+    assert db.job_status(job) == "interview"
+    assert job["interview_comment"] == "tech round"
+
+
+def test_export_csv_uses_extension_and_quotes_fields(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer, Lead", "Acme", "Remote", "Line one\nLine two")
+    dump = tmp_path / "jobs.csv"
+
+    result = runner.invoke(cli_module.cli, ["export", str(dump)])
+
+    assert result.exit_code == 0
+    assert f"Exported 1 position(s) to {dump}." in result.output
+    with dump.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Engineer, Lead"
+    assert rows[0]["description"] == "Line one\nLine two"
+    assert rows[0]["status"] == "unapplied"
+
+
+def test_export_format_flag_overrides_extension(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["export", "--format", "csv"])
+
+    assert result.exit_code == 0
+    assert result.output.startswith("url,title,company,")
+    assert "https://a.com/1" in result.output
+
+
+def test_export_status_filter(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "Body")
+    db.set_job_status(db.get_jobs()[0]["id"], "applied")
+
+    result = runner.invoke(cli_module.cli, ["export", "--status", "applied"])
+
+    records = json.loads(result.output)
+    assert [record["title"] for record in records] == ["Two"]
+    assert records[0]["status"] == "applied"
+
+
+def test_export_empty_database(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    json_result = runner.invoke(cli_module.cli, ["export"])
+    assert json.loads(json_result.output) == []
+
+    dump = tmp_path / "empty.csv"
+    assert runner.invoke(cli_module.cli, ["export", str(dump)]).exit_code == 0
+    lines = dump.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("url,title,company,")
+
+
+def test_import_rejects_invalid_status(runner: CliRunner) -> None:
+    payload = [
+        {
+            "url": "https://a.com/1",
+            "title": "T",
+            "company": "C",
+            "description": "D",
+            "status": "archived",
+        },
+    ]
+
+    result = runner.invoke(cli_module.cli, ["import", "--json"], input=json.dumps(payload))
+
+    assert result.exit_code == 1
+    assert json.loads(result.output)["errors"][0]["error"] == "invalid status: archived"
+    assert db.get_jobs() == []
+
+
 def test_stats(runner: CliRunner) -> None:
     db.init_db()
     db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
@@ -433,6 +563,69 @@ def test_stats(runner: CliRunner) -> None:
     assert human_result.exit_code == 0
     assert "Total: 2" in human_result.output
     assert "Applied: 1" in human_result.output
+
+
+def test_backup_command_json(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    dest = tmp_path / "backups"
+
+    result = runner.invoke(cli_module.cli, ["backup", "--dir", str(dest), "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["status"] == "ok"
+    assert payload["positions"] == 1
+    assert payload["pruned"] == []
+    assert Path(payload["path"]).parent == dest
+    assert Path(payload["path"]).is_file()
+
+
+def test_backup_command_prunes_older_copies(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    dest = tmp_path / "backups"
+    dest.mkdir()
+    for stamp in ("20200101-000000", "20200102-000000"):
+        (dest / f"cursustrace-{stamp}.db").write_text("old", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["backup", "--dir", str(dest), "--keep", "1"])
+
+    assert result.exit_code == 0
+    assert "Backed up 0 position(s)" in result.output
+    assert "Pruned 2 older backup(s)." in result.output
+    remaining = [path.name for path in dest.glob("cursustrace-*.db")]
+    assert len(remaining) == 1
+    assert remaining[0] not in {
+        "cursustrace-20200101-000000.db",
+        "cursustrace-20200102-000000.db",
+    }
+
+
+def test_backup_rejects_negative_keep(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["backup", "--keep", "-1"])
+
+    assert result.exit_code == 1
+    assert "backup_keep" in result.stderr
+
+
+def test_backup_dir_flag_beats_env_and_file(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    from_file = tmp_path / "from-file"
+    from_env = tmp_path / "from-env"
+    from_flag = tmp_path / "from-flag"
+    Path(config.CONFIG_FILE).write_text(
+        f'[cursustrace]\nbackup_dir = "{from_file}"\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("CURSUS_BACKUP_DIR", str(from_env))
+
+    env_result = runner.invoke(cli_module.cli, ["backup", "--json"])
+    flag_result = runner.invoke(cli_module.cli, ["backup", "--dir", str(from_flag), "--json"])
+
+    assert Path(json.loads(env_result.output)["path"]).parent == from_env
+    assert from_file.is_dir() is False
+    assert Path(json.loads(flag_result.output)["path"]).parent == from_flag
 
 
 def test_version_flags(runner: CliRunner) -> None:
