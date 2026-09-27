@@ -33,6 +33,9 @@ _CURSUS_ENV = (
     "CURSUS_CV_STYLE",
     "CURSUS_LOG_LEVEL",
     "CURSUS_LOG_RETENTION_DAYS",
+    "CURSUS_BACKUP_DIR",
+    "CURSUS_BACKUP_KEEP",
+    "CURSUS_BACKUP_ON_START",
 )
 
 
@@ -560,6 +563,69 @@ def test_stats(runner: CliRunner) -> None:
     assert human_result.exit_code == 0
     assert "Total: 2" in human_result.output
     assert "Applied: 1" in human_result.output
+
+
+def test_backup_command_json(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    dest = tmp_path / "backups"
+
+    result = runner.invoke(cli_module.cli, ["backup", "--dir", str(dest), "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["status"] == "ok"
+    assert payload["positions"] == 1
+    assert payload["pruned"] == []
+    assert Path(payload["path"]).parent == dest
+    assert Path(payload["path"]).is_file()
+
+
+def test_backup_command_prunes_older_copies(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    dest = tmp_path / "backups"
+    dest.mkdir()
+    for stamp in ("20200101-000000", "20200102-000000"):
+        (dest / f"cursustrace-{stamp}.db").write_text("old", encoding="utf-8")
+
+    result = runner.invoke(cli_module.cli, ["backup", "--dir", str(dest), "--keep", "1"])
+
+    assert result.exit_code == 0
+    assert "Backed up 0 position(s)" in result.output
+    assert "Pruned 2 older backup(s)." in result.output
+    remaining = [path.name for path in dest.glob("cursustrace-*.db")]
+    assert len(remaining) == 1
+    assert remaining[0] not in {
+        "cursustrace-20200101-000000.db",
+        "cursustrace-20200102-000000.db",
+    }
+
+
+def test_backup_rejects_negative_keep(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["backup", "--keep", "-1"])
+
+    assert result.exit_code == 1
+    assert "backup_keep" in result.stderr
+
+
+def test_backup_dir_flag_beats_env_and_file(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    from_file = tmp_path / "from-file"
+    from_env = tmp_path / "from-env"
+    from_flag = tmp_path / "from-flag"
+    Path(config.CONFIG_FILE).write_text(
+        f'[cursustrace]\nbackup_dir = "{from_file}"\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("CURSUS_BACKUP_DIR", str(from_env))
+
+    env_result = runner.invoke(cli_module.cli, ["backup", "--json"])
+    flag_result = runner.invoke(cli_module.cli, ["backup", "--dir", str(from_flag), "--json"])
+
+    assert Path(json.loads(env_result.output)["path"]).parent == from_env
+    assert from_file.is_dir() is False
+    assert Path(json.loads(flag_result.output)["path"]).parent == from_flag
 
 
 def test_version_flags(runner: CliRunner) -> None:

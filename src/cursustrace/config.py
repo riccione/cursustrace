@@ -20,12 +20,18 @@ ENV_SHOW = "CURSUS_SHOW"
 ENV_CV_STYLE = "CURSUS_CV_STYLE"
 ENV_LOG_LEVEL = "CURSUS_LOG_LEVEL"
 ENV_LOG_RETENTION_DAYS = "CURSUS_LOG_RETENTION_DAYS"
+ENV_BACKUP_DIR = "CURSUS_BACKUP_DIR"
+ENV_BACKUP_KEEP = "CURSUS_BACKUP_KEEP"
+ENV_BACKUP_ON_START = "CURSUS_BACKUP_ON_START"
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
 DEFAULT_CV_STYLE = Path("styles/cv.css")
 DEFAULT_LOG_LEVEL = "error"
 DEFAULT_LOG_RETENTION_DAYS = 7
+DEFAULT_BACKUP_DIR = Path("backups")
+DEFAULT_BACKUP_KEEP = 14
+DEFAULT_BACKUP_ON_START = True
 LOG_DIR = Path("logs")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 
@@ -44,6 +50,9 @@ class Settings:
     cv_style_path: Path = DEFAULT_CV_STYLE
     log_level: str = DEFAULT_LOG_LEVEL
     log_retention_days: int = DEFAULT_LOG_RETENTION_DAYS
+    backup_dir: Path = DEFAULT_BACKUP_DIR
+    backup_keep: int = DEFAULT_BACKUP_KEEP
+    backup_on_start: bool = DEFAULT_BACKUP_ON_START
 
 
 def load_settings(
@@ -55,6 +64,9 @@ def load_settings(
     cv_style_path: str | Path | None = None,
     log_level: str | None = None,
     log_retention_days: int | str | None = None,
+    backup_dir: str | Path | None = None,
+    backup_keep: int | str | None = None,
+    backup_on_start: bool | None = None,
     config_path: str | Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Settings:
@@ -70,6 +82,9 @@ def load_settings(
         ("cv_style", ENV_CV_STYLE),
         ("log_level", ENV_LOG_LEVEL),
         ("log_retention_days", ENV_LOG_RETENTION_DAYS),
+        ("backup_dir", ENV_BACKUP_DIR),
+        ("backup_keep", ENV_BACKUP_KEEP),
+        ("backup_on_start", ENV_BACKUP_ON_START),
     ):
         raw = environ.get(env_name)
         if raw is not None:
@@ -89,6 +104,12 @@ def load_settings(
         values["log_level"] = log_level
     if log_retention_days is not None:
         values["log_retention_days"] = log_retention_days
+    if backup_dir is not None:
+        values["backup_dir"] = backup_dir
+    if backup_keep is not None:
+        values["backup_keep"] = backup_keep
+    if backup_on_start is not None:
+        values["backup_on_start"] = backup_on_start
 
     return Settings(
         host=_as_str(values, "host", DEFAULT_HOST),
@@ -100,6 +121,9 @@ def load_settings(
         log_retention_days=_as_retention_days(
             values.get("log_retention_days", DEFAULT_LOG_RETENTION_DAYS)
         ),
+        backup_dir=_as_backup_dir(values.get("backup_dir"), DEFAULT_BACKUP_DIR),
+        backup_keep=_as_backup_keep(values.get("backup_keep", DEFAULT_BACKUP_KEEP)),
+        backup_on_start=_as_bool(values, "backup_on_start", DEFAULT_BACKUP_ON_START),
     )
 
 
@@ -174,3 +198,26 @@ def _as_retention_days(value: object) -> int:
     if days < 0:
         raise ConfigError("'log_retention_days' must be a non-negative integer")
     return days
+
+
+def _as_backup_dir(value: object, default: Path) -> Path:
+    if value is None:
+        return default
+    if isinstance(value, Path):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        return Path(stripped) if stripped else default
+    raise ConfigError("'backup_dir' must be a non-empty string")
+
+
+def _as_backup_keep(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ConfigError("'backup_keep' must be a non-negative integer")
+    try:
+        keep = int(value)
+    except ValueError as exc:
+        raise ConfigError("'backup_keep' must be a non-negative integer") from exc
+    if keep < 0:
+        raise ConfigError("'backup_keep' must be a non-negative integer")
+    return keep

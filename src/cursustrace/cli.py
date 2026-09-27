@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json as json_module
 import logging
+import sqlite3
 from pathlib import Path
 from typing import TextIO, cast
 
 import click
 
-from cursustrace import db, exporters, salary, scraper
+from cursustrace import backup, db, exporters, salary, scraper
 from cursustrace.config import LOG_LEVELS, load_settings
 from cursustrace.errors import ConfigError, ScrapeError
 from cursustrace.logsetup import setup_logging
@@ -507,6 +508,45 @@ def stats(as_json: bool) -> None:
             f"Salary ({currency}, annualized): {entry['count']} positions, "
             f"min {entry['minimum']:,}, median {entry['median']:,}, max {entry['maximum']:,}"
         )
+
+
+@cli.command()
+@click.option(
+    "--dir",
+    "target_dir",
+    type=click.Path(file_okay=False),
+    default=None,
+    help="Backup directory (default from config/env).",
+)
+@click.option("--keep", type=int, default=None, help="Backups to retain (0 = keep all).")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
+def backup_command(target_dir: str | None, keep: int | None, as_json: bool) -> None:
+    """Write a consistent copy of the database and prune older backups."""
+    db.init_db()
+    try:
+        settings = load_settings(backup_dir=target_dir, backup_keep=keep)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        result = backup.backup_database(settings.backup_dir, keep=settings.backup_keep)
+    except (OSError, sqlite3.Error) as exc:
+        raise click.ClickException(f"Backup failed: {exc}") from exc
+    if result is None:
+        raise click.ClickException("No database to back up yet.")
+
+    payload: dict[str, object] = {
+        "status": "ok",
+        "path": str(result.path),
+        "positions": db.job_counts()["total"],
+        "pruned": list(result.pruned),
+    }
+    if as_json:
+        click.echo(json_module.dumps(payload))
+        return
+    click.echo(f"Backed up {payload['positions']} position(s) to {result.path}.")
+    if result.pruned:
+        click.echo(f"Pruned {len(result.pruned)} older backup(s).")
 
 
 @cli.command()
