@@ -559,6 +559,69 @@ async def test_salary_filter_narrows_status_lists(user: User) -> None:
     await user.should_see("Paid Role")
 
 
+async def test_sort_and_page_size_control_the_list(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    db.add_job("https://a.com/2", "Alpha role", "Alpha", "Remote", "Body")
+    db.add_job("https://a.com/3", "Mike role", "Mid", "Remote", "Body")
+    await user.open("/")
+
+    cast(ui.select, user.find(marker="page-size").elements.pop()).set_value(1)
+
+    await user.should_see("Showing 1-1 of 3")
+    await user.should_see("Mike role")
+    await user.should_not_see("Alpha role")
+    await user.should_not_see("Zulu role")
+
+    cast(ui.select, user.find(marker="sort-select").elements.pop()).set_value("company")
+
+    await user.should_see("Alpha role")
+    await user.should_not_see("Mike role")
+    await user.should_not_see("Zulu role")
+
+
+async def test_pagination_pages_through_large_list(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/0", "Oldest role", "Acme", "Remote", "Body")
+    for i in range(1, 11):
+        db.add_job(f"https://a.com/{i}", f"Filler {i}", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/99", "Newest role", "Acme", "Remote", "Body")
+    await user.open("/")
+
+    cast(ui.select, user.find(marker="page-size").elements.pop()).set_value(10)
+
+    await user.should_see("Showing 1-10 of 12")
+    await user.should_see("Newest role")
+    await user.should_not_see("Oldest role")
+
+    cast(ui.pagination, user.find(marker="pagination").elements.pop()).set_value(2)
+
+    await user.should_see("Showing 11-12 of 12")
+    await user.should_see("Oldest role")
+    await user.should_not_see("Newest role")
+
+
+async def test_search_results_are_paginated_without_sorting(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/0", "Oldest role", "Acme", "Remote", "Body")
+    for i in range(1, 11):
+        db.add_job(f"https://a.com/{i}", f"Filler {i}", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/99", "Newest role", "Acme", "Remote", "Body")
+    await user.open("/")
+    sort_element = cast(ui.select, user.find(marker="sort-select").elements.pop())
+
+    user.find("Search company").clear().type("Acme")
+    await user.should_see("[Unapplied]")
+
+    assert not sort_element.visible
+
+    cast(ui.select, user.find(marker="page-size").elements.pop()).set_value(10)
+    await user.should_see("Showing 1-10 of 12")
+
+    cast(ui.pagination, user.find(marker="pagination").elements.pop()).set_value(2)
+    await user.should_see("Showing 11-12 of 12")
+
+
 async def test_add_job_manually_requires_fields(user: User) -> None:
     await user.open("/")
     user.find("➕ Add Manually").click()

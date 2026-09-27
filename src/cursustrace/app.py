@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from types import FrameType
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 from nicegui import app, events, ui
 from nicegui.run import io_bound
@@ -230,20 +230,6 @@ def _render_job_card(
         if current != "unapplied":
             _render_comment_box(job, current)
         _render_delete_controls(job, refresh)
-
-
-def _render_job_list(
-    jobs: list[db.Job],
-    empty_message: str,
-    refresh: Callable[[], None],
-    *,
-    show_status: bool = False,
-) -> None:
-    if not jobs:
-        ui.label(empty_message)
-        return
-    for job in jobs:
-        _render_job_card(job, refresh, show_status=show_status)
 
 
 def _render_statistics() -> None:
@@ -748,10 +734,48 @@ def dashboard_page() -> None:
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
     salary_filter_row: ui.row | None = None
+    sort_select: ui.select | None = None
+    pagination: ui.pagination | None = None
+    page_label: ui.label | None = None
     query = ""
     salary_currency = ""
     salary_min: int | None = None
     salary_max: int | None = None
+    sort_order: db.JobSort = "newest"
+    page_size = 25
+    pages: dict[str, int] = {}
+
+    def active_context() -> str:
+        if query:
+            return "search"
+        value = status_tabs.value if status_tabs is not None else None
+        return value if isinstance(value, str) else "unapplied"
+
+    def render_page(
+        container: ui.column,
+        jobs: list[db.Job],
+        empty_message: str,
+        context: str,
+        *,
+        show_status: bool = False,
+    ) -> tuple[int, int, int]:
+        """Render one page of jobs; return (page_count, page, total)."""
+        container.clear()
+        with container:
+            if not jobs:
+                ui.label(empty_message)
+                return (1, 1, 0)
+            if page_size > 0:
+                page_count = (len(jobs) + page_size - 1) // page_size
+                page = min(pages.get(context, 1), page_count)
+                pages[context] = page
+                start = (page - 1) * page_size
+                page_jobs = jobs[start : start + page_size]
+            else:
+                page_count, page, page_jobs = 1, 1, jobs
+            for job in page_jobs:
+                _render_job_card(job, refresh, show_status=show_status)
+        return (page_count, page, len(jobs))
 
     def refresh() -> None:
         searching = bool(query)
@@ -761,29 +785,52 @@ def dashboard_page() -> None:
             status_panels.set_visibility(not searching)
         if salary_filter_row is not None:
             salary_filter_row.set_visibility(not searching)
+        if sort_select is not None:
+            sort_select.set_visibility(not searching)
         for status, _label, _empty in STATUS_TABS:
-            containers[status].clear()
+            container = containers.get(status)
+            if container is not None:
+                container.clear()
         if results_container is not None:
             results_container.clear()
             results_container.set_visibility(searching)
-            if searching:
-                with results_container:
-                    _render_job_list(
-                        db.search_jobs(query),
-                        f'No positions match "{query}".',
-                        refresh,
-                        show_status=True,
-                    )
+        context = "search" if searching else active_context()
+        page_count, page, total = 1, 1, 0
+        if searching and results_container is not None:
+            page_count, page, total = render_page(
+                results_container,
+                db.search_jobs(query),
+                f'No positions match "{query}".',
+                "search",
+                show_status=True,
+            )
         if not searching:
             for status, _label, empty_message in STATUS_TABS:
-                with containers[status]:
-                    jobs = salary.filter_by_salary(
-                        db.search_jobs(query, status=status),
-                        min_annual=salary_min,
-                        max_annual=salary_max,
-                        currency=salary_currency or None,
-                    )
-                    _render_job_list(jobs, empty_message, refresh)
+                container = containers.get(status)
+                if container is None:
+                    continue
+                jobs = salary.filter_by_salary(
+                    db.search_jobs(query, status=status),
+                    min_annual=salary_min,
+                    max_annual=salary_max,
+                    currency=salary_currency or None,
+                )
+                jobs = db.sort_jobs(jobs, sort_order)
+                rendered = render_page(container, jobs, empty_message, status)
+                if status == context:
+                    page_count, page, total = rendered
+        if pagination is not None and page_label is not None:
+            pagination.max = max(page_count, 1)
+            pagination.set_visibility(page_size > 0 and total > 0 and page_count > 1)
+            if pagination.value != page:
+                pagination.value = page
+            page_label.set_visibility(total > 0)
+            if page_size <= 0:
+                page_label.set_text(f"Showing all {total}")
+            else:
+                first = (page - 1) * page_size + 1
+                last = min(page * page_size, total)
+                page_label.set_text(f"Showing {first}-{last} of {total}")
         if stats_container is not None:
             stats_container.clear()
             with stats_container:
@@ -836,6 +883,7 @@ def dashboard_page() -> None:
                 def on_search(event: events.ValueChangeEventArguments[str | None]) -> None:
                     nonlocal query
                     query = event.value or ""
+                    pages.clear()
                     refresh()
 
                 search_input.on_value_change(on_search)
@@ -851,11 +899,66 @@ def dashboard_page() -> None:
                     salary_currency = currency_filter.value or ""
                     salary_min = int(min_filter.value) if min_filter.value is not None else None
                     salary_max = int(max_filter.value) if max_filter.value is not None else None
+                    pages.clear()
                     refresh()
 
                 currency_filter.on_value_change(lambda _: update_salary_filter())
                 min_filter.on_value_change(lambda _: update_salary_filter())
                 max_filter.on_value_change(lambda _: update_salary_filter())
+
+                def update_sort(event: events.ValueChangeEventArguments[str | None]) -> None:
+                    nonlocal sort_order
+                    sort_order = cast("db.JobSort", event.value or "newest")
+                    pages.clear()
+                    refresh()
+
+                def update_page_size(event: events.ValueChangeEventArguments[int | None]) -> None:
+                    nonlocal page_size
+                    if event.value is not None:
+                        page_size = int(event.value)
+                    pages.clear()
+                    refresh()
+
+                def on_page_change(event: events.ValueChangeEventArguments[int | None]) -> None:
+                    context = active_context()
+                    page = event.value or 1
+                    if pages.get(context, 1) == page:
+                        return
+                    pages[context] = page
+                    refresh()
+
+                with ui.row().classes("w-full items-center gap-3"):
+                    sort_select = (
+                        ui.select(
+                            {
+                                "newest": "Newest first",
+                                "oldest": "Oldest first",
+                                "company": "Company A-Z",
+                                "company_desc": "Company Z-A",
+                                "status": "Status",
+                            },
+                            value="newest",
+                            label="Sort by",
+                        )
+                        .classes("w-56")
+                        .mark("sort-select")
+                    )
+                    page_size_select = (
+                        ui.select(
+                            {10: "10 per page", 25: "25 per page", 50: "50 per page", 0: "All"},
+                            value=25,
+                            label="Rows per page",
+                        )
+                        .classes("w-48")
+                        .mark("page-size")
+                    )
+                    pagination = ui.pagination(min=1, max=1, direction_links=True).mark(
+                        "pagination"
+                    )
+                    page_label = ui.label().mark("page-info")
+                sort_select.on_value_change(update_sort)
+                page_size_select.on_value_change(update_page_size)
+                pagination.on_value_change(on_page_change)
                 with ui.tabs().classes("w-full") as status_tabs:
                     for status, label, _message in STATUS_TABS:
                         ui.tab(status, label=label)
@@ -866,6 +969,7 @@ def dashboard_page() -> None:
                         with ui.tab_panel(status):
                             containers[status] = ui.column().classes("w-full")
                 results_container = ui.column().classes("w-full")
+                status_tabs.on_value_change(lambda _: refresh())
             with ui.tab_panel(stats_tab):
                 stats_container = ui.column().classes("w-full")
             with ui.tab_panel(profile_tab):
