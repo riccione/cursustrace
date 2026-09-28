@@ -1015,3 +1015,161 @@ def test_setting_round_trip(db_path: Path) -> None:
 
     db.set_setting("dark_mode", "light")
     assert db.get_setting("dark_mode") == "light"
+
+
+# --- Tags -------------------------------------------------------------------
+
+
+def _tagged(url: str, company: str = "Acme", tags: tuple[str, ...] = ()) -> int:
+    job_id = db.add_job(url, "Engineer", company, "Remote", "Body")
+    assert job_id is not None
+    if tags:
+        db.set_job_tags(job_id, tags)
+    return job_id
+
+
+def test_create_tag_and_list(db_path: Path) -> None:
+    db.init_db()
+    assert db.list_tags() == []
+    assert db.create_tag("startup") is not None
+    assert db.create_tag("remote") is not None
+    assert db.create_tag("REMOTE") is None  # case-insensitive duplicate
+    assert db.create_tag("   ") is None  # empty after strip
+    assert db.list_tags() == ["remote", "startup"]  # alphabetical, case-insensitive
+
+
+def test_create_tag_preserves_original_case(db_path: Path) -> None:
+    db.init_db()
+    assert db.create_tag("Remote First") is not None
+    assert db.list_tags() == ["Remote First"]
+    assert db.find_tag("remote first") is not None  # lookup ignores case
+    assert db.find_tag("  REMOTE FIRST  ") is not None  # and whitespace
+    assert db.find_tag("missing") is None
+    assert db.find_tag("") is None
+
+
+def test_rename_tag(db_path: Path) -> None:
+    db.init_db()
+    remote = db.create_tag("remote")
+    startup = db.create_tag("startup")
+    assert remote is not None and startup is not None
+
+    assert db.rename_tag(remote, "wfh") is True
+    assert db.list_tags() == ["startup", "wfh"]
+
+    assert db.rename_tag(startup, "WFH") is False  # collision with wfh
+    assert db.rename_tag(startup, "  ") is False  # empty after strip
+    assert db.rename_tag(99_999, "x") is False  # unknown id
+    assert db.list_tags() == ["startup", "wfh"]
+
+
+def test_rename_tag_keeps_assignments(db_path: Path) -> None:
+    db.init_db()
+    job_id = _tagged("https://a.com/1", tags=("remote",))
+    tag_id = db.find_tag("remote")
+    assert tag_id is not None
+
+    assert db.rename_tag(tag_id, "wfh") is True
+    assert db.job_tags(job_id) == ["wfh"]
+    assert db.list_tags() == ["wfh"]
+
+
+def test_delete_tag_cascades_assignments(db_path: Path) -> None:
+    db.init_db()
+    job_id = _tagged("https://a.com/1", tags=("remote", "startup"))
+    tag_id = db.find_tag("remote")
+    assert tag_id is not None
+
+    db.delete_tag(tag_id)
+    assert db.list_tags() == ["startup"]
+    assert db.job_tags(job_id) == ["startup"]
+
+
+def test_delete_job_cascades_assignments(db_path: Path) -> None:
+    db.init_db()
+    job_id = _tagged("https://a.com/1", tags=("remote",))
+    db.delete_job(job_id)
+    assert db.list_tags() == ["remote"]  # catalog survives
+    assert db.tag_counts() == {"remote": 0}
+
+
+def test_set_job_tags_creates_and_syncs(db_path: Path) -> None:
+    db.init_db()
+    job_id = _tagged("https://a.com/1")
+
+    db.set_job_tags(job_id, ["remote", "Startup"])
+    assert db.job_tags(job_id) == ["remote", "Startup"]  # alphabetical, case-insensitive
+    assert db.list_tags() == ["remote", "Startup"]  # alphabetical, case-insensitive
+
+    db.set_job_tags(job_id, ["startup", "referral"])  # Startup matched case-insensitively
+    assert db.job_tags(job_id) == ["referral", "Startup"]
+    assert db.list_tags() == ["referral", "remote", "Startup"]
+
+    db.set_job_tags(job_id, [])
+    assert db.job_tags(job_id) == []
+    assert db.list_tags() == ["referral", "remote", "Startup"]  # tags are not jobs
+
+
+def test_job_tags_empty_for_untagged(db_path: Path) -> None:
+    db.init_db()
+    job_id = _tagged("https://a.com/1")
+    assert db.job_tags(job_id) == []
+
+
+def test_tags_for_jobs(db_path: Path) -> None:
+    db.init_db()
+    first = _tagged("https://a.com/1", tags=("remote",))
+    second = _tagged("https://a.com/2", tags=("startup", "remote"))
+
+    grouped = db.tags_for_jobs([first, second])
+    assert grouped == {first: ["remote"], second: ["remote", "startup"]}
+    assert db.tags_for_jobs([first, 99_999])[first] == ["remote"]
+    assert db.tags_for_jobs([]) == {}
+
+
+def test_filter_by_tags_any_semantics(db_path: Path) -> None:
+    db.init_db()
+    remote_job = _tagged("https://a.com/1", company="Zeta", tags=("remote",))
+    startup_job = _tagged("https://a.com/2", company="Alpha", tags=("startup",))
+    _tagged("https://a.com/3", company="Mid")
+    all_jobs = db.get_jobs()
+
+    def kept(wanted: list[str]) -> list[int]:
+        return [job["id"] for job in db.filter_by_tags(all_jobs, wanted)]
+
+    assert kept([]) == [job["id"] for job in all_jobs]  # no filter
+    assert kept(["referral"]) == []  # unknown tag
+    assert kept(["REMOTE"]) == [remote_job]  # case-insensitive
+    # ANY: remote + startup keeps both tagged jobs, preserves id-DESC order.
+    assert kept(["remote", "startup"]) == [startup_job, remote_job]
+    assert kept(["remote", "referral"]) == [remote_job]
+    # Blank names are ignored, so no filter matches everything.
+    assert kept(["   "]) == [job["id"] for job in all_jobs]
+
+
+def test_tag_counts(db_path: Path) -> None:
+    db.init_db()
+    _tagged("https://a.com/1", tags=("remote",))
+    _tagged("https://a.com/2", tags=("remote", "startup"))
+    _tagged("https://a.com/3")
+
+    assert db.tag_counts() == {"remote": 2, "startup": 1}
+
+
+def test_clear_all_jobs_keeps_tag_catalog(db_path: Path) -> None:
+    db.init_db()
+    _tagged("https://a.com/1", tags=("remote",))
+
+    assert db.clear_all_jobs() == 1
+    assert db.list_tags() == ["remote"]
+    assert db.tag_counts() == {"remote": 0}
+
+
+def test_clear_all_data_wipes_tags(db_path: Path) -> None:
+    db.init_db()
+    _tagged("https://a.com/1", tags=("remote",))
+
+    counts = db.clear_all_data()
+    assert counts == {"positions": 1, "settings": 0}
+    assert db.list_tags() == []
+    assert db.tag_counts() == {}
