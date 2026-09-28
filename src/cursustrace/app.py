@@ -8,14 +8,16 @@ import signal
 import sqlite3
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from types import FrameType
 from typing import Literal, TypedDict, cast
+from urllib.parse import quote
 
 from nicegui import app, events, ui
 from nicegui.run import io_bound
+from starlette.requests import Request
 
 from cursustrace import backup, config, db, salary, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
@@ -205,13 +207,27 @@ def _days_since_applied(job: db.Job) -> int | None:
 
 
 def _render_job_card(
-    job: db.Job, refresh: Callable[[], None], *, show_status: bool = False
+    job: db.Job,
+    refresh: Callable[[], None],
+    *,
+    show_status: bool = False,
+    tags: list[str] | None = None,
+    on_tag_click: Callable[[str], None] | None = None,
 ) -> None:
     title = job["title"] or "Untitled position"
     company = job["company"] or "Unknown company"
     label = f"{title} — {company}"
     if show_status:
         label += f" [{db.job_status(job).title()}]"
+    tag_names = db.job_tags(job["id"]) if tags is None else tags
+    if tag_names:
+        with ui.row().classes("w-full items-center gap-1").mark("job-tags"):
+            for name in tag_names:
+                if on_tag_click is None:
+                    ui.chip(name)
+                else:
+                    chip = ui.chip(name)
+                    chip.on_click(lambda tag=name: on_tag_click(tag))
     with ui.expansion(label).classes("w-full"):
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")
@@ -393,6 +409,11 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     similar_toggle.on_value_change(update_similar)
 
     ui.separator()
+    ui.label("🏷️ Tags").classes("text-h6")
+    tag_manager = _tag_manager_dialog(refresh)
+    ui.button("Manage tags", on_click=tag_manager.open).mark("manage-tags")
+
+    ui.separator()
     ui.label("⚙️ Settings & Maintenance").classes("text-h6")
     with ui.expansion("⚠️ Danger Zone: Clear Database"):
         ui.label(
@@ -450,6 +471,94 @@ def _confirm_delete_dialog(
     return dialog
 
 
+def _tag_manager_dialog(refresh: Callable[[], None]) -> ui.dialog:
+    """Dialog to create, rename, and delete tags, showing usage counts."""
+    with ui.dialog() as dialog, ui.card().classes("w-full max-w-lg"):
+        dialog.mark("tag-manager")
+        ui.label("Manage tags").classes("text-h6")
+        name_input = ui.input("New tag name").classes("w-full").mark("new-tag-name")
+        ui.button("Add tag", on_click=lambda: add_tag()).props("color=primary")
+        list_column = ui.column().classes("w-full")
+
+    with ui.dialog() as confirm_dialog, ui.card():
+        confirm_dialog.mark("tag-delete-confirm")
+        confirm_text = ui.label()
+        pending: dict[str, int] = {}
+        with ui.row():
+            ui.button("Cancel", on_click=confirm_dialog.close).props("flat")
+            ui.button("Delete tag", on_click=lambda: confirm_delete()).props("color=negative").mark(
+                "confirm-delete-tag"
+            )
+
+    def add_tag() -> None:
+        name = (name_input.value or "").strip()
+        if not name:
+            ui.notify("Enter a tag name.", type="warning")
+            return
+        if db.create_tag(name) is None:
+            ui.notify(f"Tag '{name}' already exists.", type="warning")
+            return
+        name_input.value = ""
+        render_list()
+        refresh()
+        ui.notify(f"Tag '{name}' created.", type="positive")
+
+    def rename_tag(tag_id: int, new_name: str) -> None:
+        if not db.rename_tag(tag_id, new_name.strip()):
+            ui.notify("Tag name must not be empty or already taken.", type="warning")
+            return
+        render_list()
+        refresh()
+        ui.notify("Tag renamed.", type="positive")
+
+    def ask_delete(tag_id: int, name: str, count: int) -> None:
+        pending["tag_id"] = tag_id
+        position_word = "position" if count == 1 else "positions"
+        confirm_text.set_text(f"Delete tag '{name}'? {count} {position_word} would lose it.")
+        confirm_dialog.open()
+
+    def confirm_delete() -> None:
+        tag_id = pending.get("tag_id")
+        if tag_id is not None:
+            db.delete_tag(tag_id)
+        confirm_dialog.close()
+        render_list()
+        refresh()
+        ui.notify("Tag deleted.", type="positive")
+
+    def render_list() -> None:
+        list_column.clear()
+        counts = db.tag_counts()
+        with list_column:
+            if not counts:
+                ui.label("No tags yet.")
+                return
+            for name, count in counts.items():
+                tag_id = db.find_tag(name)
+                if tag_id is None:
+                    continue
+                with ui.row().classes("w-full items-center gap-2"):
+                    ui.label(f"{name} ({count})").classes("w-40")
+                    rename_input = (
+                        ui.input(value=name).classes("flex-1").mark(f"rename-tag-{tag_id}")
+                    )
+                    ui.button(
+                        "Rename",
+                        on_click=lambda old_id=tag_id, value_input=rename_input: rename_tag(
+                            old_id, value_input.value or ""
+                        ),
+                    ).props("flat color=primary")
+                    ui.button(
+                        "Delete",
+                        on_click=lambda old_id=tag_id, tag_name=name, uses=count: ask_delete(
+                            old_id, tag_name, uses
+                        ),
+                    ).props("flat color=negative").mark(f"delete-tag-{tag_id}")
+
+    render_list()
+    return dialog
+
+
 @dataclass(frozen=True)
 class JobFormValues:
     """Values collected from the manual job form."""
@@ -467,6 +576,7 @@ class JobFormValues:
     applied_comment: str = ""
     interview_comment: str = ""
     rejected_comment: str = ""
+    tags: list[str] = field(default_factory=list)
 
 
 class SalaryKwargs(TypedDict):
@@ -506,6 +616,7 @@ def _job_form_dialog(
     salary_currency = (values["salary_currency"] or "") if values else "EUR"
     salary_period = (values["salary_period"] or "") if values else "year"
     salary_note = (values["salary_note"] or "") if values else ""
+    current_tags = db.job_tags(values["id"]) if values is not None else []
 
     with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl"):
         dialog.mark("job-form")
@@ -532,6 +643,18 @@ def _job_form_dialog(
                 list(salary.PERIODS), value=salary_period or None, label="Period"
             ).classes("flex-1")
         salary_note_input = ui.input("Salary note", value=salary_note).classes("w-full")
+        tags_input = (
+            ui.select(
+                db.list_tags(),
+                value=current_tags,
+                label="Tags",
+                multiple=True,
+                clearable=True,
+                new_value_mode="add-unique",
+            )
+            .classes("w-full")
+            .mark("tags-field")
+        )
         description_input = (
             ui.textarea(
                 "Description",
@@ -595,6 +718,7 @@ def _job_form_dialog(
                     rejected_comment=(comment_inputs["rejected"].value or "")
                     if with_comments
                     else "",
+                    tags=[str(name) for name in tags_input.value or []],
                 )
             )
             if result:
@@ -623,6 +747,7 @@ def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> boo
         logger.warning("Rejected duplicate manual add: %s", values.url)
         ui.notify("A position with the same URL already exists.", type="warning")
         return False
+    db.set_job_tags(job_id, values.tags)
     ui.notify("Position added.", type="positive")
     matches = db.find_similar(values.company, values.title, values.description, exclude_id=job_id)
     if matches and _similar_notice_enabled():
@@ -650,6 +775,7 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.interview_comment,
         values.rejected_comment,
     )
+    db.set_job_tags(job_id, values.tags)
     ui.notify("Position updated.", type="positive")
     ui.navigate.to(f"/job/{job_id}")
     return True
@@ -725,7 +851,7 @@ def _render_profile_editor() -> None:
 
 
 @ui.page("/")
-def dashboard_page() -> None:
+def dashboard_page(request: Request) -> None:
     ui.page_title(APP_TITLE)
     dark = _apply_dark_mode()
     containers: dict[db.JobStatus, ui.column] = {}
@@ -734,6 +860,8 @@ def dashboard_page() -> None:
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
     salary_filter_row: ui.row | None = None
+    tag_filter_row: ui.row | None = None
+    tag_filter_select: ui.select | None = None
     sort_select: ui.select | None = None
     pagination: ui.pagination | None = None
     page_label: ui.label | None = None
@@ -744,6 +872,16 @@ def dashboard_page() -> None:
     sort_order: db.JobSort = "newest"
     page_size = 25
     pages: dict[str, int] = {}
+    requested_tag = (request.query_params.get("tag") or "").strip()
+    canonical_tag = next(
+        (
+            name
+            for name in db.list_tags()
+            if requested_tag and name.casefold() == requested_tag.casefold()
+        ),
+        "",
+    )
+    tag_filter: list[str] = [canonical_tag] if canonical_tag else []
 
     def active_context() -> str:
         if query:
@@ -773,11 +911,31 @@ def dashboard_page() -> None:
                 page_jobs = jobs[start : start + page_size]
             else:
                 page_count, page, page_jobs = 1, 1, jobs
+            if page_jobs:
+                grouped = db.tags_for_jobs([entry["id"] for entry in page_jobs])
+            else:
+                grouped = {}
             for job in page_jobs:
-                _render_job_card(job, refresh, show_status=show_status)
+                _render_job_card(
+                    job,
+                    refresh,
+                    show_status=show_status,
+                    tags=grouped.get(job["id"], []),
+                    on_tag_click=apply_tag_filter,
+                )
         return (page_count, page, len(jobs))
 
     def refresh() -> None:
+        if tag_filter_select is not None:
+            names = db.list_tags()
+            tag_filter_select.options = names
+            current = [str(name) for name in tag_filter_select.value or []]
+            kept = [name for name in current if name in names]
+            if kept != current:
+                # Pruning fires update_tag_filter, which re-enters refresh() to render.
+                tag_filter_select.set_value(kept)
+                return
+            tag_filter_select.update()
         searching = bool(query)
         if status_tabs is not None:
             status_tabs.set_visibility(not searching)
@@ -785,6 +943,8 @@ def dashboard_page() -> None:
             status_panels.set_visibility(not searching)
         if salary_filter_row is not None:
             salary_filter_row.set_visibility(not searching)
+        if tag_filter_row is not None:
+            tag_filter_row.set_visibility(not searching)
         if sort_select is not None:
             sort_select.set_visibility(not searching)
         for status, _label, _empty in STATUS_TABS:
@@ -815,6 +975,7 @@ def dashboard_page() -> None:
                     max_annual=salary_max,
                     currency=salary_currency or None,
                 )
+                jobs = db.filter_by_tags(jobs, tag_filter)
                 jobs = db.sort_jobs(jobs, sort_order)
                 rendered = render_page(container, jobs, empty_message, status)
                 if status == context:
@@ -838,7 +999,9 @@ def dashboard_page() -> None:
 
     with ui.header().classes("items-center justify-between"):
         ui.label(APP_TITLE).classes("text-h6")
-        settings_button = ui.button(icon="settings").props("flat color=white")
+        settings_button = (
+            ui.button(icon="settings").props("flat color=white").mark("settings-button")
+        )
 
     with ui.right_drawer(value=False).props("width=480") as drawer:
         settings_button.on_click(lambda: drawer.toggle())
@@ -905,6 +1068,44 @@ def dashboard_page() -> None:
                 currency_filter.on_value_change(lambda _: update_salary_filter())
                 min_filter.on_value_change(lambda _: update_salary_filter())
                 max_filter.on_value_change(lambda _: update_salary_filter())
+
+                with (
+                    ui.row()
+                    .classes("w-full items-center gap-2")
+                    .mark("tag-filter-row") as tag_filter_row
+                ):
+                    tag_filter_select = (
+                        ui.select(
+                            db.list_tags(),
+                            value=tag_filter,
+                            label="Filter by tag",
+                            multiple=True,
+                            clearable=True,
+                        )
+                        .classes("w-96")
+                        .mark("tag-filter")
+                    )
+
+                def update_tag_filter() -> None:
+                    nonlocal tag_filter
+                    if tag_filter_select is None:
+                        return
+                    new = [str(name) for name in tag_filter_select.value or []]
+                    if new == tag_filter:
+                        return
+                    tag_filter = new
+                    pages.clear()
+                    refresh()
+
+                def apply_tag_filter(name: str) -> None:
+                    nonlocal query
+                    if query:
+                        query = ""
+                        search_input.value = ""
+                    if tag_filter_select is not None:
+                        tag_filter_select.set_value([name])
+
+                tag_filter_select.on_value_change(lambda _: update_tag_filter())
 
                 def update_sort(event: events.ValueChangeEventArguments[str | None]) -> None:
                     nonlocal sort_order
@@ -1002,6 +1203,14 @@ def job_detail_page(job_id: int) -> None:
         ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
         ui.markdown(f"**Added:** {job['date_added']}")
         ui.markdown(f"**Status:** {db.job_status(job).title()}")
+        detail_tags = db.job_tags(job["id"])
+        if detail_tags:
+            with ui.row().classes("items-center gap-1").mark("job-tags"):
+                for name in detail_tags:
+                    ui.chip(
+                        name,
+                        on_click=lambda tag=name: ui.navigate.to(f"/?tag={quote(tag)}"),
+                    )
         salary_text = salary.format_salary(job)
         if salary_text:
             ui.markdown(f"**Salary:** {salary_text}")
