@@ -131,7 +131,7 @@ machine-readable output.
 # add one position from explicit fields
 uv run cursustrace add --url https://example.com/job/1 \
   --title "Backend Engineer" --company Acme --description "Build APIs" \
-  --location Remote --status applied --json
+  --location Remote --status applied --tag remote --json
 
 # scrape and add one or more URLs
 uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --json
@@ -140,8 +140,9 @@ uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --js
 uv run cursustrace import jobs.json --json
 echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
 
-# list stored positions
+# list stored positions (repeatable --tag filters match any tag)
 uv run cursustrace list --status applied --json
+uv run cursustrace list --tag remote --tag startup --json
 
 # sort (newest, oldest, company, company_desc, status) and paginate
 uv run cursustrace list --sort company --limit 50 --json
@@ -152,6 +153,13 @@ uv run cursustrace export
 uv run cursustrace export jobs.json
 uv run cursustrace export --format csv --status applied
 uv run cursustrace export --min-salary 60000 --salary-currency EUR
+uv run cursustrace export --tag remote --format csv
+
+# manage tags (labels): counts, creation, rename, delete
+uv run cursustrace tags list --json
+uv run cursustrace tags add remote referral --json
+uv run cursustrace tags rename remote wfh
+uv run cursustrace tags rm wfh
 
 # position counts per pipeline stage
 uv run cursustrace stats --json
@@ -169,11 +177,12 @@ uv run cursustrace clear --all --yes
 ```
 
 Each JSON item may be structured (`url`, `title`, `company`, `location`,
-`description`, `status`, `salary_*`) or URL-only (the URL is scraped to fill the
-missing fields). `export` writes that same shape, so
-`cursustrace export jobs.json` can be edited and fed back into `import`: status
-and stage comments survive the round trip, timestamps are re-stamped on import.
-The CSV variant is a flat spreadsheet view — `import` reads JSON only.
+`description`, `status`, `salary_*`, `tags`) or URL-only (the URL is scraped to
+fill the missing fields). `export` writes that same shape, so
+`cursustrace export jobs.json` can be edited and fed back into `import`: status,
+stage comments, and tags survive the round trip (unknown tags are created),
+timestamps are re-stamped on import. The CSV variant is a flat spreadsheet view
+with tags joined by `;` — `import` reads JSON only.
 
 ## Development
 

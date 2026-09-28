@@ -601,11 +601,12 @@ def list_tags() -> list[str]:
 
 
 def tag_counts() -> dict[str, int]:
-    """Return tag name -> number of assigned positions."""
+    """Return tag name -> number of assigned positions, alphabetically."""
     with closing(get_connection()) as conn:
         rows = conn.execute(
             "SELECT t.name, COUNT(jt.job_id) AS uses FROM tags t "
-            "LEFT JOIN job_tags jt ON jt.tag_id = t.id GROUP BY t.id"
+            "LEFT JOIN job_tags jt ON jt.tag_id = t.id GROUP BY t.id "
+            "ORDER BY t.name COLLATE NOCASE"
         ).fetchall()
     return {row["name"]: int(row["uses"]) for row in rows}
 

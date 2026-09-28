@@ -64,6 +64,7 @@ def _ingest(
     salary_currency: str | None = None,
     salary_period: str | None = None,
     salary_note: str | None = None,
+    tags: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if db.check_duplicate(url):
         logger.info("Skipped duplicate: %s", url)
@@ -87,6 +88,8 @@ def _ingest(
 
     if status != "unapplied":
         db.set_job_status(job_id, cast("db.JobStatus", status))
+    if tags:
+        db.set_job_tags(job_id, list(tags))
     result: dict[str, object] = {"status": "added", "id": job_id, "url": url}
     if _similar_enabled():
         matches = db.find_similar(company, title, description, exclude_id=job_id)
@@ -109,6 +112,17 @@ def _optional_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_tags(value: object) -> tuple[str, ...]:
+    """Normalize an import ``tags`` field (list or ';'/','-separated string)."""
+    if isinstance(value, str):
+        parts = value.replace(";", ",").split(",")
+    elif isinstance(value, list):
+        parts = [str(part) for part in value]
+    else:
+        return ()
+    return tuple(name.strip() for name in parts if name.strip())
 
 
 def _ingest_item(
@@ -152,6 +166,7 @@ def _ingest_item(
         salary_currency=_optional_str(item.get("salary_currency")),
         salary_period=_optional_str(item.get("salary_period")),
         salary_note=_optional_str(item.get("salary_note")),
+        tags=_optional_tags(item.get("tags")),
     )
     similar = cast("list[dict[str, object]]", result.get("similar", []))
     if result["status"] == "added":
@@ -295,6 +310,12 @@ def run_command(
 @click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
 @click.option("--salary-period", type=click.Choice(salary.PERIODS), default=None)
 @click.option("--salary-note", default=None, help="Free-text salary note.")
+@click.option(
+    "--tag",
+    "tags",
+    multiple=True,
+    help="Tag to assign (repeatable; unknown tags are created).",
+)
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
 def add(
     url: str,
@@ -308,6 +329,7 @@ def add(
     salary_currency: str | None,
     salary_period: str | None,
     salary_note: str | None,
+    tags: tuple[str, ...],
     as_json: bool,
 ) -> None:
     """Add a position from explicit fields."""
@@ -335,6 +357,7 @@ def add(
         salary_currency=salary_currency if has_amount else None,
         salary_period=salary_period if has_amount else None,
         salary_note=salary_note,
+        tags=tags,
     )
     if as_json:
         click.echo(json_module.dumps(result))
@@ -411,12 +434,14 @@ def _filtered_jobs(
     min_salary: int | None,
     max_salary: int | None,
     salary_currency: str | None,
+    tags: tuple[str, ...] = (),
 ) -> list[db.Job]:
-    """Apply the shared status/company/salary filters used by list and export."""
+    """Apply the shared status/company/salary/tag filters used by list and export."""
     jobs = db.search_jobs(search or "", status=cast("db.JobStatus | None", status))
-    return salary.filter_by_salary(
+    jobs = salary.filter_by_salary(
         jobs, min_annual=min_salary, max_annual=max_salary, currency=salary_currency
     )
+    return db.filter_by_tags(jobs, tags)
 
 
 @cli.command(name="list")
@@ -425,6 +450,12 @@ def _filtered_jobs(
 @click.option("--min-salary", type=int, default=None, help="Minimum annualized salary.")
 @click.option("--max-salary", type=int, default=None, help="Maximum annualized salary.")
 @click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
+@click.option(
+    "--tag",
+    "tags",
+    multiple=True,
+    help="Only positions with this tag (repeatable, any-match).",
+)
 @click.option(
     "--sort",
     "sort_order",
@@ -451,6 +482,7 @@ def list_jobs(
     min_salary: int | None,
     max_salary: int | None,
     salary_currency: str | None,
+    tags: tuple[str, ...],
     sort_order: str | None,
     limit: int | None,
     offset: int,
@@ -458,7 +490,7 @@ def list_jobs(
 ) -> None:
     """List stored positions."""
     db.init_db()
-    jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency)
+    jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency, tags)
     if sort_order is not None:
         jobs = db.sort_jobs(jobs, cast("db.JobSort", sort_order))
     if offset:
@@ -491,6 +523,12 @@ def list_jobs(
 @click.option("--min-salary", type=int, default=None, help="Minimum annualized salary.")
 @click.option("--max-salary", type=int, default=None, help="Maximum annualized salary.")
 @click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
+@click.option(
+    "--tag",
+    "tags",
+    multiple=True,
+    help="Only positions with this tag (repeatable, any-match).",
+)
 def export(
     output: str,
     fmt: str | None,
@@ -499,10 +537,11 @@ def export(
     min_salary: int | None,
     max_salary: int | None,
     salary_currency: str | None,
+    tags: tuple[str, ...],
 ) -> None:
     """Export positions to JSON (import-compatible) or CSV, on stdout by default."""
     db.init_db()
-    jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency)
+    jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency, tags)
     chosen = fmt or ("csv" if output.lower().endswith(".csv") else "json")
     payload = exporters.render_csv(jobs) if chosen == "csv" else exporters.render_json(jobs)
     if output == "-":
@@ -537,6 +576,87 @@ def stats(as_json: bool) -> None:
             f"Salary ({currency}, annualized): {entry['count']} positions, "
             f"min {entry['minimum']:,}, median {entry['median']:,}, max {entry['maximum']:,}"
         )
+
+
+@cli.group(name="tags")
+def tags_group() -> None:
+    """Manage tags (labels) for filtering positions."""
+
+
+@tags_group.command(name="list")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON object.")
+def tags_list(as_json: bool) -> None:
+    """List tags with their position counts."""
+    db.init_db()
+    counts = db.tag_counts()
+    if as_json:
+        click.echo(json_module.dumps(counts))
+        return
+    if not counts:
+        click.echo("No tags.")
+        return
+    for name, count in counts.items():
+        click.echo(f"{name} ({count})")
+
+
+@tags_group.command(name="add")
+@click.argument("names", nargs=-1, required=True)
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
+def tags_add(names: tuple[str, ...], as_json: bool) -> None:
+    """Create one or more tags (existing names are reported, not an error)."""
+    db.init_db()
+    cleaned = [name.strip() for name in names]
+    if any(not name for name in cleaned):
+        raise click.ClickException("Tag names must not be empty.")
+    created = [name for name in cleaned if db.create_tag(name) is not None]
+    existing = [name for name in cleaned if name not in created]
+    if as_json:
+        click.echo(json_module.dumps({"created": created, "existing": existing}))
+        return
+    if created:
+        click.echo(f"Created {len(created)} tag(s): {', '.join(created)}.")
+    if existing:
+        click.echo(f"Already present: {', '.join(existing)}.")
+
+
+@tags_group.command(name="rename")
+@click.argument("old_name")
+@click.argument("new_name")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
+def tags_rename(old_name: str, new_name: str, as_json: bool) -> None:
+    """Rename a tag, keeping its assignments."""
+    db.init_db()
+    tag_id = db.find_tag(old_name)
+    if tag_id is None:
+        raise click.ClickException(f"Unknown tag: {old_name}")
+    if not db.rename_tag(tag_id, new_name):
+        raise click.ClickException(
+            f"Cannot rename '{old_name}' to '{new_name.strip()}' (empty or taken)."
+        )
+    if as_json:
+        click.echo(json_module.dumps({"renamed": old_name, "to": new_name.strip()}))
+        return
+    click.echo(f"Renamed '{old_name}' -> '{new_name.strip()}'.")
+
+
+@tags_group.command(name="rm")
+@click.argument("names", nargs=-1, required=True)
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
+def tags_rm(names: tuple[str, ...], as_json: bool) -> None:
+    """Delete tags (unknown names abort before anything is removed)."""
+    db.init_db()
+    found = [db.find_tag(name) for name in names]
+    unknown = [name for name, tag_id in zip(names, found, strict=True) if tag_id is None]
+    if unknown:
+        raise click.ClickException(f"Unknown tag(s): {', '.join(unknown)}")
+    removed = [name.strip() for name in names]
+    for tag_id in found:
+        if tag_id is not None:
+            db.delete_tag(tag_id)
+    if as_json:
+        click.echo(json_module.dumps({"removed": removed}))
+        return
+    click.echo(f"Removed {len(removed)} tag(s): {', '.join(removed)}.")
 
 
 @cli.command()
@@ -579,14 +699,19 @@ def backup_command(target_dir: str | None, keep: int | None, as_json: bool) -> N
 
 
 @cli.command()
-@click.option("--all", "clear_all", is_flag=True, help="Also delete profile/CV and settings.")
+@click.option(
+    "--all",
+    "clear_all",
+    is_flag=True,
+    help="Also delete profile/CV, settings, and tags.",
+)
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON result.")
 def clear(clear_all: bool, yes: bool, as_json: bool) -> None:
     """Delete job positions, or ALL data with --all."""
     db.init_db()
     prompt = (
-        "Delete ALL data (positions, profile/CV, settings)? This cannot be undone."
+        "Delete ALL data (positions, profile/CV, settings, tags)? This cannot be undone."
         if clear_all
         else "Delete all job positions? This cannot be undone."
     )
