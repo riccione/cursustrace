@@ -837,6 +837,101 @@ async def test_statistics_without_salary_shows_hint(user: User) -> None:
     await user.should_see("Add salary to positions to see the distribution.")
 
 
+def test_fill_months() -> None:
+    assert app._fill_months([("2026-01", 2), ("2026-04", 1)]) == (
+        ["2026-01", "2026-02", "2026-03", "2026-04"],
+        [2, 0, 0, 1],
+    )
+    assert app._fill_months([("2025-11", 3)]) == (["2025-11"], [3])
+    assert app._fill_months([("2025-12", 1), ("2026-01", 2)]) == (
+        ["2025-12", "2026-01"],
+        [1, 2],
+    )
+
+
+async def test_statistics_status_pie(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/3", "Three", "Acme", "Remote", "desc")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "rejected")
+    await user.open("/")
+
+    chart = cast(ui.echart, user.find(marker="status-chart").elements.pop())
+    assert chart.options["series"][0]["data"] == [
+        {"name": "Unapplied", "value": 1},
+        {"name": "Applied", "value": 1},
+        {"name": "Interview", "value": 0},
+        {"name": "Rejected", "value": 1},
+    ]
+
+
+async def test_statistics_funnel(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/3", "Three", "Acme", "Remote", "desc")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "rejected")
+    await user.open("/")
+
+    chart = cast(ui.echart, user.find(marker="funnel-chart").elements.pop())
+    assert chart.options["series"][0]["data"] == [
+        {"name": "Added", "value": 3},
+        {"name": "Applied", "value": 2},
+        {"name": "Response", "value": 1},
+        {"name": "Interview", "value": 0},
+    ]
+
+
+async def test_statistics_timeline_chart(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "desc")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "applied")
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_applied = '2020-01-15 09:00:00' WHERE id = ?",
+            (jobs[0]["id"],),
+        )
+        conn.commit()
+    await user.open("/")
+
+    chart = cast(ui.echart, user.find(marker="timeline-chart").elements.pop())
+    labels = chart.options["xAxis"]["data"]
+    values = chart.options["series"][0]["data"]
+    assert labels[0] == "2020-01"
+    assert labels[-1] == time.strftime("%Y-%m")
+    assert values[0] == 1
+    assert values[-1] == 1
+    assert sum(values) == 2
+
+
+async def test_statistics_charts_hidden_without_positions(user: User) -> None:
+    db.init_db()
+    await user.open("/")
+
+    await user.should_see("No positions yet to display charts.")
+    await user.should_not_see(marker="status-chart")
+    await user.should_not_see(marker="funnel-chart")
+    await user.should_not_see(marker="timeline-chart")
+
+
+async def test_statistics_timeline_hint_without_applications(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    await user.should_see("No applications recorded yet.")
+    await user.should_see(marker="status-chart")
+    await user.should_see(marker="funnel-chart")
+    await user.should_not_see(marker="timeline-chart")
+
+
 async def test_card_has_full_details_link(user: User) -> None:
     await user.open("/")
     await _scan(user)

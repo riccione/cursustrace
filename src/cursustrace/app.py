@@ -57,6 +57,20 @@ STAT_CARDS: tuple[tuple[str, str], ...] = (
     ("rejected", "❌ Rejected"),
 )
 
+STATUS_NAMES: tuple[tuple[db.JobStatus, str], ...] = (
+    ("unapplied", "Unapplied"),
+    ("applied", "Applied"),
+    ("interview", "Interview"),
+    ("rejected", "Rejected"),
+)
+
+FUNNEL_STAGES: tuple[tuple[str, str], ...] = (
+    ("added", "Added"),
+    ("applied", "Applied"),
+    ("response", "Response"),
+    ("interview", "Interview"),
+)
+
 GLOBAL_CSS = """
 html { font-size: 22px; }
 body { font-size: 22px; }
@@ -248,6 +262,72 @@ def _render_job_card(
         _render_delete_controls(job, refresh)
 
 
+def _fill_months(months: list[tuple[str, int]]) -> tuple[list[str], list[int]]:
+    """Expand sparse monthly counts into a zero-filled, contiguous series."""
+    counts = dict(months)
+    year, month = int(months[0][0][:4]), int(months[0][0][5:7])
+    end_year, end_month = int(months[-1][0][:4]), int(months[-1][0][5:7])
+    labels: list[str] = []
+    while (year, month) <= (end_year, end_month):
+        labels.append(f"{year:04d}-{month:02d}")
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    return labels, [counts.get(label, 0) for label in labels]
+
+
+def _render_status_pie(counts: dict[str, int]) -> None:
+    with ui.card().classes("w-full"):
+        ui.label("Status distribution").classes("text-subtitle1")
+        options = {
+            "tooltip": {"trigger": "item", "formatter": "{b}: {c}"},
+            "legend": {"bottom": 0},
+            "series": [
+                {
+                    "type": "pie",
+                    "radius": ["45%", "70%"],
+                    "label": {"formatter": "{b}: {c}"},
+                    "data": [{"name": name, "value": counts[key]} for key, name in STATUS_NAMES],
+                }
+            ],
+        }
+        ui.echart(options).classes("w-full").mark("status-chart")
+
+
+def _render_funnel() -> None:
+    funnel = db.pipeline_funnel()
+    with ui.card().classes("w-full"):
+        ui.label("Response funnel").classes("text-subtitle1")
+        options = {
+            "tooltip": {"trigger": "item", "formatter": "{b}: {c}"},
+            "series": [
+                {
+                    "type": "funnel",
+                    "left": "10%",
+                    "width": "80%",
+                    "sort": "none",
+                    "gap": 2,
+                    "label": {"formatter": "{b}: {c}"},
+                    "data": [{"name": name, "value": funnel[key]} for key, name in FUNNEL_STAGES],
+                }
+            ],
+        }
+        ui.echart(options).classes("w-full").mark("funnel-chart")
+
+
+def _render_timeline(months: list[tuple[str, int]]) -> None:
+    labels, values = _fill_months(months)
+    with ui.card().classes("w-full"):
+        ui.label("Applications per month").classes("text-subtitle1")
+        options = {
+            "tooltip": {"trigger": "axis"},
+            "xAxis": {"type": "category", "data": labels},
+            "yAxis": {"type": "value", "name": "Applications", "minInterval": 1},
+            "series": [{"type": "bar", "name": "Applications", "data": values, "barMaxWidth": 40}],
+        }
+        ui.echart(options).classes("w-full").mark("timeline-chart")
+
+
 def _render_statistics() -> None:
     counts = db.job_counts()
     with ui.grid(columns=2).classes("w-full gap-4"):
@@ -255,6 +335,18 @@ def _render_statistics() -> None:
             with ui.card().classes("w-full items-center"):
                 ui.label(str(counts[key])).classes("text-h4").mark(f"stat-{key}")
                 ui.label(label)
+
+    if counts["total"]:
+        with ui.grid(columns=2).classes("w-full gap-4"):
+            _render_status_pie(counts)
+            _render_funnel()
+        months = db.applications_by_month()
+        if months:
+            _render_timeline(months)
+        else:
+            ui.label("No applications recorded yet.").classes("text-caption")
+    else:
+        ui.label("No positions yet to display charts.").classes("text-caption")
 
     jobs = db.get_jobs()
     summary = salary.salary_summary(jobs)

@@ -113,7 +113,9 @@ the SQLite database, and **📄 Export to PDF** downloads a formatted document
 combining your contact header with the CV body.
 
 The **📊 Statistics** tab shows how many positions you have in total and in each
-pipeline stage (unapplied, applied, interview, rejected).
+pipeline stage (unapplied, applied, interview, rejected), with charts for the
+status distribution, applications per month, and a response funnel from added
+to applied, responded, and interview.
 
 ## Customizing the CV PDF style
 
