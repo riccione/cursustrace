@@ -276,7 +276,7 @@ def _fill_months(months: list[tuple[str, int]]) -> tuple[list[str], list[int]]:
     return labels, [counts.get(label, 0) for label in labels]
 
 
-def _render_status_pie(counts: dict[str, int]) -> None:
+def _render_status_pie(counts: dict[str, int], dark: bool) -> None:
     with ui.card().classes("w-full"):
         ui.label("Status distribution").classes("text-subtitle1")
         options = {
@@ -291,10 +291,10 @@ def _render_status_pie(counts: dict[str, int]) -> None:
                 }
             ],
         }
-        ui.echart(options).classes("w-full").mark("status-chart")
+        ui.echart(options, theme="dark" if dark else None).classes("w-full").mark("status-chart")
 
 
-def _render_funnel() -> None:
+def _render_funnel(dark: bool) -> None:
     funnel = db.pipeline_funnel()
     with ui.card().classes("w-full"):
         ui.label("Response funnel").classes("text-subtitle1")
@@ -312,10 +312,10 @@ def _render_funnel() -> None:
                 }
             ],
         }
-        ui.echart(options).classes("w-full").mark("funnel-chart")
+        ui.echart(options, theme="dark" if dark else None).classes("w-full").mark("funnel-chart")
 
 
-def _render_timeline(months: list[tuple[str, int]]) -> None:
+def _render_timeline(months: list[tuple[str, int]], dark: bool) -> None:
     labels, values = _fill_months(months)
     with ui.card().classes("w-full"):
         ui.label("Applications per month").classes("text-subtitle1")
@@ -325,10 +325,10 @@ def _render_timeline(months: list[tuple[str, int]]) -> None:
             "yAxis": {"type": "value", "name": "Applications", "minInterval": 1},
             "series": [{"type": "bar", "name": "Applications", "data": values, "barMaxWidth": 40}],
         }
-        ui.echart(options).classes("w-full").mark("timeline-chart")
+        ui.echart(options, theme="dark" if dark else None).classes("w-full").mark("timeline-chart")
 
 
-def _render_statistics() -> None:
+def _render_statistics(dark: bool) -> None:
     counts = db.job_counts()
     with ui.grid(columns=2).classes("w-full gap-4"):
         for key, label in STAT_CARDS:
@@ -338,11 +338,11 @@ def _render_statistics() -> None:
 
     if counts["total"]:
         with ui.grid(columns=2).classes("w-full gap-4"):
-            _render_status_pie(counts)
-            _render_funnel()
+            _render_status_pie(counts, dark)
+            _render_funnel(dark)
         months = db.applications_by_month()
         if months:
-            _render_timeline(months)
+            _render_timeline(months, dark)
         else:
             ui.label("No applications recorded yet.").classes("text-caption")
     else:
@@ -374,7 +374,9 @@ def _render_statistics() -> None:
                 "yAxis": {"type": "value", "name": "Positions"},
                 "series": [{"type": "bar", "name": "Positions", "data": values}],
             }
-            ui.echart(options).classes("w-full").mark("salary-chart")
+            ui.echart(options, theme="dark" if dark else None).classes("w-full").mark(
+                "salary-chart"
+            )
 
     currency.on_value_change(lambda _: render_chart())
     render_chart()
@@ -486,6 +488,7 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
         name = event.value or "system"
         dark.value = _dark_mode_value(name)
         db.set_setting(DARK_MODE_KEY, name)
+        refresh()
 
     theme.on_value_change(update_theme)
 
@@ -1091,7 +1094,7 @@ def dashboard_page(request: Request) -> None:
         if stats_container is not None:
             stats_container.clear()
             with stats_container:
-                _render_statistics()
+                _render_statistics(dark.value is True)
 
     with ui.header().classes("items-center justify-between"):
         ui.label(APP_TITLE).classes("text-h6")

@@ -932,6 +932,25 @@ async def test_statistics_timeline_hint_without_applications(user: User) -> None
     await user.should_not_see(marker="timeline-chart")
 
 
+async def test_statistics_charts_use_dark_theme(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    chart = cast(ui.echart, user.find(marker="status-chart").elements.pop())
+    assert chart.props["theme"] is None
+
+    user.find(ui.toggle).elements.pop().set_value("dark")
+
+    def theme_is_dark() -> bool:
+        try:
+            current = cast(ui.echart, user.find(marker="status-chart").elements.pop())
+        except AssertionError:
+            return False
+        return bool(current.props["theme"] == "dark")
+
+    await _wait_for(theme_is_dark)
+
+
 async def test_card_has_full_details_link(user: User) -> None:
     await user.open("/")
     await _scan(user)
