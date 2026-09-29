@@ -528,9 +528,12 @@ def test_export_json_round_trips_through_import(runner: CliRunner, tmp_path: Pat
     assert job_id is not None
     db.set_job_status(job_id, "interview")
     db.set_job_comment(job_id, "interview", "tech round")
+    db.set_job_tags(job_id, ["remote", "startup"])
     dump = tmp_path / "jobs.json"
 
     assert runner.invoke(cli_module.cli, ["export", str(dump)]).exit_code == 0
+    exported = json.loads(dump.read_text(encoding="utf-8"))
+    assert exported[0]["tags"] == ["remote", "startup"]
     assert runner.invoke(cli_module.cli, ["clear", "--yes"]).exit_code == 0
 
     import_result = runner.invoke(cli_module.cli, ["import", str(dump), "--json"])
@@ -547,6 +550,7 @@ def test_export_json_round_trips_through_import(runner: CliRunner, tmp_path: Pat
     assert job["salary_note"] == "plus bonus"
     assert db.job_status(job) == "interview"
     assert job["interview_comment"] == "tech round"
+    assert db.job_tags(job["id"]) == ["remote", "startup"]  # tags survive too
 
 
 def test_export_csv_uses_extension_and_quotes_fields(runner: CliRunner, tmp_path: Path) -> None:
@@ -819,6 +823,7 @@ def test_clear_removes_positions(runner: CliRunner) -> None:
     db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
     db.save_profile(_profile())
     db.set_setting("dark_mode", "dark")
+    db.create_tag("remote")
 
     result = runner.invoke(cli_module.cli, ["clear", "--yes"])
 
@@ -827,6 +832,7 @@ def test_clear_removes_positions(runner: CliRunner) -> None:
     assert db.get_jobs() == []
     assert db.get_profile()["full_name"] == "Jane Doe"
     assert db.get_setting("dark_mode") == "dark"
+    assert db.list_tags() == ["remote"]  # plain clear keeps the catalog
 
 
 def test_clear_all_removes_everything(runner: CliRunner) -> None:
@@ -834,6 +840,7 @@ def test_clear_all_removes_everything(runner: CliRunner) -> None:
     db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
     db.save_profile(_profile())
     db.set_setting("dark_mode", "dark")
+    db.create_tag("remote")
 
     result = runner.invoke(cli_module.cli, ["clear", "--all", "--yes", "--json"])
 
@@ -842,3 +849,169 @@ def test_clear_all_removes_everything(runner: CliRunner) -> None:
     assert db.get_jobs() == []
     assert db.get_profile()["full_name"] == ""
     assert db.get_setting("dark_mode") is None
+    assert db.list_tags() == []
+
+
+# --- Tags -------------------------------------------------------------------
+
+
+def _tagged_job(
+    url: str,
+    company: str,
+    tags: tuple[str, ...] = (),
+    *,
+    title: str = "Engineer",
+) -> int:
+    job_id = db.add_job(url, title, company, "Remote", "Body")
+    assert job_id is not None
+    if tags:
+        db.set_job_tags(job_id, tags)
+    return job_id
+
+
+def test_list_filters_by_tag(runner: CliRunner) -> None:
+    db.init_db()
+    _tagged_job("https://a.com/1", "Zeta", ("remote",))
+    _tagged_job("https://a.com/2", "Alpha", ("startup", "remote"))
+    _tagged_job("https://a.com/3", "Mid")
+
+    def companies(*args: str) -> list[str]:
+        result = runner.invoke(cli_module.cli, ["list", "--json", *args])
+        assert result.exit_code == 0
+        return [record["company"] for record in json.loads(result.output)]
+
+    assert len(companies()) == 3  # no filter
+    assert companies("--tag", "remote") == ["Alpha", "Zeta"]  # any-match, id-DESC
+    assert companies("--tag", "REMOTE") == ["Alpha", "Zeta"]  # case-insensitive
+    assert companies("--tag", "remote", "--tag", "startup") == ["Alpha", "Zeta"]
+    assert companies("--tag", "referral") == []  # unknown tag matches nothing
+    assert "No positions." in runner.invoke(cli_module.cli, ["list", "--tag", "x"]).output
+
+
+def test_export_filters_by_tag(runner: CliRunner) -> None:
+    db.init_db()
+    _tagged_job("https://a.com/1", "Zeta", ("remote",))
+    _tagged_job("https://a.com/2", "Alpha", ("startup",))
+
+    result = runner.invoke(cli_module.cli, ["export", "--tag", "startup"])
+
+    assert result.exit_code == 0
+    records = json.loads(result.output)
+    assert [record["company"] for record in records] == ["Alpha"]
+
+
+def test_add_assigns_tags(runner: CliRunner) -> None:
+    db.init_db()
+
+    result = runner.invoke(
+        cli_module.cli,
+        [*ADD_ARGS, "--tag", "remote", "--tag", "Startup"],
+    )
+
+    assert result.exit_code == 0
+    assert db.list_tags() == ["remote", "Startup"]  # alphabetical, case-insensitive
+    assert db.job_tags(db.get_jobs()[0]["id"]) == ["remote", "Startup"]
+
+
+def test_add_duplicate_does_not_touch_tags(runner: CliRunner) -> None:
+    db.init_db()
+    job_id = _tagged_job("https://a.com/1", "Acme", ("remote",))
+
+    result = runner.invoke(cli_module.cli, [*ADD_ARGS, "--tag", "startup"])
+
+    assert result.exit_code == 0
+    assert "Skipped (already tracked)" in result.output
+    assert db.job_tags(job_id) == ["remote"]
+
+
+def test_tags_lifecycle(runner: CliRunner) -> None:
+    db.init_db()
+
+    created = runner.invoke(cli_module.cli, ["tags", "add", "remote", "startup", "--json"])
+    assert created.exit_code == 0
+    assert json.loads(created.output) == {"created": ["remote", "startup"], "existing": []}
+
+    again = runner.invoke(cli_module.cli, ["tags", "add", "remote", "--json"])
+    assert json.loads(again.output) == {"created": [], "existing": ["remote"]}
+
+    job_id = _tagged_job("https://a.com/1", "Acme", ("remote",))
+    counts = runner.invoke(cli_module.cli, ["tags", "list", "--json"])
+    assert json.loads(counts.output) == {"remote": 1, "startup": 0}
+    listed = runner.invoke(cli_module.cli, ["tags", "list"])
+    assert "remote (1)" in listed.output
+    assert "startup (0)" in listed.output
+
+    renamed = runner.invoke(cli_module.cli, ["tags", "rename", "remote", "wfh", "--json"])
+    assert renamed.exit_code == 0
+    assert json.loads(renamed.output) == {"renamed": "remote", "to": "wfh"}
+    assert db.job_tags(job_id) == ["wfh"]
+
+    collision = runner.invoke(cli_module.cli, ["tags", "rename", "startup", "WFH"])
+    assert collision.exit_code == 1
+    assert "empty or taken" in collision.output
+
+    unknown_rename = runner.invoke(cli_module.cli, ["tags", "rename", "nope", "x"])
+    assert unknown_rename.exit_code == 1
+    assert "Unknown tag: nope" in unknown_rename.output
+
+    removed = runner.invoke(cli_module.cli, ["tags", "rm", "wfh", "--json"])
+    assert removed.exit_code == 0
+    assert json.loads(removed.output) == {"removed": ["wfh"]}
+    assert db.list_tags() == ["startup"]
+    assert db.job_tags(job_id) == []
+
+    unknown_rm = runner.invoke(cli_module.cli, ["tags", "rm", "wfh", "other"])
+    assert unknown_rm.exit_code == 1
+    assert "Unknown tag(s): wfh, other" in unknown_rm.output
+    assert db.list_tags() == ["startup"]  # aborted before deleting
+
+
+def test_tags_add_rejects_blank_name(runner: CliRunner) -> None:
+    db.init_db()
+    result = runner.invoke(cli_module.cli, ["tags", "add", "  "])
+    assert result.exit_code == 1
+    assert "must not be empty" in result.output
+    assert db.list_tags() == []
+
+
+def test_import_accepts_list_and_string_tags(runner: CliRunner) -> None:
+    db.init_db()
+    payload = json.dumps(
+        [
+            {
+                "url": "https://a.com/1",
+                "title": "Engineer",
+                "company": "Acme",
+                "description": "Body",
+                "tags": ["remote", "startup"],
+            },
+            {
+                "url": "https://a.com/2",
+                "title": "Dev",
+                "company": "Two",
+                "description": "Body",
+                "tags": "remote; referral",
+            },
+        ]
+    )
+
+    result = runner.invoke(cli_module.cli, ["import", "--json"], input=payload)
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["added"] == 2
+    jobs = {job["job_url"]: job for job in db.get_jobs()}
+    assert db.job_tags(jobs["https://a.com/1"]["id"]) == ["remote", "startup"]
+    assert db.job_tags(jobs["https://a.com/2"]["id"]) == ["referral", "remote"]
+
+
+def test_export_csv_joins_tags_with_semicolons(runner: CliRunner) -> None:
+    db.init_db()
+    _tagged_job("https://a.com/1", "Acme", ("remote", "startup"))
+    _tagged_job("https://a.com/2", "Other")
+
+    result = runner.invoke(cli_module.cli, ["export", "--format", "csv", "--tag", "remote"])
+
+    assert result.exit_code == 0
+    rows = list(csv.DictReader(result.output.splitlines()))
+    assert [row["company"] for row in rows] == ["Acme"]
+    assert rows[0]["tags"] == "remote;startup"

@@ -553,6 +553,7 @@ async def test_salary_filter_narrows_status_lists(user: User) -> None:
     await user.should_see("Unknown Salary")
     await user.should_see("Paid Role")
 
+    cast(ui.expansion, user.find(marker="advanced-filters").elements.pop()).open()
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
 
     await user.should_not_see("Unknown Salary")
@@ -1154,3 +1155,257 @@ def test_run_survives_backup_failure(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert "host" in captured
     finally:
         app._settings = None
+
+
+# --- Tags -------------------------------------------------------------------
+
+
+def _tagged_pair() -> tuple[int, int]:
+    """Create two unapplied jobs; the 'Zeta' one carries a golang tag."""
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    db.add_job("https://a.com/2", "Alpha role", "Alpha", "Remote", "Body")
+    ids = {job["company"]: job["id"] for job in db.get_jobs()}
+    db.set_job_tags(ids["Zeta"], ["golang"])
+    return ids["Zeta"], ids["Alpha"]
+
+
+async def test_add_job_manually_assigns_tags(user: User) -> None:
+    db.init_db()
+    db.create_tag("remote")
+    db.create_tag("startup")
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/tags")
+        user.find("Title").clear().type("Tagged Engineer")
+        user.find("Company").clear().type("Acme")
+        user.find("Description").clear().type("Body")
+        cast(ui.select, user.find(marker="tags-field").elements.pop()).set_value(
+            ["remote", "startup", "brand-new"]
+        )
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    job_id = db.get_jobs()[0]["id"]
+    assert db.job_tags(job_id) == ["brand-new", "remote", "startup"]  # alphabetical
+    assert db.list_tags() == ["brand-new", "remote", "startup"]  # brand-new auto-created
+
+    tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
+    assert sorted(str(name) for name in tag_select.options) == [
+        "brand-new",
+        "remote",
+        "startup",
+    ]
+
+
+async def test_edit_form_replaces_tags(user: User) -> None:
+    db.init_db()
+    job_id = _seed_job()
+    db.set_job_tags(job_id, ["remote"])
+    await user.open(f"/job/{job_id}")
+
+    user.find("✏️ Edit").click()
+    with user.scope(marker="job-form"):
+        cast(ui.select, user.find(marker="tags-field").elements.pop()).set_value(["referral"])
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: db.job_tags(job_id) == ["referral"])
+    assert db.list_tags() == ["referral", "remote"]  # unused tags stay in the catalog
+
+
+async def test_cards_and_detail_show_tag_chips(user: User) -> None:
+    db.init_db()
+    job_id = _seed_job()
+    db.set_job_tags(job_id, ["golang", "referral"])
+
+    await user.open("/")
+    await user.should_see("golang")
+    await user.should_see("referral")
+
+    await user.open(f"/job/{job_id}")
+    await user.should_see("golang")
+    await user.should_see("referral")
+
+
+async def test_tag_filter_select_narrows_list(user: User) -> None:
+    _tagged_pair()
+    await user.open("/")
+    await user.should_see("Zulu role")
+    await user.should_see("Alpha role")
+
+    cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value(["golang"])
+
+    await user.should_see("Zulu role")
+    await user.should_not_see("Alpha role")
+
+
+async def test_clicking_chip_filters_dashboard(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    db.add_job("https://a.com/2", "Alpha role", "Alpha", "Remote", "Body")
+    ids = {job["company"]: job["id"] for job in db.get_jobs()}
+    db.set_job_tags(ids["Zeta"], ["golang"])
+    db.set_job_tags(ids["Alpha"], ["rust"])
+    await user.open("/")
+    await user.should_see("Zulu role")
+    await user.should_see("Alpha role")
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.value is False
+
+    user.find(kind=ui.chip, content="golang").click()
+
+    tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
+    await _wait_for(lambda: list(tag_select.value or []) == ["golang"])
+    assert advanced.value is True  # chip click expands the Advanced bar
+    await user.should_see("Zulu role")
+    await user.should_not_see("Alpha role")
+
+
+async def test_detail_chip_navigates_to_filtered_dashboard(user: User) -> None:
+    db.init_db()
+    tagged_id = _seed_job(title="Tagged role")
+    db.add_job("https://a.com/other", "Untagged role", "OtherCo", "Berlin", "Body")
+    db.set_job_tags(tagged_id, ["golang"])
+    await user.open(f"/job/{tagged_id}")
+
+    user.find(kind=ui.chip, content="golang").click()
+
+    await user.should_see("Filter by tag")  # dashboard reloaded with the tag filter
+    await user.should_see("Tagged role")
+    await user.should_not_see("Untagged role")
+    tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
+    assert list(tag_select.value or []) == ["golang"]
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.value is True  # deep-linked tag opens the Advanced bar
+
+
+async def test_opening_with_tag_query_filters_dashboard(user: User) -> None:
+    _tagged_pair()
+    await user.open("/?tag=golang")
+
+    tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
+    assert list(tag_select.value or []) == ["golang"]
+    await user.should_see("Zulu role")
+    await user.should_not_see("Alpha role")
+
+
+async def test_advanced_filters_hidden_during_search(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    await user.open("/")
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.visible
+
+    user.find("Search company").clear().type("Zeta")
+    await user.should_see("[Unapplied]")
+    assert not advanced.visible
+
+
+async def test_tag_manager_adds_renames_and_deletes(user: User) -> None:
+    db.init_db()
+    await user.open("/")
+    user.find(marker="settings-button").click()
+    user.find(marker="manage-tags").click()
+
+    with user.scope(marker="tag-manager"):
+        user.find(marker="new-tag-name").clear().type("golang")
+        user.find("Add tag").click()
+    await _wait_for(lambda: db.list_tags() == ["golang"])
+    await user.should_see("Tag 'golang' created.")
+
+    tag_id = db.find_tag("golang")
+    assert tag_id is not None
+    with user.scope(marker="tag-manager"):
+        cast(ui.input, user.find(marker=f"rename-tag-{tag_id}").elements.pop()).set_value("wfh")
+        user.find("Rename").click()
+    await _wait_for(lambda: db.list_tags() == ["wfh"])
+    await user.should_see("Tag renamed.")
+
+    wfh_id = db.find_tag("wfh")
+    assert wfh_id is not None
+    with user.scope(marker="tag-manager"):
+        user.find(marker=f"delete-tag-{wfh_id}").click()
+    with user.scope(marker="tag-delete-confirm"):
+        await user.should_see("Delete tag 'wfh'?")
+        user.find(marker="confirm-delete-tag").click()
+
+    await _wait_for(lambda: db.list_tags() == [])
+    await user.should_see("Tag deleted.")
+
+
+async def test_manager_rename_keeps_assignments_and_filter(user: User) -> None:
+    _tagged_pair()
+    await user.open("/")
+    user.find(marker="manage-tags").click()
+
+    tag_id = db.find_tag("golang")
+    assert tag_id is not None
+    with user.scope(marker="tag-manager"):
+        cast(ui.input, user.find(marker=f"rename-tag-{tag_id}").elements.pop()).set_value("go")
+        user.find("Rename").click()
+    await _wait_for(lambda: db.list_tags() == ["go"])
+
+    job = next(job for job in db.get_jobs() if job["company"] == "Zeta")
+    assert db.job_tags(job["id"]) == ["go"]
+
+    tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
+    await _wait_for(lambda: [str(name) for name in tag_select.options] == ["go"])
+
+
+async def test_advanced_bar_collapsed_by_default(user: User) -> None:
+    db.init_db()
+    db.add_job(
+        "https://a.com/1",
+        "High role",
+        "HighCo",
+        "Remote",
+        "Body",
+        salary_min=90000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+    db.add_job(
+        "https://a.com/2",
+        "Low role",
+        "LowCo",
+        "Remote",
+        "Body",
+        salary_min=30000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+    await user.open("/")
+
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.value is False  # default view: search, sort, pagination only
+    await user.should_see("High role")
+    await user.should_see("Low role")
+
+    advanced.open()
+    assert advanced.value is True
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
+
+    await user.should_see("High role")
+    await user.should_not_see("Low role")
+
+
+async def test_advanced_bar_shows_active_count(user: User) -> None:
+    _tagged_pair()
+    await user.open("/")
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.text == "Advanced filters"
+
+    cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value(["golang"])
+    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
+    await _wait_for(lambda: advanced.text == "Advanced filters (2 active)")
+
+    cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value([])
+    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(None)
+    await _wait_for(lambda: advanced.text == "Advanced filters")

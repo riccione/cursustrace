@@ -84,6 +84,23 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE_EVENTS_INDEX = "CREATE INDEX IF NOT EXISTS idx_events_job_id ON events(job_id)"
 
+CREATE_TAGS_TABLE = """
+CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL COLLATE NOCASE
+)
+"""
+
+CREATE_JOB_TAGS_TABLE = """
+CREATE TABLE IF NOT EXISTS job_tags (
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (job_id, tag_id)
+)
+"""
+
+CREATE_JOB_TAGS_INDEX = "CREATE INDEX IF NOT EXISTS idx_job_tags_tag_id ON job_tags(tag_id)"
+
 
 class Job(TypedDict):
     """A stored job listing row."""
@@ -274,9 +291,12 @@ def init_db() -> None:
         conn.execute(CREATE_PROFILE_TABLE)
         conn.execute(CREATE_SETTINGS_TABLE)
         conn.execute(CREATE_EVENTS_TABLE)
+        conn.execute(CREATE_TAGS_TABLE)
+        conn.execute(CREATE_JOB_TAGS_TABLE)
         _migrate(conn)
         _migrate_profile(conn)
         conn.execute(CREATE_EVENTS_INDEX)
+        conn.execute(CREATE_JOB_TAGS_INDEX)
         conn.commit()
         conn.execute("PRAGMA journal_mode=WAL")
         if not events_existed:
@@ -559,7 +579,7 @@ def delete_job(job_id: int) -> None:
 
 
 def clear_all_data() -> dict[str, int]:
-    """Delete all jobs, the profile row, and all settings; return the counts."""
+    """Delete all jobs, the profile row, settings, and tags; return the counts."""
     with closing(get_connection()) as conn:
         positions = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
         settings = int(conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0])
@@ -568,8 +588,154 @@ def clear_all_data() -> dict[str, int]:
         conn.execute("DELETE FROM sqlite_sequence WHERE name = 'events'")
         conn.execute("DELETE FROM profile")
         conn.execute("DELETE FROM settings")
+        conn.execute("DELETE FROM tags")
         conn.commit()
     return {"positions": positions, "settings": settings}
+
+
+def list_tags() -> list[str]:
+    """Return every tag name, alphabetically, case-insensitively."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute("SELECT name FROM tags ORDER BY name COLLATE NOCASE").fetchall()
+    return [row["name"] for row in rows]
+
+
+def tag_counts() -> dict[str, int]:
+    """Return tag name -> number of assigned positions, alphabetically."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT t.name, COUNT(jt.job_id) AS uses FROM tags t "
+            "LEFT JOIN job_tags jt ON jt.tag_id = t.id GROUP BY t.id "
+            "ORDER BY t.name COLLATE NOCASE"
+        ).fetchall()
+    return {row["name"]: int(row["uses"]) for row in rows}
+
+
+def find_tag(name: str) -> int | None:
+    """Return the id of a tag by name (case-insensitive), or None when unknown."""
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return None
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (cleaned,)
+        ).fetchone()
+    return int(row["id"]) if row is not None else None
+
+
+def create_tag(name: str) -> int | None:
+    """Create a tag; return its id, or None when empty or already present."""
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return None
+    with closing(get_connection()) as conn:
+        try:
+            cursor = conn.execute("INSERT INTO tags (name) VALUES (?)", (cleaned,))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return None
+    return cast("int", cursor.lastrowid)
+
+
+def rename_tag(tag_id: int, new_name: str) -> bool:
+    """Rename a tag; False when the new name is empty, taken, or the id is unknown."""
+    cleaned = (new_name or "").strip()
+    if not cleaned:
+        return False
+    try:
+        with closing(get_connection()) as conn:
+            cursor = conn.execute("UPDATE tags SET name = ? WHERE id = ?", (cleaned, tag_id))
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return False
+    return cursor.rowcount > 0
+
+
+def delete_tag(tag_id: int) -> None:
+    """Delete a tag; its job assignments go away with it (ON DELETE CASCADE)."""
+    with closing(get_connection()) as conn:
+        conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+        conn.commit()
+
+
+def _ensure_tag(conn: sqlite3.Connection, name: str) -> int | None:
+    """Return the tag id for ``name``, creating it when missing (case-insensitive)."""
+    cleaned = name.strip()
+    if not cleaned:
+        return None
+    row = conn.execute("SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (cleaned,)).fetchone()
+    if row is not None:
+        return int(row["id"])
+    cursor = conn.execute("INSERT INTO tags (name) VALUES (?)", (cleaned,))
+    return cast("int", cursor.lastrowid)
+
+
+def set_job_tags(job_id: int, names: list[str] | tuple[str, ...]) -> None:
+    """Replace a job's tags, creating any unknown names."""
+    with closing(get_connection()) as conn:
+        wanted: set[int] = set()
+        for name in names:
+            tag_id = _ensure_tag(conn, name)
+            if tag_id is not None:
+                wanted.add(tag_id)
+        current = {
+            int(row["tag_id"])
+            for row in conn.execute(
+                "SELECT tag_id FROM job_tags WHERE job_id = ?", (job_id,)
+            ).fetchall()
+        }
+        for tag_id in current - wanted:
+            conn.execute("DELETE FROM job_tags WHERE job_id = ? AND tag_id = ?", (job_id, tag_id))
+        for tag_id in wanted - current:
+            conn.execute(
+                "INSERT OR IGNORE INTO job_tags (job_id, tag_id) VALUES (?, ?)",
+                (job_id, tag_id),
+            )
+        conn.commit()
+
+
+def job_tags(job_id: int) -> list[str]:
+    """Return one job's tag names, alphabetically, case-insensitively."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT t.name FROM job_tags jt JOIN tags t ON t.id = jt.tag_id "
+            "WHERE jt.job_id = ? ORDER BY t.name COLLATE NOCASE",
+            (job_id,),
+        ).fetchall()
+    return [row["name"] for row in rows]
+
+
+def tags_for_jobs(job_ids: list[int]) -> dict[int, list[str]]:
+    """Return job id -> tag names for a batch of jobs (missing ids map to [])."""
+    if not job_ids:
+        return {}
+    placeholders = ",".join("?" for _ in job_ids)
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT jt.job_id, t.name FROM job_tags jt JOIN tags t ON t.id = jt.tag_id "
+            f"WHERE jt.job_id IN ({placeholders}) ORDER BY t.name COLLATE NOCASE",
+            tuple(job_ids),
+        ).fetchall()
+    grouped: dict[int, list[str]] = {job_id: [] for job_id in job_ids}
+    for row in rows:
+        grouped[int(row["job_id"])].append(row["name"])
+    return grouped
+
+
+def filter_by_tags(jobs: list[Job], wanted: list[str] | tuple[str, ...]) -> list[Job]:
+    """Keep jobs carrying at least one of ``wanted`` (case-insensitive); no-op when empty."""
+    names = [name.strip() for name in wanted if name.strip()]
+    if not names or not jobs:
+        return jobs
+    placeholders = ",".join("?" for _ in names)
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT jt.job_id FROM job_tags jt JOIN tags t ON t.id = jt.tag_id "
+            f"WHERE t.name COLLATE NOCASE IN ({placeholders})",
+            tuple(names),
+        ).fetchall()
+    keep = {int(row["job_id"]) for row in rows}
+    return [job for job in jobs if job["id"] in keep]
 
 
 def update_job(
