@@ -535,6 +535,45 @@ def job_counts() -> dict[str, int]:
     }
 
 
+def applications_by_month() -> list[tuple[str, int]]:
+    """Return application counts per calendar month (YYYY-MM), ascending."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT substr(date_applied, 1, 7) AS month, COUNT(*) AS count "
+            "FROM jobs WHERE date_applied IS NOT NULL GROUP BY month ORDER BY month"
+        ).fetchall()
+    return [(str(row["month"]), int(row["count"])) for row in rows]
+
+
+def pipeline_funnel() -> dict[str, int]:
+    """Return monotonic pipeline counts for the response funnel.
+
+    Stages are counted from the event log so they survive unmarking a
+    status (which clears ``date_applied``): ``applied`` counts jobs that
+    ever left the unapplied stage, ``response`` jobs that reached an
+    interview or a rejection, and ``interview`` jobs that reached an
+    interview. The subset relation guarantees a non-increasing funnel.
+    """
+    with closing(get_connection()) as conn:
+        row = conn.execute(
+            "SELECT "
+            "COUNT(DISTINCT CASE WHEN status != 'unapplied' THEN job_id END) AS applied, "
+            "COUNT(DISTINCT CASE WHEN status IN ('interview', 'rejected') "
+            "THEN job_id END) AS response, "
+            "COUNT(DISTINCT CASE WHEN status = 'interview' THEN job_id END) AS interview "
+            "FROM events"
+        ).fetchone()
+    applied = int(row["applied"])
+    response = int(row["response"])
+    interview = int(row["interview"])
+    return {
+        "added": job_counts()["total"],
+        "applied": applied,
+        "response": response,
+        "interview": interview,
+    }
+
+
 def search_jobs(
     query: str,
     status: JobStatus | None = None,
