@@ -523,6 +523,70 @@ def test_job_counts(db_path: Path) -> None:
     }
 
 
+def test_applications_by_month(db_path: Path) -> None:
+    db.init_db()
+    assert db.applications_by_month() == []
+
+    _add("https://a.com/1")
+    _add("https://a.com/2")
+    _add("https://a.com/3")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "rejected")
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_applied = '2020-01-15 09:00:00' WHERE id = ?",
+            (jobs[0]["id"],),
+        )
+        conn.commit()
+
+    assert db.applications_by_month() == [
+        ("2020-01", 1),
+        (time.strftime("%Y-%m"), 1),
+    ]
+
+
+def test_pipeline_funnel(db_path: Path) -> None:
+    db.init_db()
+    assert db.pipeline_funnel() == {
+        "added": 0,
+        "applied": 0,
+        "response": 0,
+        "interview": 0,
+    }
+
+    _add("https://a.com/1")
+    _add("https://a.com/2")
+    _add("https://a.com/3")
+    jobs = db.get_jobs()
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "rejected")
+    db.set_job_status(jobs[2]["id"], "interview")
+
+    assert db.pipeline_funnel() == {
+        "added": 3,
+        "applied": 3,
+        "response": 2,
+        "interview": 1,
+    }
+
+
+def test_pipeline_funnel_keeps_history_after_unmark(db_path: Path) -> None:
+    db.init_db()
+    _add("https://a.com/1")
+    job_id = db.get_jobs()[0]["id"]
+    db.set_job_status(job_id, "rejected")
+
+    db.set_job_status(job_id, "unapplied")
+
+    assert db.pipeline_funnel() == {
+        "added": 1,
+        "applied": 1,
+        "response": 1,
+        "interview": 0,
+    }
+
+
 def test_set_job_comment_round_trip(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
