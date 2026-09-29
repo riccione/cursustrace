@@ -553,6 +553,7 @@ async def test_salary_filter_narrows_status_lists(user: User) -> None:
     await user.should_see("Unknown Salary")
     await user.should_see("Paid Role")
 
+    cast(ui.expansion, user.find(marker="advanced-filters").elements.pop()).open()
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
 
     await user.should_not_see("Unknown Salary")
@@ -1251,11 +1252,14 @@ async def test_clicking_chip_filters_dashboard(user: User) -> None:
     await user.open("/")
     await user.should_see("Zulu role")
     await user.should_see("Alpha role")
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.value is False
 
     user.find(kind=ui.chip, content="golang").click()
 
     tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
     await _wait_for(lambda: list(tag_select.value or []) == ["golang"])
+    assert advanced.value is True  # chip click expands the Advanced bar
     await user.should_see("Zulu role")
     await user.should_not_see("Alpha role")
 
@@ -1274,6 +1278,8 @@ async def test_detail_chip_navigates_to_filtered_dashboard(user: User) -> None:
     await user.should_not_see("Untagged role")
     tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
     assert list(tag_select.value or []) == ["golang"]
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.value is True  # deep-linked tag opens the Advanced bar
 
 
 async def test_opening_with_tag_query_filters_dashboard(user: User) -> None:
@@ -1286,16 +1292,16 @@ async def test_opening_with_tag_query_filters_dashboard(user: User) -> None:
     await user.should_not_see("Alpha role")
 
 
-async def test_tag_filter_hidden_during_search(user: User) -> None:
+async def test_advanced_filters_hidden_during_search(user: User) -> None:
     db.init_db()
     db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
     await user.open("/")
-    filter_row = user.find(marker="tag-filter-row").elements.pop()
-    assert filter_row.visible
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.visible
 
     user.find("Search company").clear().type("Zeta")
     await user.should_see("[Unapplied]")
-    assert not filter_row.visible
+    assert not advanced.visible
 
 
 async def test_tag_manager_adds_renames_and_deletes(user: User) -> None:
@@ -1347,3 +1353,59 @@ async def test_manager_rename_keeps_assignments_and_filter(user: User) -> None:
 
     tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
     await _wait_for(lambda: [str(name) for name in tag_select.options] == ["go"])
+
+
+async def test_advanced_bar_collapsed_by_default(user: User) -> None:
+    db.init_db()
+    db.add_job(
+        "https://a.com/1",
+        "High role",
+        "HighCo",
+        "Remote",
+        "Body",
+        salary_min=90000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+    db.add_job(
+        "https://a.com/2",
+        "Low role",
+        "LowCo",
+        "Remote",
+        "Body",
+        salary_min=30000,
+        salary_currency="EUR",
+        salary_period="year",
+    )
+    await user.open("/")
+
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.value is False  # default view: search, sort, pagination only
+    await user.should_see("High role")
+    await user.should_see("Low role")
+
+    advanced.open()
+    assert advanced.value is True
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
+
+    await user.should_see("High role")
+    await user.should_not_see("Low role")
+
+
+async def test_advanced_bar_shows_active_count(user: User) -> None:
+    _tagged_pair()
+    await user.open("/")
+    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
+    assert advanced.text == "Advanced filters"
+
+    cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value(["golang"])
+    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
+    await _wait_for(lambda: advanced.text == "Advanced filters (2 active)")
+
+    cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value([])
+    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(None)
+    await _wait_for(lambda: advanced.text == "Advanced filters")

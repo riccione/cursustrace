@@ -859,8 +859,7 @@ def dashboard_page(request: Request) -> None:
     results_container: ui.column | None = None
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
-    salary_filter_row: ui.row | None = None
-    tag_filter_row: ui.row | None = None
+    advanced_bar: ui.expansion | None = None
     tag_filter_select: ui.select | None = None
     sort_select: ui.select | None = None
     pagination: ui.pagination | None = None
@@ -941,10 +940,15 @@ def dashboard_page(request: Request) -> None:
             status_tabs.set_visibility(not searching)
         if status_panels is not None:
             status_panels.set_visibility(not searching)
-        if salary_filter_row is not None:
-            salary_filter_row.set_visibility(not searching)
-        if tag_filter_row is not None:
-            tag_filter_row.set_visibility(not searching)
+        if advanced_bar is not None:
+            advanced_bar.set_visibility(not searching)
+            salary_active = (
+                salary_min is not None or salary_max is not None or bool(salary_currency)
+            )
+            active = int(salary_active) + int(bool(tag_filter))
+            advanced_bar.text = (
+                f"Advanced filters ({active} active)" if active else "Advanced filters"
+            )
         if sort_select is not None:
             sort_select.set_visibility(not searching)
         for status, _label, _empty in STATUS_TABS:
@@ -1050,62 +1054,70 @@ def dashboard_page(request: Request) -> None:
                     refresh()
 
                 search_input.on_value_change(on_search)
-                with ui.row().classes("w-full items-center gap-2") as salary_filter_row:
-                    currency_filter = ui.select(
-                        ["", *salary.CURRENCIES], value="", label="Salary currency"
-                    ).classes("w-48")
-                    min_filter = ui.number("Min salary", min=0, step=1000).classes("w-40")
-                    max_filter = ui.number("Max salary", min=0, step=1000).classes("w-40")
-
-                def update_salary_filter() -> None:
-                    nonlocal salary_currency, salary_min, salary_max
-                    salary_currency = currency_filter.value or ""
-                    salary_min = int(min_filter.value) if min_filter.value is not None else None
-                    salary_max = int(max_filter.value) if max_filter.value is not None else None
-                    pages.clear()
-                    refresh()
-
-                currency_filter.on_value_change(lambda _: update_salary_filter())
-                min_filter.on_value_change(lambda _: update_salary_filter())
-                max_filter.on_value_change(lambda _: update_salary_filter())
-
-                with (
-                    ui.row()
-                    .classes("w-full items-center gap-2")
-                    .mark("tag-filter-row") as tag_filter_row
-                ):
-                    tag_filter_select = (
-                        ui.select(
-                            db.list_tags(),
-                            value=tag_filter,
-                            label="Filter by tag",
-                            multiple=True,
-                            clearable=True,
-                        )
-                        .classes("w-96")
-                        .mark("tag-filter")
+                advanced_bar = (
+                    ui.expansion(
+                        "Advanced filters",
+                        icon="tune",
+                        value=bool(tag_filter),
                     )
+                    .classes("w-full")
+                    .mark("advanced-filters")
+                )
+                with advanced_bar:
+                    with ui.row().classes("w-full items-center gap-2"):
+                        currency_filter = ui.select(
+                            ["", *salary.CURRENCIES], value="", label="Salary currency"
+                        ).classes("w-48")
+                        min_filter = ui.number("Min salary", min=0, step=1000).classes("w-40")
+                        max_filter = ui.number("Max salary", min=0, step=1000).classes("w-40")
 
-                def update_tag_filter() -> None:
-                    nonlocal tag_filter
-                    if tag_filter_select is None:
-                        return
-                    new = [str(name) for name in tag_filter_select.value or []]
-                    if new == tag_filter:
-                        return
-                    tag_filter = new
-                    pages.clear()
-                    refresh()
+                    def update_salary_filter() -> None:
+                        nonlocal salary_currency, salary_min, salary_max
+                        salary_currency = currency_filter.value or ""
+                        salary_min = int(min_filter.value) if min_filter.value is not None else None
+                        salary_max = int(max_filter.value) if max_filter.value is not None else None
+                        pages.clear()
+                        refresh()
 
-                def apply_tag_filter(name: str) -> None:
-                    nonlocal query
-                    if query:
-                        query = ""
-                        search_input.value = ""
-                    if tag_filter_select is not None:
-                        tag_filter_select.set_value([name])
+                    currency_filter.on_value_change(lambda _: update_salary_filter())
+                    min_filter.on_value_change(lambda _: update_salary_filter())
+                    max_filter.on_value_change(lambda _: update_salary_filter())
 
-                tag_filter_select.on_value_change(lambda _: update_tag_filter())
+                    with ui.row().classes("w-full items-center gap-2").mark("tag-filter-row"):
+                        tag_filter_select = (
+                            ui.select(
+                                db.list_tags(),
+                                value=tag_filter,
+                                label="Filter by tag",
+                                multiple=True,
+                                clearable=True,
+                            )
+                            .classes("w-96")
+                            .mark("tag-filter")
+                        )
+
+                    def update_tag_filter() -> None:
+                        nonlocal tag_filter
+                        if tag_filter_select is None:
+                            return
+                        new = [str(name) for name in tag_filter_select.value or []]
+                        if new == tag_filter:
+                            return
+                        tag_filter = new
+                        pages.clear()
+                        refresh()
+
+                    def apply_tag_filter(name: str) -> None:
+                        nonlocal query
+                        if query:
+                            query = ""
+                            search_input.value = ""
+                        if advanced_bar is not None:
+                            advanced_bar.open()
+                        if tag_filter_select is not None:
+                            tag_filter_select.set_value([name])
+
+                    tag_filter_select.on_value_change(lambda _: update_tag_filter())
 
                 def update_sort(event: events.ValueChangeEventArguments[str | None]) -> None:
                     nonlocal sort_order
