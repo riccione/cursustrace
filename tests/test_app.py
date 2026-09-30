@@ -7,12 +7,14 @@ import re
 import time
 from collections.abc import Callable
 from datetime import date, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import cast
 
 import pytest
 from nicegui import ui
 from nicegui.testing import User
+from pypdf import PdfReader
 
 from cursustrace import app, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
@@ -43,8 +45,15 @@ def _seed_job(title: str = "Senior Engineer", description: str = "Body text") ->
     return db.get_jobs()[0]["id"]
 
 
-def _profile_payload(full_name: str = "Jane Doe", summary: str = "# Jane") -> db.Profile:
+def _profile_payload(
+    full_name: str = "Jane Doe",
+    summary: str = "# Jane",
+    profile_id: int = 1,
+    name: str = "Default",
+) -> db.Profile:
     return {
+        "id": profile_id,
+        "name": name,
         "full_name": full_name,
         "location": "Remote",
         "phone": "555-0100",
@@ -1081,6 +1090,8 @@ async def test_clear_database_removes_all_jobs(user: User) -> None:
 
 
 async def test_profile_tab_renders(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
     await user.open("/")
 
     for label in (
@@ -1110,6 +1121,8 @@ async def test_profile_prefills_existing_values(user: User) -> None:
 
 
 async def test_profile_save_persists(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
     await user.open("/")
     user.find("Full Name").clear().type("Jane Doe")
     user.find("Email").clear().type("jane@example.com")
@@ -1132,6 +1145,8 @@ async def test_profile_save_persists(user: User) -> None:
 
 
 async def test_profile_preview_combines_sections_in_order(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
     await user.open("/")
     user.find("Summary").clear().type("MARK_SUMMARY")
     user.find("Work History").clear().type("MARK_WORK")
@@ -1153,6 +1168,8 @@ async def test_profile_preview_combines_sections_in_order(user: User) -> None:
 
 
 async def test_profile_export_button_renders(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
     await user.open("/")
 
     await user.should_see("📄 Export to PDF")
@@ -1167,6 +1184,186 @@ async def test_profile_export_downloads_pdf(user: User) -> None:
 
     response = await user.download.next()
     assert response.content.startswith(b"%PDF")
+
+
+def _profile_select(user: User) -> ui.select:
+    return cast(ui.select, user.find(marker="profile-select").elements.pop())
+
+
+async def test_profile_empty_state_without_profiles(user: User) -> None:
+    db.init_db()
+    await user.open("/")
+
+    await user.should_see("No profiles yet. Add a profile to create your CV.")
+    await user.should_not_see(marker="profile-select")
+    await user.should_not_see(content="💾 Save Profile & CV")
+
+
+async def test_profile_dropdown_hidden_with_single_profile(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    await user.should_not_see(marker="profile-select")
+    await user.should_see("💾 Save Profile & CV")
+
+
+async def test_profile_dropdown_switches_between_profiles(user: User) -> None:
+    db.init_db()
+    first = db.create_profile("Alpha CV")
+    second = db.create_profile("Beta CV")
+    assert first is not None and second is not None
+    db.save_profile(_profile_payload(full_name="Alpha Person", profile_id=first, name="Alpha CV"))
+    db.save_profile(_profile_payload(full_name="Beta Person", profile_id=second, name="Beta CV"))
+    await user.open("/")
+
+    select = _profile_select(user)
+    assert select.value == first
+    assert cast(ui.input, user.find("Full Name").elements.pop()).value == "Alpha Person"
+
+    select.set_value(second)
+    await asyncio.sleep(0.1)
+
+    assert cast(ui.input, user.find("Full Name").elements.pop()).value == "Beta Person"
+
+    user.find("Full Name").clear().type("Beta Edited")
+    await asyncio.sleep(0.1)
+    user.find("💾 Save Profile & CV").click()
+    await user.should_see("Profile and CV saved successfully!")
+
+    assert db.get_profile(first)["full_name"] == "Alpha Person"
+    assert db.get_profile(second)["full_name"] == "Beta Edited"
+
+
+async def test_profile_add_dialog_creates_and_selects_profile(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    user.find(marker="add-profile").click()
+    user.find(marker="new-profile-name").type("Work CV")
+    user.find(marker="confirm-add-profile").click()
+
+    await user.should_see("Profile 'Work CV' created.")
+    assert [p["name"] for p in db.list_profiles()] == ["Default", "Work CV"]
+    await user.should_see(marker="profile-select")
+    assert cast(ui.input, user.find("Full Name").elements.pop()).value in ("", None)
+
+
+async def test_profile_add_rejects_duplicate_name(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    user.find(marker="add-profile").click()
+    user.find(marker="new-profile-name").type("default")
+    user.find(marker="confirm-add-profile").click()
+
+    await user.should_see("Profile 'default' already exists.")
+    assert [p["name"] for p in db.list_profiles()] == ["Default"]
+
+
+async def test_profile_add_rejects_empty_name(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    user.find(marker="add-profile").click()
+    user.find(marker="confirm-add-profile").click()
+
+    await user.should_see("Enter a profile name.")
+    assert [p["name"] for p in db.list_profiles()] == ["Default"]
+
+
+async def test_profile_delete_requires_typing_delete(user: User) -> None:
+    db.init_db()
+    keep = db.create_profile("Keep")
+    drop = db.create_profile("Drop")
+    assert keep is not None and drop is not None
+    await user.open("/")
+
+    _profile_select(user).set_value(drop)
+    await asyncio.sleep(0.1)
+
+    user.find(marker="delete-profile").click()
+    await user.should_see("Profile 'Drop'")
+    confirm_button = cast(ui.button, user.find(marker="confirm-delete-profile").elements.pop())
+    assert confirm_button.enabled is False
+
+    user.find(marker="delete-profile-confirm").type("delete")
+    await asyncio.sleep(0.1)
+    confirm_button = cast(ui.button, user.find(marker="confirm-delete-profile").elements.pop())
+    assert confirm_button.enabled is False
+
+    user.find(marker="delete-profile-confirm").clear().type("DELETE")
+    await asyncio.sleep(0.1)
+    confirm_button = cast(ui.button, user.find(marker="confirm-delete-profile").elements.pop())
+    assert confirm_button.enabled is True
+
+    user.find(marker="confirm-delete-profile").click()
+
+    await user.should_see("Profile deleted.")
+    assert [p["id"] for p in db.list_profiles()] == [keep]
+    await user.should_not_see(marker="profile-select")
+
+
+async def test_profile_delete_last_shows_empty_state(user: User) -> None:
+    db.init_db()
+    db.create_profile("Only")
+    await user.open("/")
+
+    user.find(marker="delete-profile").click()
+    user.find(marker="delete-profile-confirm").type("DELETE")
+    await asyncio.sleep(0.1)
+    user.find(marker="confirm-delete-profile").click()
+
+    await user.should_see("No profiles yet. Add a profile to create your CV.")
+    await user.should_not_see(marker="profile-select")
+    assert db.list_profiles() == []
+
+    user.find(marker="add-profile").click()
+    user.find(marker="new-profile-name").type("Fresh CV")
+    user.find(marker="confirm-add-profile").click()
+
+    await user.should_see("Profile 'Fresh CV' created.")
+    assert [p["name"] for p in db.list_profiles()] == ["Fresh CV"]
+
+
+async def test_profile_selection_persists_across_reloads(user: User) -> None:
+    db.init_db()
+    first = db.create_profile("Alpha CV")
+    second = db.create_profile("Beta CV")
+    assert first is not None and second is not None
+    await user.open("/")
+
+    _profile_select(user).set_value(second)
+    await asyncio.sleep(0.1)
+
+    await user.open("/")
+
+    assert _profile_select(user).value == second
+    assert db.get_setting(app.SELECTED_PROFILE_KEY) == str(second)
+
+
+async def test_profile_export_uses_selected_profile(user: User) -> None:
+    db.init_db()
+    first = db.create_profile("Alpha CV")
+    second = db.create_profile("Beta CV")
+    assert first is not None and second is not None
+    db.save_profile(_profile_payload(full_name="Alpha Person", profile_id=first, name="Alpha CV"))
+    db.save_profile(_profile_payload(full_name="Beta Person", profile_id=second, name="Beta CV"))
+    await user.open("/")
+
+    _profile_select(user).set_value(second)
+    await asyncio.sleep(0.1)
+    user.find("📄 Export to PDF").click()
+
+    response = await user.download.next()
+    assert response.content.startswith(b"%PDF")
+    reader = PdfReader(BytesIO(response.content))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "Beta Person" in text
+    assert "Alpha Person" not in text
 
 
 async def test_theme_defaults_to_system(user: User) -> None:

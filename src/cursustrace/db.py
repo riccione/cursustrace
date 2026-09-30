@@ -48,9 +48,10 @@ CREATE TABLE IF NOT EXISTS jobs (
 )
 """
 
-CREATE_PROFILE_TABLE = """
-CREATE TABLE IF NOT EXISTS profile (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
+# Column definitions shared by CREATE_PROFILE_TABLE and the profile table rebuild.
+_PROFILE_TABLE_BODY = """
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL COLLATE NOCASE,
     full_name TEXT,
     location TEXT,
     phone TEXT,
@@ -62,8 +63,9 @@ CREATE TABLE IF NOT EXISTS profile (
     education TEXT,
     skills TEXT,
     date_updated TEXT DEFAULT (datetime('now'))
-)
 """
+
+CREATE_PROFILE_TABLE = f"CREATE TABLE IF NOT EXISTS profile ({_PROFILE_TABLE_BODY})"
 
 CREATE_SETTINGS_TABLE = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -190,8 +192,10 @@ def sort_jobs(jobs: list[Job], order: JobSort = "newest") -> list[Job]:
 
 
 class Profile(TypedDict):
-    """The single user profile row, including the sectioned Markdown CV."""
+    """One named CV profile: contact metadata plus the sectioned Markdown CV."""
 
+    id: int
+    name: str
     full_name: str
     location: str
     phone: str
@@ -251,12 +255,65 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_profile(conn: sqlite3.Connection) -> None:
+    _recover_profile_rebuild(conn)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
+    if "name" in columns:
+        return
+    # Legacy tables are single-row (CHECK (id = 1)); rebuild to the multi-profile
+    # schema, backfilling a name and carrying over any legacy CV content.
+    select_columns = ["id", "'Default' AS name"]
+    for column in ("full_name", "location", "phone", "email", "linkedin_url", "github_url"):
+        select_columns.append(column if column in columns else "NULL")
     for column in ("summary", "work_history", "education", "skills"):
-        if column not in columns:
-            conn.execute(f"ALTER TABLE profile ADD COLUMN {column} TEXT")
-    if "cv_markdown" in columns:
-        conn.execute("ALTER TABLE profile DROP COLUMN cv_markdown")
+        if column == "summary" and "cv_markdown" in columns:
+            if "summary" in columns:
+                select_columns.append(
+                    "CASE WHEN TRIM(COALESCE(summary, '')) = '' "
+                    "THEN COALESCE(cv_markdown, '') ELSE summary END"
+                )
+            else:
+                select_columns.append("COALESCE(cv_markdown, '')")
+        else:
+            select_columns.append(f"COALESCE({column}, '')" if column in columns else "''")
+    select_columns.append("date_updated" if "date_updated" in columns else "NULL")
+
+    started_here = not conn.in_transaction
+    if started_here:
+        conn.execute("BEGIN")
+    try:
+        conn.execute(f"CREATE TABLE profile_migrated ({_PROFILE_TABLE_BODY})")
+        conn.execute(
+            f"INSERT INTO profile_migrated (id, name, full_name, location, phone, email, "
+            f"linkedin_url, github_url, summary, work_history, education, skills, date_updated) "
+            f"SELECT {', '.join(select_columns)} FROM profile"
+        )
+        conn.execute("DROP TABLE profile")
+        conn.execute("ALTER TABLE profile_migrated RENAME TO profile")
+        if started_here:
+            conn.execute("COMMIT")
+    except Exception:
+        if started_here:
+            conn.execute("ROLLBACK")
+        raise
+
+
+def _recover_profile_rebuild(conn: sqlite3.Connection) -> None:
+    """Adopt a half-finished profile rebuild from a previously interrupted run."""
+    leftover = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'profile_migrated'"
+    ).fetchone()
+    if leftover is None:
+        return
+    # CREATE_PROFILE_TABLE may have recreated an empty `profile` first; the
+    # rebuilt table always matches the current schema, so its rows win.
+    conn.execute(
+        "INSERT OR IGNORE INTO profile (id, name, full_name, location, phone, email, "
+        "linkedin_url, github_url, summary, work_history, education, skills, date_updated) "
+        "SELECT id, name, full_name, location, phone, email, "
+        "linkedin_url, github_url, summary, work_history, education, skills, date_updated "
+        "FROM profile_migrated"
+    )
+    conn.execute("DROP TABLE profile_migrated")
 
 
 def _backfill_events(conn: sqlite3.Connection) -> None:
@@ -846,15 +903,53 @@ def set_setting(key: str, value: str) -> None:
         conn.commit()
 
 
+def _row_to_profile(row: sqlite3.Row) -> Profile:
+    return {
+        "id": int(row["id"]),
+        "name": row["name"] or "",
+        "full_name": row["full_name"] or "",
+        "location": row["location"] or "",
+        "phone": row["phone"] or "",
+        "email": row["email"] or "",
+        "linkedin_url": row["linkedin_url"] or "",
+        "github_url": row["github_url"] or "",
+        "summary": row["summary"] or "",
+        "work_history": row["work_history"] or "",
+        "education": row["education"] or "",
+        "skills": row["skills"] or "",
+        "date_updated": row["date_updated"],
+    }
+
+
+def _empty_profile() -> Profile:
+    return {
+        "id": 0,
+        "name": "",
+        "full_name": "",
+        "location": "",
+        "phone": "",
+        "email": "",
+        "linkedin_url": "",
+        "github_url": "",
+        "summary": "",
+        "work_history": "",
+        "education": "",
+        "skills": "",
+        "date_updated": None,
+    }
+
+
 def save_profile(data: Profile) -> None:
-    """Upsert the single profile row with contact metadata and the Markdown CV sections."""
+    """Replace the profile row with the given id, keeping its name."""
     with closing(get_connection()) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO profile "
-            "(id, full_name, location, phone, email, linkedin_url, github_url, "
+            "(id, name, full_name, location, phone, email, linkedin_url, github_url, "
             "summary, work_history, education, skills, date_updated) "
-            "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
             (
+                data["id"],
+                data["name"],
                 data["full_name"],
                 data["location"],
                 data["phone"],
@@ -870,34 +965,42 @@ def save_profile(data: Profile) -> None:
         conn.commit()
 
 
-def get_profile() -> Profile:
-    """Return the stored profile, or an empty profile when no row exists."""
+def get_profile(profile_id: int | None = None) -> Profile:
+    """Return one profile by id (or the first profile when omitted), else an empty profile."""
     with closing(get_connection()) as conn:
-        row = conn.execute("SELECT * FROM profile WHERE id = 1").fetchone()
-    if row is None:
-        return {
-            "full_name": "",
-            "location": "",
-            "phone": "",
-            "email": "",
-            "linkedin_url": "",
-            "github_url": "",
-            "summary": "",
-            "work_history": "",
-            "education": "",
-            "skills": "",
-            "date_updated": None,
-        }
-    return {
-        "full_name": row["full_name"] or "",
-        "location": row["location"] or "",
-        "phone": row["phone"] or "",
-        "email": row["email"] or "",
-        "linkedin_url": row["linkedin_url"] or "",
-        "github_url": row["github_url"] or "",
-        "summary": row["summary"] or "",
-        "work_history": row["work_history"] or "",
-        "education": row["education"] or "",
-        "skills": row["skills"] or "",
-        "date_updated": row["date_updated"],
-    }
+        if profile_id is None:
+            row = conn.execute("SELECT * FROM profile ORDER BY id LIMIT 1").fetchone()
+        else:
+            row = conn.execute("SELECT * FROM profile WHERE id = ?", (profile_id,)).fetchone()
+    return _row_to_profile(row) if row is not None else _empty_profile()
+
+
+def list_profiles() -> list[Profile]:
+    """Return all profiles ordered by name for the selection dropdown."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute("SELECT * FROM profile ORDER BY name COLLATE NOCASE, id").fetchall()
+    return [_row_to_profile(row) for row in rows]
+
+
+def create_profile(name: str) -> int | None:
+    """Create an empty named profile; return its id, or None when empty or taken."""
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return None
+    with closing(get_connection()) as conn:
+        try:
+            cursor = conn.execute(
+                "INSERT INTO profile (name) VALUES (?)",
+                (cleaned,),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return None
+    return cast("int", cursor.lastrowid)
+
+
+def delete_profile(profile_id: int) -> None:
+    """Delete one profile row; unknown ids are ignored."""
+    with closing(get_connection()) as conn:
+        conn.execute("DELETE FROM profile WHERE id = ?", (profile_id,))
+        conn.commit()

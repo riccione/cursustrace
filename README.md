@@ -112,7 +112,11 @@ your CV in Markdown as four sections — Summary, Work History, Education, and
 Skills — with a live preview combining them in export order. Your profile and CV
 are stored only in the SQLite database, and **📄 Export to PDF** downloads a
 formatted document combining your contact header with the sections in that
-order.
+order. When you keep more than one CV (e.g. per role or seniority), a dropdown
+at the top of the tab switches between named profiles: **➕** adds a new
+profile, and **Delete profile** removes the selected one after you type
+`DELETE` to confirm. The selected profile persists across restarts, and PDF
+export always uses it.
 
 The **📊 Statistics** tab shows how many positions you have in total and in each
 pipeline stage (unapplied, applied, interview, rejected), with charts for the

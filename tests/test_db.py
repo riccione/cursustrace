@@ -990,6 +990,8 @@ def _profile_payload(
     full_name: str = "Jane Doe", summary: str = "# Jane Doe\n\nEngineer"
 ) -> db.Profile:
     return {
+        "id": 1,
+        "name": "Default",
         "full_name": full_name,
         "location": "Remote",
         "phone": "555-0100",
@@ -1018,6 +1020,8 @@ def test_save_and_get_profile_round_trip(db_path: Path) -> None:
     db.save_profile(_profile_payload())
 
     profile = db.get_profile()
+    assert profile["id"] == 1
+    assert profile["name"] == "Default"
     assert profile["full_name"] == "Jane Doe"
     assert profile["email"] == "jane@example.com"
     assert profile["linkedin_url"] == "https://linkedin.com/in/jane"
@@ -1071,10 +1075,19 @@ def test_init_db_migrates_profile_cv_sections(db_path: Path) -> None:
 
     with db.get_connection() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
-    assert {"summary", "work_history", "education", "skills"} <= columns
+        table_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'profile'"
+        ).fetchone()[0]
+    assert {"name", "summary", "work_history", "education", "skills"} <= columns
     assert "cv_markdown" not in columns
-    assert db.get_profile()["full_name"] == "Legacy"
-    assert db.get_profile()["summary"] == ""
+    assert "CHECK (id = 1)" not in table_sql
+    migrated = db.get_profile()
+    assert migrated["name"] == "Default"
+    assert migrated["full_name"] == "Legacy"
+    assert migrated["summary"] == "# Old CV"
+    # The rebuilt table accepts more than one profile and enforces unique names.
+    assert db.create_profile("Second") is not None
+    assert db.create_profile("default") is None
 
 
 def test_init_db_migrates_profile_without_cv_markdown(db_path: Path) -> None:
@@ -1093,13 +1106,127 @@ def test_init_db_migrates_profile_without_cv_markdown(db_path: Path) -> None:
 
     with db.get_connection() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
-    assert {"summary", "work_history", "education", "skills"} <= columns
+    assert {"name", "summary", "work_history", "education", "skills"} <= columns
     assert db.get_profile()["full_name"] == "Legacy"
+    assert db.get_profile()["name"] == "Default"
+
+
+def test_init_db_migrates_single_row_profile_with_sections(db_path: Path) -> None:
+    with db.get_connection() as conn:
+        conn.execute(
+            "CREATE TABLE profile ("
+            "id INTEGER PRIMARY KEY CHECK (id = 1), "
+            "full_name TEXT, location TEXT, phone TEXT, email TEXT, "
+            "linkedin_url TEXT, github_url TEXT, "
+            "summary TEXT, work_history TEXT, education TEXT, skills TEXT, "
+            "date_updated TEXT DEFAULT (datetime('now')))"
+        )
+        conn.execute(
+            "INSERT INTO profile (id, full_name, summary) VALUES (1, 'Sergei', '# Summary body')"
+        )
+        conn.commit()
+
+    db.init_db()
+
+    profile = db.get_profile()
+    assert profile["name"] == "Default"
+    assert profile["full_name"] == "Sergei"
+    assert profile["summary"] == "# Summary body"
+    assert db.create_profile("Work CV") is not None
+
+
+def test_init_db_profile_migration_is_idempotent(db_path: Path) -> None:
+    db.init_db()
+    db.save_profile(_profile_payload())
+    db.init_db()
+    db.init_db()
+
+    profiles = db.list_profiles()
+    assert len(profiles) == 1
+    assert profiles[0]["name"] == "Default"
+    assert profiles[0]["full_name"] == "Jane Doe"
+
+
+def test_init_db_recovers_interrupted_profile_rebuild(db_path: Path) -> None:
+    db.init_db()
+    with db.get_connection() as conn:
+        conn.execute(
+            "CREATE TABLE profile_migrated ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name TEXT UNIQUE NOT NULL COLLATE NOCASE, "
+            "full_name TEXT, location TEXT, phone TEXT, email TEXT, "
+            "linkedin_url TEXT, github_url TEXT, "
+            "summary TEXT, work_history TEXT, education TEXT, skills TEXT, "
+            "date_updated TEXT DEFAULT (datetime('now')))"
+        )
+        conn.execute(
+            "INSERT INTO profile_migrated (id, name, full_name) "
+            "VALUES (1, 'Recovered', 'Rescued Name')"
+        )
+        conn.commit()
+
+    db.init_db()
+
+    assert db.get_profile()["name"] == "Recovered"
+    assert db.get_profile()["full_name"] == "Rescued Name"
+    with db.get_connection() as conn:
+        leftover = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'profile_migrated'"
+        ).fetchone()
+    assert leftover is None
+
+
+def test_create_profile_validates_name(db_path: Path) -> None:
+    db.init_db()
+    assert db.create_profile("   ") is None
+    first = db.create_profile("Default")
+    assert first is not None
+    assert db.create_profile("Default") is None
+    assert db.create_profile("default") is None
+    second = db.create_profile("Work CV")
+    assert second is not None
+    assert second != first
+
+
+def test_list_profiles_orders_by_name(db_path: Path) -> None:
+    db.init_db()
+    db.create_profile("beta")
+    db.create_profile("Alpha")
+    db.create_profile("gamma")
+
+    assert [profile["name"] for profile in db.list_profiles()] == ["Alpha", "beta", "gamma"]
+
+
+def test_get_profile_by_id_and_missing(db_path: Path) -> None:
+    db.init_db()
+    first = db.create_profile("First")
+    second = db.create_profile("Second")
+    assert first is not None and second is not None
+
+    assert db.get_profile(second)["name"] == "Second"
+    assert db.get_profile(first)["name"] == "First"
+    assert db.get_profile()["id"] == first
+    assert db.get_profile(999)["id"] == 0
+    assert db.get_profile(999)["name"] == ""
+
+
+def test_delete_profile(db_path: Path) -> None:
+    db.init_db()
+    first = db.create_profile("First")
+    second = db.create_profile("Second")
+    assert first is not None and second is not None
+
+    db.delete_profile(first)
+
+    assert [profile["id"] for profile in db.list_profiles()] == [second]
+    db.delete_profile(first)
 
 
 def test_get_profile_without_row(db_path: Path) -> None:
     db.init_db()
     profile = db.get_profile()
+    assert profile["id"] == 0
+    assert profile["name"] == ""
     assert profile["summary"] == ""
     assert profile["work_history"] == ""
     assert profile["education"] == ""

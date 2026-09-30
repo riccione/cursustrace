@@ -61,6 +61,8 @@ def _varying_scrape(url: str) -> scraper.ScrapedJob:
 
 def _profile() -> db.Profile:
     return {
+        "id": 1,
+        "name": "Default",
         "full_name": "Jane Doe",
         "location": "Remote",
         "phone": "555-0100",

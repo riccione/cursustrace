@@ -44,6 +44,8 @@ def _profile(
     skills: str = "## Skills\n\n- Python",
 ) -> Profile:
     return {
+        "id": 1,
+        "name": "Default",
         "full_name": full_name,
         "location": location,
         "phone": phone,
