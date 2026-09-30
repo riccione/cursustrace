@@ -21,6 +21,7 @@ def test_defaults(config_file: Path) -> None:
     settings = config.load_settings(env={})
 
     assert settings == config.Settings()
+    assert settings.config_file is None
 
 
 def test_file_overrides_defaults(config_file: Path) -> None:
@@ -41,6 +42,17 @@ def test_file_overrides_defaults(config_file: Path) -> None:
     assert settings.reload is True
     assert settings.show is True
     assert settings.cv_style_path == Path("custom.css")
+    assert settings.config_file == config_file
+
+
+def test_explicit_config_path_is_reported(tmp_path: Path) -> None:
+    path = tmp_path / "explicit.toml"
+    path.write_text("[cursustrace]\nport = 9001\n", encoding="utf-8")
+
+    settings = config.load_settings(config_path=path, env={})
+
+    assert settings.port == 9001
+    assert settings.config_file == path
 
 
 def test_env_overrides_file(config_file: Path) -> None:

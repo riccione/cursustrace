@@ -1481,7 +1481,35 @@ def _prepare_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, o
     return captured
 
 
-def test_run_writes_startup_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_prints_config_source_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_run(tmp_path, monkeypatch)
+    try:
+        app.run(config.Settings(backup_on_start=False))
+    finally:
+        app._settings = None
+
+    out = capsys.readouterr().out
+    assert "Config: no config file found, using hardcoded default values" in out
+
+
+def test_run_prints_config_file_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _prepare_run(tmp_path, monkeypatch)
+    settings = config.Settings(config_file=Path("custom.toml"), backup_on_start=False)
+    try:
+        app.run(settings)
+    finally:
+        app._settings = None
+
+    assert "Config: using config file custom.toml" in capsys.readouterr().out
+
+
+def test_run_writes_startup_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _prepare_run(tmp_path, monkeypatch)
     dest = tmp_path / "backups"
     settings = config.Settings(backup_dir=dest, backup_keep=5)
@@ -1491,8 +1519,13 @@ def test_run_writes_startup_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     finally:
         app._settings = None
 
+    out = capsys.readouterr().out
+    assert f"Backup completed successfully to {dest}/" in out
 
-def test_run_skips_backup_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_run_skips_backup_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     _prepare_run(tmp_path, monkeypatch)
     dest = tmp_path / "backups"
     settings = config.Settings(backup_dir=dest, backup_on_start=False)
@@ -1502,8 +1535,12 @@ def test_run_skips_backup_when_disabled(tmp_path: Path, monkeypatch: pytest.Monk
     finally:
         app._settings = None
 
+    assert "Backup skipped: backup_on_start is disabled" in capsys.readouterr().out
 
-def test_run_survives_backup_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_run_survives_backup_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     captured = _prepare_run(tmp_path, monkeypatch)
 
     def explode(*_args: object, **_kwargs: object) -> None:
@@ -1516,6 +1553,19 @@ def test_run_survives_backup_failure(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert "host" in captured
     finally:
         app._settings = None
+
+    assert "Backup failed: disk full" in capsys.readouterr().out
+
+
+def test_backup_on_startup_without_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "missing.db")
+    settings = config.Settings(backup_dir=tmp_path / "backups")
+
+    app._backup_on_startup(settings)
+
+    assert "Backup skipped: no database file yet" in capsys.readouterr().out
 
 
 # --- Tags -------------------------------------------------------------------

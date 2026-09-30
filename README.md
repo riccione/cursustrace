@@ -61,7 +61,9 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   `cursustrace --log-level debug scan URL`.
 
 `cv_style` / `--css` points at the PDF stylesheet used by **📄 Export to PDF**
-(see below).
+(see below). On start the dashboard prints which source it resolved from:
+`Config: using config file cursustrace.toml` or `Config: no config file found,
+using hardcoded default values`.
 
 ### Logging
 
@@ -79,7 +81,9 @@ SQLite's online backup API. Only the newest `backup_keep` copies are retained
 (default `14`, `0` keeps everything), and only files matching our
 `cursustrace-*.db` pattern are ever pruned. Set `backup_on_start = false` (or
 `CURSUS_BACKUP_ON_START=0`) to skip the startup copy; a failed backup is logged
-and never stops the app.
+and never stops the app. The outcome is printed to the shell on start, e.g.
+`Backup completed successfully to backups/cursustrace-20260930-153012.db`, or
+`Backup skipped: backup_on_start is disabled` / `Backup failed: <error>`.
 
 Use `cursustrace backup` for an on-demand copy — it honours the same settings,
 with `--dir` and `--keep` as overrides. Schedule it from cron if you also run

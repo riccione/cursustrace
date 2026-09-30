@@ -1523,21 +1523,38 @@ def job_detail_page(job_id: int) -> None:
         ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
 
+def _print_config_source(settings: config.Settings) -> None:
+    """Tell the shell which configuration source the app resolved from."""
+    if settings.config_file is not None:
+        print(f"Config: using config file {settings.config_file}", flush=True)
+    else:
+        print("Config: no config file found, using hardcoded default values", flush=True)
+
+
 def _backup_on_startup(settings: config.Settings) -> None:
     """Write a startup copy of the database; failures are logged, never fatal."""
     try:
         result = backup.backup_database(settings.backup_dir, keep=settings.backup_keep)
-    except (OSError, sqlite3.Error):
+    except (OSError, sqlite3.Error) as exc:
         logger.exception("Database backup failed")
+        print(f"Backup failed: {exc}", flush=True)
         return
-    if result is not None:
-        logger.info("Database backup written to %s", result.path)
+    if result is None:
+        print("Backup skipped: no database file yet", flush=True)
+        return
+    logger.info("Database backup written to %s", result.path)
+    pruned = ""
+    if result.pruned:
+        count = len(result.pruned)
+        pruned = f" (pruned {count} old backup{'s' if count != 1 else ''})"
+    print(f"Backup completed successfully to {result.path}{pruned}", flush=True)
 
 
 def run(settings: config.Settings | None = None) -> None:
     """CLI entrypoint that launches the CursusTrace NiceGUI dashboard."""
     global _settings
     _settings = settings or config.load_settings()
+    _print_config_source(_settings)
     setup_logging(_settings.log_level, retention_days=_settings.log_retention_days)
     try:
         db.init_db()
@@ -1546,6 +1563,8 @@ def run(settings: config.Settings | None = None) -> None:
         raise
     if _settings.backup_on_start:
         _backup_on_startup(_settings)
+    else:
+        print("Backup skipped: backup_on_start is disabled", flush=True)
     ui.add_css(GLOBAL_CSS, shared=True)
     shutdown_signal: int | None = None
 
