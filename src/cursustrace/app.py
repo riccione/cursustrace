@@ -85,6 +85,9 @@ body.body--dark .q-drawer { background: #1d1d1d; }
 .nicegui-markdown img,
 .nicegui-markdown table { max-width: 100%; }
 .nicegui-markdown table { display: block; overflow-x: auto; }
+.header-tabs { flex: 0 0 auto; min-width: 0; }
+.header-tabs .q-tabs__content { overflow-x: auto; scrollbar-width: thin; }
+@media (max-width: 999px) { .header-tabs { flex: 1 1 0%; } }
 """
 
 DARK_MODE_KEY = "dark_mode"
@@ -1096,11 +1099,20 @@ def dashboard_page(request: Request) -> None:
             with stats_container:
                 _render_statistics(dark.value is True)
 
-    with ui.header().classes("items-center justify-between"):
-        ui.label(APP_TITLE).classes("text-h6")
-        settings_button = (
-            ui.button(icon="settings").props("flat color=white").mark("settings-button")
-        )
+    with ui.header().classes("items-center flex-nowrap"):
+        ui.label(APP_TITLE).classes("text-h6 flex-1 truncate min-w-0")
+        with (
+            ui.tabs()
+            .classes("header-tabs text-grey-4")
+            .props('active-color="white" indicator-color="white"') as main_tabs
+        ):
+            dashboard_tab = ui.tab("📋 Dashboard")
+            stats_tab = ui.tab("📊 Statistics")
+            profile_tab = ui.tab("👤 Profile & CV Editor")
+        with ui.element("div").classes("flex-1 flex justify-end min-w-0"):
+            settings_button = (
+                ui.button(icon="settings").props("flat color=white").mark("settings-button")
+            )
 
     with ui.right_drawer(value=False).props("width=480") as drawer:
         settings_button.on_click(lambda: drawer.toggle())
@@ -1128,11 +1140,6 @@ def dashboard_page(request: Request) -> None:
                 lambda: _handle_scan(urls_input, refresh, status_label, scan_button)
             )
             ui.button("➕ Add Manually", on_click=add_dialog.open).props("flat color=primary")
-
-        with ui.tabs().classes("w-full") as main_tabs:
-            dashboard_tab = ui.tab("📋 Dashboard")
-            stats_tab = ui.tab("📊 Statistics")
-            profile_tab = ui.tab("👤 Profile & CV Editor")
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
