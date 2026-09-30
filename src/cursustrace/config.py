@@ -53,6 +53,7 @@ class Settings:
     backup_dir: Path = DEFAULT_BACKUP_DIR
     backup_keep: int = DEFAULT_BACKUP_KEEP
     backup_on_start: bool = DEFAULT_BACKUP_ON_START
+    config_file: Path | None = None
 
 
 def load_settings(
@@ -72,7 +73,7 @@ def load_settings(
 ) -> Settings:
     """Merge defaults, `cursustrace.toml`, `CURSUS_*` env vars, and explicit overrides."""
     environ = os.environ if env is None else env
-    values = _read_config(config_path)
+    values, config_file = _read_config(config_path)
 
     for key, env_name in (
         ("host", ENV_HOST),
@@ -124,15 +125,16 @@ def load_settings(
         backup_dir=_as_backup_dir(values.get("backup_dir"), DEFAULT_BACKUP_DIR),
         backup_keep=_as_backup_keep(values.get("backup_keep", DEFAULT_BACKUP_KEEP)),
         backup_on_start=_as_bool(values, "backup_on_start", DEFAULT_BACKUP_ON_START),
+        config_file=config_file,
     )
 
 
-def _read_config(config_path: str | Path | None) -> dict[str, object]:
+def _read_config(config_path: str | Path | None) -> tuple[dict[str, object], Path | None]:
     path = Path(config_path) if config_path is not None else CONFIG_FILE
     if not path.exists():
         if config_path is not None:
             raise ConfigError(f"Config file not found: {path}")
-        return {}
+        return {}, None
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
@@ -140,7 +142,7 @@ def _read_config(config_path: str | Path | None) -> dict[str, object]:
     table = data.get(CONFIG_TABLE, {})
     if not isinstance(table, dict):
         raise ConfigError(f"[{CONFIG_TABLE}] must be a table in {path}")
-    return {str(key): value for key, value in table.items()}
+    return {str(key): value for key, value in table.items()}, path
 
 
 def _as_str(values: dict[str, object], key: str, default: str) -> str:
