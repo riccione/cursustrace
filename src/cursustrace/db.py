@@ -57,7 +57,10 @@ CREATE TABLE IF NOT EXISTS profile (
     email TEXT,
     linkedin_url TEXT,
     github_url TEXT,
-    cv_markdown TEXT,
+    summary TEXT,
+    work_history TEXT,
+    education TEXT,
+    skills TEXT,
     date_updated TEXT DEFAULT (datetime('now'))
 )
 """
@@ -187,7 +190,7 @@ def sort_jobs(jobs: list[Job], order: JobSort = "newest") -> list[Job]:
 
 
 class Profile(TypedDict):
-    """The single user profile row, including the raw Markdown CV."""
+    """The single user profile row, including the sectioned Markdown CV."""
 
     full_name: str
     location: str
@@ -195,7 +198,10 @@ class Profile(TypedDict):
     email: str
     linkedin_url: str
     github_url: str
-    cv_markdown: str
+    summary: str
+    work_history: str
+    education: str
+    skills: str
     date_updated: str | None
 
 
@@ -246,8 +252,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def _migrate_profile(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
-    if "cv_markdown" not in columns:
-        conn.execute("ALTER TABLE profile ADD COLUMN cv_markdown TEXT")
+    for column in ("summary", "work_history", "education", "skills"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE profile ADD COLUMN {column} TEXT")
+    if "cv_markdown" in columns:
+        conn.execute("ALTER TABLE profile DROP COLUMN cv_markdown")
 
 
 def _backfill_events(conn: sqlite3.Connection) -> None:
@@ -838,13 +847,13 @@ def set_setting(key: str, value: str) -> None:
 
 
 def save_profile(data: Profile) -> None:
-    """Upsert the single profile row with contact metadata and the Markdown CV."""
+    """Upsert the single profile row with contact metadata and the Markdown CV sections."""
     with closing(get_connection()) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO profile "
             "(id, full_name, location, phone, email, linkedin_url, github_url, "
-            "cv_markdown, date_updated) "
-            "VALUES (1, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            "summary, work_history, education, skills, date_updated) "
+            "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
             (
                 data["full_name"],
                 data["location"],
@@ -852,7 +861,10 @@ def save_profile(data: Profile) -> None:
                 data["email"],
                 data["linkedin_url"],
                 data["github_url"],
-                data["cv_markdown"],
+                data["summary"],
+                data["work_history"],
+                data["education"],
+                data["skills"],
             ),
         )
         conn.commit()
@@ -870,7 +882,10 @@ def get_profile() -> Profile:
             "email": "",
             "linkedin_url": "",
             "github_url": "",
-            "cv_markdown": "",
+            "summary": "",
+            "work_history": "",
+            "education": "",
+            "skills": "",
             "date_updated": None,
         }
     return {
@@ -880,6 +895,9 @@ def get_profile() -> Profile:
         "email": row["email"] or "",
         "linkedin_url": row["linkedin_url"] or "",
         "github_url": row["github_url"] or "",
-        "cv_markdown": row["cv_markdown"] or "",
+        "summary": row["summary"] or "",
+        "work_history": row["work_history"] or "",
+        "education": row["education"] or "",
+        "skills": row["skills"] or "",
         "date_updated": row["date_updated"],
     }

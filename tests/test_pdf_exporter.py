@@ -12,6 +12,7 @@ from pypdf import PdfReader
 from cursustrace.db import Profile
 from cursustrace.errors import PdfExportError
 from cursustrace.pdf_exporter import (
+    build_cv_body_markdown,
     build_header_markdown,
     build_html,
     generate_cv_pdf,
@@ -37,7 +38,10 @@ def _profile(
     email: str = "jane@example.com",
     linkedin_url: str = "https://linkedin.com/in/jane",
     github_url: str = "https://github.com/jane",
-    cv_markdown: str = "# Jane\n\nEngineer",
+    summary: str = "# Jane\n\nEngineer",
+    work_history: str = "## Work History\n\n- Acme",
+    education: str = "## Education\n\nBSc",
+    skills: str = "## Skills\n\n- Python",
 ) -> Profile:
     return {
         "full_name": full_name,
@@ -46,7 +50,10 @@ def _profile(
         "email": email,
         "linkedin_url": linkedin_url,
         "github_url": github_url,
-        "cv_markdown": cv_markdown,
+        "summary": summary,
+        "work_history": work_history,
+        "education": education,
+        "skills": skills,
         "date_updated": None,
     }
 
@@ -97,9 +104,49 @@ def test_build_header_defaults_empty_name() -> None:
     assert header.startswith("# Candidate Name\n\n")
 
 
+def test_build_cv_body_joins_sections_in_order() -> None:
+    body = build_cv_body_markdown(
+        _profile(
+            summary="SUMMARY_MARK",
+            work_history="WORK_MARK",
+            education="EDU_MARK",
+            skills="SKILLS_MARK",
+        )
+    )
+
+    assert body == "SUMMARY_MARK\n\nWORK_MARK\n\nEDU_MARK\n\nSKILLS_MARK"
+
+
+def test_build_cv_body_skips_and_tightens_empty_sections() -> None:
+    body = build_cv_body_markdown(
+        _profile(summary="SUMMARY_MARK", work_history="", education="  ", skills="SKILLS_MARK")
+    )
+
+    assert body == "SUMMARY_MARK\n\nSKILLS_MARK"
+
+
+def test_generate_cv_pdf_contains_sections_in_order() -> None:
+    pdf = generate_cv_pdf(
+        _profile(
+            summary="AlphaSummary",
+            work_history="BravoWork",
+            education="CharlieEducation",
+            skills="DeltaSkills",
+        )
+    )
+
+    reader = PdfReader(io.BytesIO(pdf))
+    full_text = " ".join((page.extract_text() or "") for page in reader.pages)
+    positions = [
+        full_text.index(marker)
+        for marker in ("AlphaSummary", "BravoWork", "CharlieEducation", "DeltaSkills")
+    ]
+    assert positions == sorted(positions)
+
+
 def test_generate_cv_pdf_returns_pdf_bytes() -> None:
     data = _profile(
-        cv_markdown="# Jane Doe\n\n## Skills\n\n- Python\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+        summary="# Jane Doe\n\n## Skills\n\n- Python\n\n| A | B |\n|---|---|\n| 1 | 2 |"
     )
 
     pdf = generate_cv_pdf(data)
@@ -117,7 +164,10 @@ def test_generate_cv_pdf_handles_empty_profile() -> None:
         email="",
         linkedin_url="",
         github_url="",
-        cv_markdown="",
+        summary="",
+        work_history="",
+        education="",
+        skills="",
     )
 
     assert generate_cv_pdf(empty).startswith(b"%PDF")
@@ -130,7 +180,7 @@ def test_generate_cv_pdf_numbers_single_page() -> None:
 def test_generate_cv_pdf_numbers_every_page() -> None:
     long_cv = "\n\n".join(f"Line {index}" for index in range(200))
 
-    footers = _page_footers(generate_cv_pdf(_profile(cv_markdown=long_cv)))
+    footers = _page_footers(generate_cv_pdf(_profile(summary=long_cv)))
 
     assert len(footers) > 1
     assert footers[0] == f"Page 1 of {len(footers)}"

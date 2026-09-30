@@ -108,9 +108,11 @@ to enter a position's URL, title, company, and description, and edit those field
 from the position's detail page.
 
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
-your CV in Markdown with a live preview. Your profile and CV are stored only in
-the SQLite database, and **📄 Export to PDF** downloads a formatted document
-combining your contact header with the CV body.
+your CV in Markdown as four sections — Summary, Work History, Education, and
+Skills — with a live preview combining them in export order. Your profile and CV
+are stored only in the SQLite database, and **📄 Export to PDF** downloads a
+formatted document combining your contact header with the sections in that
+order.
 
 The **📊 Statistics** tab shows how many positions you have in total and in each
 pipeline stage (unapplied, applied, interview, rejected), with charts for the
