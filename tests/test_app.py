@@ -1149,9 +1149,25 @@ async def test_settings_drawer_is_wide(user: User) -> None:
     assert drawer.props["width"] == "480"
 
 
+async def test_main_tabs_render_inside_header(user: User) -> None:
+    await user.open("/")
+
+    stat_tab = cast(ui.tab, user.find("📊 Statistics").elements.pop())
+    ancestors = list(stat_tab.ancestors(include_self=True))
+    assert any(isinstance(element, ui.header) for element in ancestors)
+    tabs_element = next(element for element in ancestors if isinstance(element, ui.tabs))
+    assert "header-tabs" in tabs_element.classes
+
+
 def test_global_css_styles_all_textareas() -> None:
     assert ".q-textarea .q-field__native" in app.GLOBAL_CSS
     assert "line-height: 1.7" in app.GLOBAL_CSS
+
+
+def test_global_css_scrolls_header_tabs_when_narrow() -> None:
+    assert ".header-tabs .q-tabs__content" in app.GLOBAL_CSS
+    assert "overflow-x: auto" in app.GLOBAL_CSS
+    assert "@media (max-width: 999px)" in app.GLOBAL_CSS
 
 
 def test_global_css_wraps_markdown_pre() -> None:
