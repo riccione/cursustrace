@@ -92,6 +92,7 @@ body.body--dark .q-drawer { background: #1d1d1d; }
 
 DARK_MODE_KEY = "dark_mode"
 SIMILAR_NOTICE_KEY = "similar_notice"
+SELECTED_PROFILE_KEY = "selected_profile_id"
 DARK_MODE_OPTIONS: dict[str, str] = {
     "light": "☀️ Light",
     "dark": "🌙 Dark",
@@ -880,97 +881,232 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
 
 
 def _render_profile_editor() -> None:
-    profile = db.get_profile()
     ui.label("👤 Profile & CV Configuration").classes("text-h5")
 
-    with ui.row().classes("w-full gap-8"):
-        with ui.column().classes("flex-1 gap-2"):
-            name = ui.input("Full Name", value=profile["full_name"])
-            email = ui.input("Email", value=profile["email"])
-            linkedin = ui.input("LinkedIn URL", value=profile["linkedin_url"])
-        with ui.column().classes("flex-1 gap-2"):
-            location = ui.input("Location", value=profile["location"])
-            phone = ui.input("Phone Number", value=profile["phone"])
-            github = ui.input("GitHub URL", value=profile["github_url"])
+    profiles = db.list_profiles()
+    known_ids = {profile["id"] for profile in profiles}
+    stored = db.get_setting(SELECTED_PROFILE_KEY)
+    stored_id = int(stored) if stored is not None and stored.isdigit() else None
+    selected: dict[str, int | None] = {
+        "id": stored_id if stored_id in known_ids else (min(known_ids) if known_ids else None)
+    }
 
-    def combined_markdown() -> str:
-        sections = (
-            summary.value or "",
-            work_history.value or "",
-            education.value or "",
-            skills.value or "",
+    with ui.dialog() as add_dialog, ui.card().classes("w-full max-w-md"):
+        ui.label("Add profile").classes("text-h6")
+        new_name_input = ui.input("Profile name").classes("w-full").mark("new-profile-name")
+        with ui.row():
+            ui.button("Cancel", on_click=add_dialog.close).props("flat")
+            ui.button("Add", on_click=lambda: confirm_add()).props("color=primary").mark(
+                "confirm-add-profile"
+            )
+
+    with ui.dialog() as delete_dialog, ui.card():
+        ui.label("Delete this profile?").classes("text-h6")
+        delete_target = ui.label().classes("font-bold")
+        ui.label("This action cannot be undone.").classes("text-negative")
+        delete_confirm_input = (
+            ui.input("Type 'DELETE' to confirm", placeholder="DELETE")
+            .classes("w-full")
+            .mark("delete-profile-confirm")
         )
-        return "\n\n".join(section.strip() for section in sections if section.strip())
-
-    ui.label("Markdown CV").classes("text-h6")
-    with ui.row().classes("w-full gap-4"):
-        with ui.column().classes("flex-1 gap-4"):
-            summary = (
-                ui.textarea("Summary", value=profile["summary"])
-                .classes("w-full")
-                .props('autogrow input-style="min-height: 140px"')
-            )
-            work_history = (
-                ui.textarea("Work History", value=profile["work_history"])
-                .classes("w-full")
-                .props('autogrow input-style="min-height: 140px"')
-            )
-            education = (
-                ui.textarea("Education", value=profile["education"])
-                .classes("w-full")
-                .props('autogrow input-style="min-height: 140px"')
-            )
-            skills = (
-                ui.textarea("Skills", value=profile["skills"])
-                .classes("w-full")
-                .props('autogrow input-style="min-height: 140px"')
-            )
-        with ui.column().classes("flex-1"):
-            ui.label("Live preview").classes("font-bold")
-            preview = ui.markdown(combined_markdown() or "_Nothing to preview yet._")
-
-    def update_preview(_event: events.ValueChangeEventArguments[str | None]) -> None:
-        preview.set_content(combined_markdown() or "_Nothing to preview yet._")
-
-    for section in (summary, work_history, education, skills):
-        section.on_value_change(update_preview)
-
-    def save() -> None:
-        db.save_profile(
-            {
-                "full_name": name.value or "",
-                "location": location.value or "",
-                "phone": phone.value or "",
-                "email": email.value or "",
-                "linkedin_url": linkedin.value or "",
-                "github_url": github.value or "",
-                "summary": summary.value or "",
-                "work_history": work_history.value or "",
-                "education": education.value or "",
-                "skills": skills.value or "",
-                "date_updated": None,
-            }
+        delete_button = (
+            ui.button("Delete profile", on_click=lambda: confirm_delete())
+            .props("color=negative")
+            .mark("confirm-delete-profile")
         )
-        ui.notify("Profile and CV saved successfully!", type="positive")
+        delete_button.enabled = False
 
-    ui.button("💾 Save Profile & CV", on_click=save).props("color=primary")
+        def update_delete_button(event: events.ValueChangeEventArguments[str | None]) -> None:
+            delete_button.enabled = event.value == "DELETE"
 
-    ui.separator()
+        delete_confirm_input.on_value_change(update_delete_button)
 
-    def export() -> None:
-        current = db.get_profile()
-        try:
-            pdf_bytes = generate_cv_pdf(current, load_cv_styles(_cv_style_path()))
-        except PdfExportError as exc:
-            ui.notify(f"Could not generate PDF: {exc}", type="negative")
+    container = ui.column().classes("w-full")
+    with container:
+        topbar = ui.row().classes("w-full items-center gap-4")
+        body = ui.column().classes("w-full")
+
+    def persist_selection() -> None:
+        if selected["id"] is not None:
+            db.set_setting(SELECTED_PROFILE_KEY, str(selected["id"]))
+
+    def render_topbar() -> None:
+        current_profiles = db.list_profiles()
+        ids = {profile["id"] for profile in current_profiles}
+        if selected["id"] not in ids:
+            selected["id"] = min(ids) if ids else None
+        topbar.clear()
+        with topbar:
+            if len(current_profiles) >= 2:
+                selector = (
+                    ui.select(
+                        options={profile["id"]: profile["name"] for profile in current_profiles},
+                        value=selected["id"],
+                        label="Profile",
+                    )
+                    .classes("w-64")
+                    .mark("profile-select")
+                )
+                selector.on_value_change(switch_profile)
+            ui.button("➕ Add Profile", on_click=add_dialog.open).mark("add-profile")
+            if selected["id"] is not None:
+                ui.button(
+                    "🗑 Delete Profile",
+                    on_click=open_delete,
+                ).props("color=negative").mark("delete-profile")
+
+    def switch_profile(event: events.ValueChangeEventArguments[int | None]) -> None:
+        if event.value is None:
             return
-        ui.download.content(
-            pdf_bytes,
-            get_pdf_filename(current["full_name"]),
-            media_type="application/pdf",
-        )
+        selected["id"] = event.value
+        persist_selection()
+        render_form()
 
-    ui.button("📄 Export to PDF", on_click=export)
+    def confirm_add() -> None:
+        name = (new_name_input.value or "").strip()
+        if not name:
+            ui.notify("Enter a profile name.", type="warning")
+            return
+        profile_id = db.create_profile(name)
+        if profile_id is None:
+            ui.notify(f"Profile '{name}' already exists.", type="warning")
+            return
+        new_name_input.value = ""
+        add_dialog.close()
+        selected["id"] = profile_id
+        persist_selection()
+        rerender_all()
+        ui.notify(f"Profile '{name}' created.", type="positive")
+
+    def open_delete() -> None:
+        if selected["id"] is None:
+            return
+        delete_target.set_text(f"Profile '{db.get_profile(selected['id'])['name']}'")
+        delete_confirm_input.value = ""
+        delete_button.enabled = False
+        delete_dialog.open()
+
+    def confirm_delete() -> None:
+        if selected["id"] is None:
+            return
+        db.delete_profile(selected["id"])
+        delete_dialog.close()
+        remaining = db.list_profiles()
+        selected["id"] = min((profile["id"] for profile in remaining), default=None)
+        if selected["id"] is not None:
+            persist_selection()
+        rerender_all()
+        ui.notify("Profile deleted.", type="positive")
+
+    def render_form() -> None:
+        body.clear()
+        with body:
+            profiles_now = db.list_profiles()
+            ids = {profile["id"] for profile in profiles_now}
+            if selected["id"] not in ids:
+                selected["id"] = min(ids) if ids else None
+            if selected["id"] is None:
+                ui.label("No profiles yet. Add a profile to create your CV.").mark("no-profiles")
+                return
+            _render_profile_fields(db.get_profile(selected["id"]))
+
+    def rerender_all() -> None:
+        render_topbar()
+        render_form()
+
+    def _render_profile_fields(profile: db.Profile) -> None:
+        with ui.row().classes("w-full gap-8"):
+            with ui.column().classes("flex-1 gap-2"):
+                name = ui.input("Full Name", value=profile["full_name"])
+                email = ui.input("Email", value=profile["email"])
+                linkedin = ui.input("LinkedIn URL", value=profile["linkedin_url"])
+            with ui.column().classes("flex-1 gap-2"):
+                location = ui.input("Location", value=profile["location"])
+                phone = ui.input("Phone Number", value=profile["phone"])
+                github = ui.input("GitHub URL", value=profile["github_url"])
+
+        def combined_markdown() -> str:
+            sections = (
+                summary.value or "",
+                work_history.value or "",
+                education.value or "",
+                skills.value or "",
+            )
+            return "\n\n".join(section.strip() for section in sections if section.strip())
+
+        ui.label("Markdown CV").classes("text-h6")
+        with ui.row().classes("w-full gap-4"):
+            with ui.column().classes("flex-1 gap-4"):
+                summary = (
+                    ui.textarea("Summary", value=profile["summary"])
+                    .classes("w-full")
+                    .props('autogrow input-style="min-height: 140px"')
+                )
+                work_history = (
+                    ui.textarea("Work History", value=profile["work_history"])
+                    .classes("w-full")
+                    .props('autogrow input-style="min-height: 140px"')
+                )
+                education = (
+                    ui.textarea("Education", value=profile["education"])
+                    .classes("w-full")
+                    .props('autogrow input-style="min-height: 140px"')
+                )
+                skills = (
+                    ui.textarea("Skills", value=profile["skills"])
+                    .classes("w-full")
+                    .props('autogrow input-style="min-height: 140px"')
+                )
+            with ui.column().classes("flex-1"):
+                ui.label("Live preview").classes("font-bold")
+                preview = ui.markdown(combined_markdown() or "_Nothing to preview yet._")
+
+        def update_preview(_event: events.ValueChangeEventArguments[str | None]) -> None:
+            preview.set_content(combined_markdown() or "_Nothing to preview yet._")
+
+        for section in (summary, work_history, education, skills):
+            section.on_value_change(update_preview)
+
+        def save() -> None:
+            db.save_profile(
+                {
+                    "id": profile["id"],
+                    "name": profile["name"],
+                    "full_name": name.value or "",
+                    "location": location.value or "",
+                    "phone": phone.value or "",
+                    "email": email.value or "",
+                    "linkedin_url": linkedin.value or "",
+                    "github_url": github.value or "",
+                    "summary": summary.value or "",
+                    "work_history": work_history.value or "",
+                    "education": education.value or "",
+                    "skills": skills.value or "",
+                    "date_updated": None,
+                }
+            )
+            ui.notify("Profile and CV saved successfully!", type="positive")
+
+        ui.button("💾 Save Profile & CV", on_click=save).props("color=primary")
+
+        ui.separator()
+
+        def export() -> None:
+            current = db.get_profile(profile["id"])
+            try:
+                pdf_bytes = generate_cv_pdf(current, load_cv_styles(_cv_style_path()))
+            except PdfExportError as exc:
+                ui.notify(f"Could not generate PDF: {exc}", type="negative")
+                return
+            ui.download.content(
+                pdf_bytes,
+                get_pdf_filename(current["full_name"]),
+                media_type="application/pdf",
+            )
+
+        ui.button("📄 Export to PDF", on_click=export)
+
+    rerender_all()
 
 
 @ui.page("/")
