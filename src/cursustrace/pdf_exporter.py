@@ -77,9 +77,20 @@ def build_html(markdown_text: str, css: str | None = None) -> str:
     )
 
 
+def build_cv_body_markdown(profile: Profile) -> str:
+    """Join the CV sections into the final body, in export order."""
+    sections = (
+        profile["summary"],
+        profile["work_history"],
+        profile["education"],
+        profile["skills"],
+    )
+    return "\n\n".join(section.strip() for section in sections if section.strip())
+
+
 def generate_cv_pdf(profile: Profile, css: str | None = None) -> bytes:
-    """Render the profile header and Markdown CV body into a PDF document."""
-    combined_md = f"{build_header_markdown(profile)}{profile.get('cv_markdown', '').strip()}"
+    """Render the profile header and Markdown CV sections into a PDF document."""
+    combined_md = f"{build_header_markdown(profile)}{build_cv_body_markdown(profile)}"
     try:
         pdf = HTML(string=build_html(combined_md, css)).write_pdf()
     except Exception as exc:

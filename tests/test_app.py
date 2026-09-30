@@ -43,7 +43,7 @@ def _seed_job(title: str = "Senior Engineer", description: str = "Body text") ->
     return db.get_jobs()[0]["id"]
 
 
-def _profile_payload(full_name: str = "Jane Doe", cv_markdown: str = "# Jane") -> db.Profile:
+def _profile_payload(full_name: str = "Jane Doe", summary: str = "# Jane") -> db.Profile:
     return {
         "full_name": full_name,
         "location": "Remote",
@@ -51,7 +51,10 @@ def _profile_payload(full_name: str = "Jane Doe", cv_markdown: str = "# Jane") -
         "email": "jane@example.com",
         "linkedin_url": "https://linkedin.com/in/jane",
         "github_url": "https://github.com/jane",
-        "cv_markdown": cv_markdown,
+        "summary": summary,
+        "work_history": "## Work History",
+        "education": "## Education",
+        "skills": "## Skills",
         "date_updated": None,
     }
 
@@ -1087,26 +1090,33 @@ async def test_profile_tab_renders(user: User) -> None:
         "Location",
         "Phone Number",
         "GitHub URL",
+        "Summary",
+        "Work History",
+        "Education",
+        "Skills",
     ):
         await user.should_see(label)
 
 
 async def test_profile_prefills_existing_values(user: User) -> None:
     db.init_db()
-    db.save_profile(_profile_payload(full_name="Jane Doe", cv_markdown="# Jane"))
+    db.save_profile(_profile_payload(full_name="Jane Doe", summary="# Jane"))
     await user.open("/")
 
     name_input = cast(ui.input, user.find("Full Name").elements.pop())
-    cv_input = cast(ui.textarea, user.find("Edit your CV in Markdown format").elements.pop())
+    summary_input = cast(ui.textarea, user.find("Summary").elements.pop())
     assert name_input.value == "Jane Doe"
-    assert cv_input.value == "# Jane"
+    assert summary_input.value == "# Jane"
 
 
 async def test_profile_save_persists(user: User) -> None:
     await user.open("/")
     user.find("Full Name").clear().type("Jane Doe")
     user.find("Email").clear().type("jane@example.com")
-    user.find("Edit your CV in Markdown format").clear().type("# Jane Doe\n\nNew CV")
+    user.find("Summary").clear().type("# Jane Doe\n\nNew CV summary")
+    user.find("Work History").clear().type("## Work History\n\n- Acme")
+    user.find("Education").clear().type("## Education\n\nBSc")
+    user.find("Skills").clear().type("## Skills\n\n- Python")
     await asyncio.sleep(0.1)
 
     user.find("💾 Save Profile & CV").click()
@@ -1115,7 +1125,31 @@ async def test_profile_save_persists(user: User) -> None:
     profile = db.get_profile()
     assert profile["full_name"] == "Jane Doe"
     assert profile["email"] == "jane@example.com"
-    assert profile["cv_markdown"] == "# Jane Doe\n\nNew CV"
+    assert profile["summary"] == "# Jane Doe\n\nNew CV summary"
+    assert profile["work_history"] == "## Work History\n\n- Acme"
+    assert profile["education"] == "## Education\n\nBSc"
+    assert profile["skills"] == "## Skills\n\n- Python"
+
+
+async def test_profile_preview_combines_sections_in_order(user: User) -> None:
+    await user.open("/")
+    user.find("Summary").clear().type("MARK_SUMMARY")
+    user.find("Work History").clear().type("MARK_WORK")
+    user.find("Education").clear().type("MARK_EDUCATION")
+    user.find("Skills").clear().type("MARK_SKILLS")
+    await asyncio.sleep(0.1)
+
+    contents = [
+        element.content
+        for element in user.find(ui.markdown).elements
+        if isinstance(element, ui.markdown)
+    ]
+    combined = next(
+        content for content in contents if "MARK_SUMMARY" in content and "MARK_SKILLS" in content
+    )
+    markers = ["MARK_SUMMARY", "MARK_WORK", "MARK_EDUCATION", "MARK_SKILLS"]
+    positions = [combined.index(marker) for marker in markers]
+    assert positions == sorted(positions)
 
 
 async def test_profile_export_button_renders(user: User) -> None:

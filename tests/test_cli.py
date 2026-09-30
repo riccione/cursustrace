@@ -67,7 +67,10 @@ def _profile() -> db.Profile:
         "email": "jane@example.com",
         "linkedin_url": "",
         "github_url": "",
-        "cv_markdown": "# Jane",
+        "summary": "# Jane",
+        "work_history": "",
+        "education": "",
+        "skills": "",
         "date_updated": None,
     }
 

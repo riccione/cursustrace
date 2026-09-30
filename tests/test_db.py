@@ -987,7 +987,7 @@ def test_find_similar_exclude_id_ignores_own_description(db_path: Path) -> None:
 
 
 def _profile_payload(
-    full_name: str = "Jane Doe", cv_markdown: str = "# Jane Doe\n\nEngineer"
+    full_name: str = "Jane Doe", summary: str = "# Jane Doe\n\nEngineer"
 ) -> db.Profile:
     return {
         "full_name": full_name,
@@ -996,7 +996,10 @@ def _profile_payload(
         "email": "jane@example.com",
         "linkedin_url": "https://linkedin.com/in/jane",
         "github_url": "https://github.com/jane",
-        "cv_markdown": cv_markdown,
+        "summary": summary,
+        "work_history": "## Work History\n\n- Acme Corp",
+        "education": "## Education\n\nBSc",
+        "skills": "## Skills\n\n- Python",
         "date_updated": None,
     }
 
@@ -1018,7 +1021,10 @@ def test_save_and_get_profile_round_trip(db_path: Path) -> None:
     assert profile["full_name"] == "Jane Doe"
     assert profile["email"] == "jane@example.com"
     assert profile["linkedin_url"] == "https://linkedin.com/in/jane"
-    assert profile["cv_markdown"] == "# Jane Doe\n\nEngineer"
+    assert profile["summary"] == "# Jane Doe\n\nEngineer"
+    assert profile["work_history"] == "## Work History\n\n- Acme Corp"
+    assert profile["education"] == "## Education\n\nBSc"
+    assert profile["skills"] == "## Skills\n\n- Python"
     assert profile["date_updated"] is not None
 
 
@@ -1032,17 +1038,46 @@ def test_save_profile_upserts_single_row(db_path: Path) -> None:
     assert db.get_profile()["full_name"] == "Jane Smith"
 
 
-def test_save_profile_keeps_cv_in_database(db_path: Path) -> None:
+def test_save_profile_keeps_sections_in_database(db_path: Path) -> None:
     db.init_db()
-    db.save_profile(_profile_payload(cv_markdown="# Updated CV"))
+    db.save_profile(_profile_payload(summary="# Updated CV"))
 
     with db.get_connection() as conn:
-        stored = conn.execute("SELECT cv_markdown FROM profile WHERE id = 1").fetchone()[0]
-    assert stored == "# Updated CV"
+        row = conn.execute(
+            "SELECT summary, work_history, education, skills FROM profile WHERE id = 1"
+        ).fetchone()
+    assert row["summary"] == "# Updated CV"
+    assert row["work_history"] == "## Work History\n\n- Acme Corp"
+    assert row["education"] == "## Education\n\nBSc"
+    assert row["skills"] == "## Skills\n\n- Python"
     assert not (db_path.parent / "cv.md").exists()
 
 
-def test_init_db_migrates_profile_cv_markdown(db_path: Path) -> None:
+def test_init_db_migrates_profile_cv_sections(db_path: Path) -> None:
+    with db.get_connection() as conn:
+        conn.execute(
+            "CREATE TABLE profile ("
+            "id INTEGER PRIMARY KEY CHECK (id = 1), "
+            "full_name TEXT, location TEXT, phone TEXT, email TEXT, "
+            "linkedin_url TEXT, github_url TEXT, cv_markdown TEXT, "
+            "date_updated TEXT DEFAULT (datetime('now')))"
+        )
+        conn.execute(
+            "INSERT INTO profile (id, full_name, cv_markdown) VALUES (1, 'Legacy', '# Old CV')"
+        )
+        conn.commit()
+
+    db.init_db()
+
+    with db.get_connection() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
+    assert {"summary", "work_history", "education", "skills"} <= columns
+    assert "cv_markdown" not in columns
+    assert db.get_profile()["full_name"] == "Legacy"
+    assert db.get_profile()["summary"] == ""
+
+
+def test_init_db_migrates_profile_without_cv_markdown(db_path: Path) -> None:
     with db.get_connection() as conn:
         conn.execute(
             "CREATE TABLE profile ("
@@ -1058,14 +1093,17 @@ def test_init_db_migrates_profile_cv_markdown(db_path: Path) -> None:
 
     with db.get_connection() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
-    assert "cv_markdown" in columns
+    assert {"summary", "work_history", "education", "skills"} <= columns
     assert db.get_profile()["full_name"] == "Legacy"
 
 
 def test_get_profile_without_row(db_path: Path) -> None:
     db.init_db()
     profile = db.get_profile()
-    assert profile["cv_markdown"] == ""
+    assert profile["summary"] == ""
+    assert profile["work_history"] == ""
+    assert profile["education"] == ""
+    assert profile["skills"] == ""
     assert profile["full_name"] == ""
 
 

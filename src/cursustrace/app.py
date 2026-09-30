@@ -893,25 +893,47 @@ def _render_profile_editor() -> None:
             phone = ui.input("Phone Number", value=profile["phone"])
             github = ui.input("GitHub URL", value=profile["github_url"])
 
+    def combined_markdown() -> str:
+        sections = (
+            summary.value or "",
+            work_history.value or "",
+            education.value or "",
+            skills.value or "",
+        )
+        return "\n\n".join(section.strip() for section in sections if section.strip())
+
     ui.label("Markdown CV").classes("text-h6")
     with ui.row().classes("w-full gap-4"):
-        with ui.column().classes("flex-1"):
-            cv = (
-                ui.textarea(
-                    "Edit your CV in Markdown format",
-                    value=profile["cv_markdown"],
-                )
+        with ui.column().classes("flex-1 gap-4"):
+            summary = (
+                ui.textarea("Summary", value=profile["summary"])
                 .classes("w-full")
-                .props('autogrow input-style="min-height: 400px"')
+                .props('autogrow input-style="min-height: 140px"')
+            )
+            work_history = (
+                ui.textarea("Work History", value=profile["work_history"])
+                .classes("w-full")
+                .props('autogrow input-style="min-height: 140px"')
+            )
+            education = (
+                ui.textarea("Education", value=profile["education"])
+                .classes("w-full")
+                .props('autogrow input-style="min-height: 140px"')
+            )
+            skills = (
+                ui.textarea("Skills", value=profile["skills"])
+                .classes("w-full")
+                .props('autogrow input-style="min-height: 140px"')
             )
         with ui.column().classes("flex-1"):
             ui.label("Live preview").classes("font-bold")
-            preview = ui.markdown(profile["cv_markdown"] or "_Nothing to preview yet._")
+            preview = ui.markdown(combined_markdown() or "_Nothing to preview yet._")
 
-    def update_preview(event: events.ValueChangeEventArguments[str | None]) -> None:
-        preview.set_content(event.value or "_Nothing to preview yet._")
+    def update_preview(_event: events.ValueChangeEventArguments[str | None]) -> None:
+        preview.set_content(combined_markdown() or "_Nothing to preview yet._")
 
-    cv.on_value_change(update_preview)
+    for section in (summary, work_history, education, skills):
+        section.on_value_change(update_preview)
 
     def save() -> None:
         db.save_profile(
@@ -922,7 +944,10 @@ def _render_profile_editor() -> None:
                 "email": email.value or "",
                 "linkedin_url": linkedin.value or "",
                 "github_url": github.value or "",
-                "cv_markdown": cv.value or "",
+                "summary": summary.value or "",
+                "work_history": work_history.value or "",
+                "education": education.value or "",
+                "skills": skills.value or "",
                 "date_updated": None,
             }
         )
