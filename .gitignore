@@ -18,7 +18,7 @@ wheels/
 logs/
 
 # Local database
-data/*.db*
+data/
 
 # Personal data kept only in SQLite
 data/cv.md
@@ -28,3 +28,6 @@ data/*.csv
 
 # Database backups (contain personal data)
 backups/
+
+screenshots/
+scripts/
