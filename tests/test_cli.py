@@ -251,6 +251,21 @@ def test_discover_add_ingests_new_positions(
     assert "https://board.example/jobs/222?ref=x" in urls
 
 
+def test_discover_add_assigns_tags(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+    monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["discover", "https://board.example", "--add", "--tag", "qa", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["added"] == 2
+    assert db.tag_counts() == {"qa": 2}
+
+
 def test_discover_add_reports_errors_and_exits_nonzero(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -381,6 +396,17 @@ def test_scan_reports_scrape_errors(runner: CliRunner, monkeypatch: pytest.Monke
     payload = json.loads(result.output)
     assert payload["errors"][0]["error"] == "boom"
     assert db.get_jobs() == []
+
+
+def test_scan_assigns_tags(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
+
+    result = runner.invoke(
+        cli_module.cli, ["scan", "https://a.com/1", "--tag", "qa", "--tag", "remote"]
+    )
+
+    assert result.exit_code == 0
+    assert db.tag_counts() == {"qa": 1, "remote": 1}
 
 
 def test_import_from_file(

@@ -376,8 +376,14 @@ def add(
 
 @cli.command()
 @click.argument("urls", nargs=-1, required=True)
+@click.option(
+    "--tag",
+    "tags",
+    multiple=True,
+    help="Tag to assign (repeatable; unknown tags are created).",
+)
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON summary.")
-def scan(urls: tuple[str, ...], as_json: bool) -> None:
+def scan(urls: tuple[str, ...], tags: tuple[str, ...], as_json: bool) -> None:
     """Scrape one or more URLs and add the positions."""
     db.init_db()
     added = skipped = 0
@@ -389,7 +395,9 @@ def scan(urls: tuple[str, ...], as_json: bool) -> None:
         except ScrapeError as exc:
             errors.append({"url": url, "error": str(exc)})
             continue
-        result = _ingest(url, job["title"], job["company"], job["location"], job["description"])
+        result = _ingest(
+            url, job["title"], job["company"], job["location"], job["description"], tags=tags
+        )
         if result["status"] == "duplicate":
             skipped += 1
             click.echo(f"Skipped (already tracked): {url}", err=True)
@@ -404,13 +412,21 @@ def scan(urls: tuple[str, ...], as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON summary.")
 @click.option("--add", "add_new", is_flag=True, help="Scrape and add every new position found.")
 @click.option(
+    "--tag",
+    "tags",
+    multiple=True,
+    help="Tag to assign with --add (repeatable; unknown tags are created).",
+)
+@click.option(
     "--limit",
     type=click.IntRange(1, discovery.MAX_LIMIT),
     default=discovery.DEFAULT_LIMIT,
     show_default=True,
     help="Maximum candidate links to examine.",
 )
-def discover(source_arg: str, as_json: bool, add_new: bool, limit: int) -> None:
+def discover(
+    source_arg: str, as_json: bool, add_new: bool, tags: tuple[str, ...], limit: int
+) -> None:
     """Discover position links from a job source (URL or job-sources site name)."""
     db.init_db()
     try:
@@ -434,7 +450,14 @@ def discover(source_arg: str, as_json: bool, add_new: bool, limit: int) -> None:
             except ScrapeError as exc:
                 errors.append({"url": url, "error": str(exc)})
                 continue
-            ingest = _ingest(url, job["title"], job["company"], job["location"], job["description"])
+            ingest = _ingest(
+                url,
+                job["title"],
+                job["company"],
+                job["location"],
+                job["description"],
+                tags=tags,
+            )
             if ingest["status"] == "duplicate":
                 skipped += 1
             else:
