@@ -40,6 +40,7 @@ Sources for fully remote roles. Remote filters on the global sites often surface
 | Skip | https://www.skip.com | remote | Curated remote tech roles | live |
 | Tech Ladies | https://www.hiretechladies.com | remote | Curated roles for women in tech | live |
 | Turing | https://turing.com | remote | Remote developer matching, US-timezone clients | live |
+| Wantapply | https://wantapply.com | remote | Verified remote and relocation tech roles, EU-heavy | blocked |
 | We Work Remotely | https://weworkremotely.com | remote | Oldest large remote-only board | live |
 | Working Nomads | https://www.workingnomads.com | remote | Daily-curated remote listings by category | live |
 
