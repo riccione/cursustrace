@@ -145,12 +145,12 @@ uv run cursustrace add --url https://example.com/job/1 \
   --title "Backend Engineer" --company Acme --description "Build APIs" \
   --location Remote --status applied --tag remote --json
 
-# scrape and add one or more URLs
-uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --json
+# scrape and add one or more URLs (repeatable --tag labels the whole batch)
+uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --tag qa --json
 
 # discover candidate listing links from a source page (URL or job-sources site name)
 uv run cursustrace discover RemoteOK --json
-uv run cursustrace discover https://example.com/jobs --add --json
+uv run cursustrace discover https://example.com/jobs --add --tag qa --json
 
 # batch import a JSON array (structured items and/or URL-only items) from a file or stdin
 uv run cursustrace import jobs.json --json
@@ -187,14 +187,23 @@ uv run cursustrace backup --dir /mnt/backup --keep 30
 # show the version
 uv run cursustrace -V
 
-# delete job positions (or everything with --all); --yes skips the prompt
+# delete positions by id, URL, a URL list file, or the list filters;
+# preview + confirmation prompt unless --yes (--json requires --yes)
+uv run cursustrace delete 42 43 --yes
+uv run cursustrace delete --url https://example.com/job/1 --yes
+uv run cursustrace delete --url-file urls.txt --yes --json
+uv run cursustrace delete --status rejected --tag spam --yes
+
+# delete ALL job positions at once (or everything with --all); --yes skips the prompt
 uv run cursustrace clear --yes
 uv run cursustrace clear --all --yes
 ```
 
 Each JSON item may be structured (`url`, `title`, `company`, `location`,
 `description`, `status`, `salary_*`, `tags`) or URL-only (the URL is scraped to
-fill the missing fields). `export` writes that same shape, so
+fill the missing fields). Scraped positions resolve `location` from the page's
+Open Graph meta, then its JSON-LD `JobPosting` address, then a `📍Location:`
+line in the description. `export` writes that same shape, so
 `cursustrace export jobs.json` can be edited and fed back into `import`: status,
 stage comments, and tags survive the round trip (unknown tags are created),
 timestamps are re-stamped on import. The CSV variant is a flat spreadsheet view

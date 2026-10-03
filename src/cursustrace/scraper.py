@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import TypedDict
 from urllib.parse import urlparse
 
@@ -82,6 +84,71 @@ def _extract_description(html: str, url: str, soup: BeautifulSoup) -> str | None
     return fallback or None
 
 
+def _jsonld_location(data: object) -> str | None:
+    """Pull a location string from a parsed JSON-LD JobPosting payload."""
+    items: list[object]
+    if isinstance(data, list):
+        items = list(data)
+    elif isinstance(data, dict):
+        items = [data]
+        if isinstance(data.get("@graph"), list):
+            items.extend(data["@graph"])
+    else:
+        items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        jtype = item.get("@type")
+        types = [jtype] if isinstance(jtype, str) else jtype if isinstance(jtype, list) else []
+        if not any(isinstance(entry, str) and entry.lower() == "jobposting" for entry in types):
+            continue
+        location = item.get("jobLocation")
+        if isinstance(location, list):
+            location = next((entry for entry in location if isinstance(entry, dict)), None)
+        if not isinstance(location, dict):
+            continue
+        address = location.get("address")
+        if isinstance(address, str) and address.strip():
+            return address.strip()
+        if not isinstance(address, dict):
+            continue
+        parts: list[str] = []
+        seen: set[str] = set()
+        for key in ("addressLocality", "addressRegion", "addressCountry"):
+            value = address.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized = value.strip().lower()
+                if normalized not in seen:
+                    seen.add(normalized)
+                    parts.append(value.strip())
+        if parts:
+            return ", ".join(parts)
+    return None
+
+
+def _extract_location(soup: BeautifulSoup, description: str | None) -> str | None:
+    """Resolve a job location: Open Graph meta, then JSON-LD, then description marker."""
+    meta = _meta_content(soup, "og:locality", "og:region", "job:location")
+    if meta is not None:
+        return meta
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        text = tag.string or ""
+        if not text.strip():
+            continue
+        try:
+            data = json.loads(text)
+        except ValueError:
+            continue
+        found = _jsonld_location(data)
+        if found is not None:
+            return found
+    if description:
+        match = re.search(r"📍\s*Location:\s*([^\n\r]+)", description)
+        if match is not None:
+            return match.group(1).strip()
+    return None
+
+
 def fetch_html(url: str) -> str:
     """Fetch any page with the shared browser UA and timeout; raise ScrapeError on failure."""
     try:
@@ -102,6 +169,7 @@ def scrape_job(url: str) -> ScrapedJob:
 
     html = response.text
     soup = BeautifulSoup(html, "html.parser")
+    description = _extract_description(html, url, soup)
 
     return ScrapedJob(
         title=_first_nonempty(
@@ -110,7 +178,6 @@ def scrape_job(url: str) -> ScrapedJob:
             _text_of(soup.title),
         ),
         company=_meta_content(soup, "og:site_name") or _infer_company(url),
-        location=_meta_content(soup, "og:locality", "og:region", "job:location")
-        or DEFAULT_LOCATION,
-        description=_extract_description(html, url, soup),
+        location=_extract_location(soup, description) or DEFAULT_LOCATION,
+        description=description,
     )

@@ -113,6 +113,88 @@ def test_location_defaults_when_missing(monkeypatch: pytest.MonkeyPatch) -> None
     assert scraper.scrape_job("https://example.com")["location"] == "Not Specified"
 
 
+def test_location_from_jsonld_jobposting(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@context": "https://schema.org", "@type": "JobPosting", "title": "QA Engineer",
+     "jobLocation": {"@type": "Place", "address": {"@type": "PostalAddress",
+     "addressLocality": "Arvada", "addressRegion": "CO", "addressCountry": "US"}}}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["location"] == "Arvada, CO, US"
+
+
+def test_location_jsonld_list_dedupes_parts(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    [{"@type": "JobPosting",
+      "jobLocation": [{"@type": "Place", "address": {"addressLocality": "Hamburg",
+      "addressRegion": "HAMBURG", "addressCountry": "DE"}}]}]
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["location"] == "Hamburg, DE"
+
+
+def test_location_jsonld_address_as_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "JobPosting", "jobLocation": {"address": "Berlin, Germany"}}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["location"] == "Berlin, Germany"
+
+
+def test_og_meta_wins_over_jsonld(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <meta property="og:locality" content="Oslo" />
+    <script type="application/ld+json">
+    {"@type": "JobPosting", "jobLocation": {"address": {"addressLocality": "Berlin"}}}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["location"] == "Oslo"
+
+
+def test_malformed_jsonld_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = (
+        '<html><head><script type="application/ld+json">{not json</script>'
+        "</head><body></body></html>"
+    )
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["location"] == "Not Specified"
+
+
+def test_non_jobposting_jsonld_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "Organization", "address": {"addressLocality": "Paris"}}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["location"] == "Not Specified"
+
+
+def test_location_from_description_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        trafilatura, "extract", lambda *args, **kwargs: "Role text. 📍Location: Croatia"
+    )
+    _patch_get(monkeypatch, "<html><body><p>Role text</p></body></html>")
+    assert scraper.scrape_job("https://example.com")["location"] == "Croatia"
+
+
 def test_description_falls_back_to_page_text(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(trafilatura, "extract", lambda *args, **kwargs: None)
     _patch_get(monkeypatch, "<html><body><p>Plain body text</p></body></html>")

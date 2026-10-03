@@ -251,6 +251,21 @@ def test_discover_add_ingests_new_positions(
     assert "https://board.example/jobs/222?ref=x" in urls
 
 
+def test_discover_add_assigns_tags(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+    monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["discover", "https://board.example", "--add", "--tag", "qa", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["added"] == 2
+    assert db.tag_counts() == {"qa": 2}
+
+
 def test_discover_add_reports_errors_and_exits_nonzero(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -381,6 +396,17 @@ def test_scan_reports_scrape_errors(runner: CliRunner, monkeypatch: pytest.Monke
     payload = json.loads(result.output)
     assert payload["errors"][0]["error"] == "boom"
     assert db.get_jobs() == []
+
+
+def test_scan_assigns_tags(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
+
+    result = runner.invoke(
+        cli_module.cli, ["scan", "https://a.com/1", "--tag", "qa", "--tag", "remote"]
+    )
+
+    assert result.exit_code == 0
+    assert db.tag_counts() == {"qa": 1, "remote": 1}
 
 
 def test_import_from_file(
@@ -980,6 +1006,119 @@ def test_clear_all_removes_everything(runner: CliRunner) -> None:
     assert db.get_profile()["full_name"] == ""
     assert db.get_setting("dark_mode") is None
     assert db.list_tags() == []
+
+
+# --- Delete -----------------------------------------------------------------
+
+
+def test_delete_requires_selector(runner: CliRunner) -> None:
+    db.init_db()
+
+    result = runner.invoke(cli_module.cli, ["delete", "--yes"])
+
+    assert result.exit_code == 1
+    assert "Provide position IDs" in result.output
+
+
+def test_delete_by_id_with_preview(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/2", "Other", "Beta", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["delete", "1", "--yes"])
+
+    assert result.exit_code == 0
+    assert "1. Engineer — Acme" in result.output
+    assert "Removed 1 position(s)." in result.output
+    assert [job["job_url"] for job in db.get_jobs()] == ["https://a.com/2"]
+
+
+def test_delete_confirmation_aborts(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["delete", "1"], input="n\n")
+
+    assert result.exit_code == 1
+    assert len(db.get_jobs()) == 1
+
+
+def test_delete_by_url_and_url_file(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/3", "Three", "Acme", "Remote", "Body")
+    url_file = tmp_path / "urls.txt"
+    url_file.write_text("# comment\nhttps://a.com/2\n\nhttps://a.com/missing\n", encoding="utf-8")
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["delete", "--url", "https://a.com/1", "--url-file", str(url_file), "--yes", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "deleted": 2,
+        "ids": [1, 2],
+        "not_found_ids": [],
+        "not_found_urls": ["https://a.com/missing"],
+    }
+    assert [job["job_url"] for job in db.get_jobs()] == ["https://a.com/3"]
+
+
+def test_delete_by_filters(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "Body")
+    job_id = db.add_job("https://a.com/2", "Two", "Beta", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_tags(job_id, ["spam"])
+
+    result = runner.invoke(cli_module.cli, ["delete", "--tag", "spam", "--yes", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["ids"] == [2]
+    assert [job["job_url"] for job in db.get_jobs()] == ["https://a.com/1"]
+
+
+def test_delete_json_requires_yes(runner: CliRunner) -> None:
+    db.init_db()
+
+    result = runner.invoke(cli_module.cli, ["delete", "1", "--json"])
+
+    assert result.exit_code == 1
+    assert "--json requires --yes" in result.output
+
+
+def test_delete_reports_unknown_ids(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["delete", "99", "--yes", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "deleted": 0,
+        "ids": [],
+        "not_found_ids": [99],
+        "not_found_urls": [],
+    }
+    assert len(db.get_jobs()) == 1
+
+
+def test_delete_cascades_events_and_tags(runner: CliRunner) -> None:
+    db.init_db()
+    job_id = db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_tags(job_id, ["remote"])
+    db.set_job_status(job_id, "applied")
+    assert db.get_events(job_id)
+
+    result = runner.invoke(cli_module.cli, ["delete", str(job_id), "--yes"])
+
+    assert result.exit_code == 0
+    assert db.get_jobs() == []
+    assert db.get_events(job_id) == []
+    assert db.filter_by_tags(db.get_jobs(), ["remote"]) == []
 
 
 # --- Tags -------------------------------------------------------------------
