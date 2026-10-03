@@ -241,6 +241,46 @@ A ready-to-paste workflow for an AI agent:
 > `cursustrace scan <chosen urls> --json` and summarize what was added, what
 > was already tracked, and what you skipped and why.
 
+## MCP server
+
+CursusTrace ships a [Model Context Protocol](https://modelcontextprotocol.io)
+server so AI agents can drive the tracker over structured tool calls instead of
+shelling out to the CLI:
+
+```sh
+uv run cursustrace mcp   # stdio transport; blocks until the client disconnects
+```
+
+It exposes 12 tools: `list_positions`, `get_position`, `get_stats`,
+`list_tags`, `add_position`, `scan`, `discover`, `update_status`, `set_tags`,
+`delete_positions`, `rename_tag`, and `delete_tag`. Tool failures come back
+with `is_error` set and the real reason, adding never overwrites (known URLs
+report as duplicates), and `delete_positions` is preview-first: call it with
+`confirm=false` to see what matches, then repeat with `confirm=true` to
+delete. The database path is relative to the server's working directory, so
+the MCP client's cwd decides which tracker it talks to.
+
+### opencode
+
+This repository registers the server for [opencode](https://opencode.ai) in
+`opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cursustrace": {
+      "type": "local",
+      "command": ["uv", "run", "cursustrace", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Restart opencode after editing it — config is not hot-reloaded. Any other MCP
+client works the same way: point it at `uv run cursustrace mcp` over stdio.
+
 ## Development
 
 ```sh
