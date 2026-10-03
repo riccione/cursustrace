@@ -982,6 +982,119 @@ def test_clear_all_removes_everything(runner: CliRunner) -> None:
     assert db.list_tags() == []
 
 
+# --- Delete -----------------------------------------------------------------
+
+
+def test_delete_requires_selector(runner: CliRunner) -> None:
+    db.init_db()
+
+    result = runner.invoke(cli_module.cli, ["delete", "--yes"])
+
+    assert result.exit_code == 1
+    assert "Provide position IDs" in result.output
+
+
+def test_delete_by_id_with_preview(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/2", "Other", "Beta", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["delete", "1", "--yes"])
+
+    assert result.exit_code == 0
+    assert "1. Engineer — Acme" in result.output
+    assert "Removed 1 position(s)." in result.output
+    assert [job["job_url"] for job in db.get_jobs()] == ["https://a.com/2"]
+
+
+def test_delete_confirmation_aborts(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["delete", "1"], input="n\n")
+
+    assert result.exit_code == 1
+    assert len(db.get_jobs()) == 1
+
+
+def test_delete_by_url_and_url_file(runner: CliRunner, tmp_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/3", "Three", "Acme", "Remote", "Body")
+    url_file = tmp_path / "urls.txt"
+    url_file.write_text("# comment\nhttps://a.com/2\n\nhttps://a.com/missing\n", encoding="utf-8")
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["delete", "--url", "https://a.com/1", "--url-file", str(url_file), "--yes", "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "deleted": 2,
+        "ids": [1, 2],
+        "not_found_ids": [],
+        "not_found_urls": ["https://a.com/missing"],
+    }
+    assert [job["job_url"] for job in db.get_jobs()] == ["https://a.com/3"]
+
+
+def test_delete_by_filters(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "Body")
+    job_id = db.add_job("https://a.com/2", "Two", "Beta", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_tags(job_id, ["spam"])
+
+    result = runner.invoke(cli_module.cli, ["delete", "--tag", "spam", "--yes", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["ids"] == [2]
+    assert [job["job_url"] for job in db.get_jobs()] == ["https://a.com/1"]
+
+
+def test_delete_json_requires_yes(runner: CliRunner) -> None:
+    db.init_db()
+
+    result = runner.invoke(cli_module.cli, ["delete", "1", "--json"])
+
+    assert result.exit_code == 1
+    assert "--json requires --yes" in result.output
+
+
+def test_delete_reports_unknown_ids(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["delete", "99", "--yes", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == {
+        "deleted": 0,
+        "ids": [],
+        "not_found_ids": [99],
+        "not_found_urls": [],
+    }
+    assert len(db.get_jobs()) == 1
+
+
+def test_delete_cascades_events_and_tags(runner: CliRunner) -> None:
+    db.init_db()
+    job_id = db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_tags(job_id, ["remote"])
+    db.set_job_status(job_id, "applied")
+    assert db.get_events(job_id)
+
+    result = runner.invoke(cli_module.cli, ["delete", str(job_id), "--yes"])
+
+    assert result.exit_code == 0
+    assert db.get_jobs() == []
+    assert db.get_events(job_id) == []
+    assert db.filter_by_tags(db.get_jobs(), ["remote"]) == []
+
+
 # --- Tags -------------------------------------------------------------------
 
 

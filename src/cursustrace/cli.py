@@ -808,6 +808,111 @@ def backup_command(target_dir: str | None, keep: int | None, as_json: bool) -> N
 
 
 @cli.command()
+@click.argument("job_ids", nargs=-1, type=int)
+@click.option("--url", "urls", multiple=True, help="Delete positions with this URL (repeatable).")
+@click.option(
+    "--url-file",
+    type=click.Path(dir_okay=False, exists=True),
+    default=None,
+    help="File with one position URL per line (# comments and blank lines ignored).",
+)
+@click.option("--status", type=click.Choice(STATUSES), default=None)
+@click.option("--search", default=None, help="Fuzzy company search.")
+@click.option("--min-salary", type=int, default=None, help="Minimum annualized salary.")
+@click.option("--max-salary", type=int, default=None, help="Maximum annualized salary.")
+@click.option("--salary-currency", type=click.Choice(salary.CURRENCIES), default=None)
+@click.option(
+    "--tag",
+    "tags",
+    multiple=True,
+    help="Only positions with this tag (repeatable, any-match).",
+)
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.option("--json", "as_json", is_flag=True, help="Print a JSON result (requires --yes).")
+def delete(
+    job_ids: tuple[int, ...],
+    urls: tuple[str, ...],
+    url_file: str | None,
+    status: str | None,
+    search: str | None,
+    min_salary: int | None,
+    max_salary: int | None,
+    salary_currency: str | None,
+    tags: tuple[str, ...],
+    yes: bool,
+    as_json: bool,
+) -> None:
+    """Delete positions selected by ID, URL, or the shared list filters."""
+    db.init_db()
+    has_filter = any((status, search, min_salary, max_salary, salary_currency, tags))
+    file_urls: list[str] = []
+    if url_file is not None:
+        file_urls = [
+            line.strip()
+            for line in Path(url_file).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+    wanted_urls = [*urls, *file_urls]
+    if not job_ids and not wanted_urls and not has_filter:
+        raise click.ClickException(
+            "Provide position IDs, --url/--url-file, or at least one filter."
+        )
+    if as_json and not yes:
+        raise click.ClickException("--json requires --yes.")
+
+    jobs = db.get_jobs()
+    by_id = {job["id"]: job for job in jobs}
+    by_url = {job["job_url"]: job for job in jobs}
+    not_found_ids = [job_id for job_id in job_ids if job_id not in by_id]
+    not_found_urls = [url for url in wanted_urls if url not in by_url]
+
+    selected: dict[int, None] = {}
+    for job_id in job_ids:
+        if job_id in by_id:
+            selected[job_id] = None
+    for url in wanted_urls:
+        job = by_url.get(url)
+        if job is not None:
+            selected[job["id"]] = None
+    if has_filter:
+        for job in _filtered_jobs(status, search, min_salary, max_salary, salary_currency, tags):
+            selected[job["id"]] = None
+    target = sorted(selected)
+
+    if not as_json:
+        for job_id in target[:5]:
+            job = by_id[job_id]
+            title = job["title"] or "Untitled position"
+            company = job["company"] or "Unknown company"
+            click.echo(f"  {job_id}. {title} — {company}")
+        if len(target) > 5:
+            click.echo(f"  … and {len(target) - 5} more")
+    if target and not yes:
+        click.confirm(f"Delete {len(target)} position(s)? This cannot be undone.", abort=True)
+    for job_id in target:
+        db.delete_job(job_id)
+
+    if as_json:
+        payload: dict[str, object] = {
+            "deleted": len(target),
+            "ids": target,
+            "not_found_ids": not_found_ids,
+            "not_found_urls": not_found_urls,
+        }
+        click.echo(json_module.dumps(payload))
+        return
+    if not target:
+        click.echo("No matching positions.")
+    else:
+        click.echo(f"Removed {len(target)} position(s).")
+    if not_found_ids or not_found_urls:
+        click.echo(
+            f"Not found: {len(not_found_ids)} id(s), {len(not_found_urls)} URL(s).",
+            err=True,
+        )
+
+
+@cli.command()
 @click.option(
     "--all",
     "clear_all",
