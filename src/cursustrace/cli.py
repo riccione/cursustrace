@@ -830,6 +830,37 @@ def backup_command(target_dir: str | None, keep: int | None, as_json: bool) -> N
         click.echo(f"Pruned {len(result.pruned)} older backup(s).")
 
 
+def _resolve_delete(
+    job_ids: tuple[int, ...],
+    wanted_urls: list[str],
+    status: str | None,
+    search: str | None,
+    min_salary: int | None,
+    max_salary: int | None,
+    salary_currency: str | None,
+    tags: tuple[str, ...],
+) -> tuple[list[db.Job], list[int], list[str]]:
+    """Resolve delete selectors into sorted target jobs plus unmatched ids/URLs."""
+    jobs = db.get_jobs()
+    by_id = {job["id"]: job for job in jobs}
+    by_url = {job["job_url"]: job for job in jobs}
+    not_found_ids = [job_id for job_id in job_ids if job_id not in by_id]
+    not_found_urls = [url for url in wanted_urls if url not in by_url]
+
+    selected: dict[int, None] = {}
+    for job_id in job_ids:
+        if job_id in by_id:
+            selected[job_id] = None
+    for url in wanted_urls:
+        job = by_url.get(url)
+        if job is not None:
+            selected[job["id"]] = None
+    if any((status, search, min_salary, max_salary, salary_currency, tags)):
+        for job in _filtered_jobs(status, search, min_salary, max_salary, salary_currency, tags):
+            selected[job["id"]] = None
+    return [by_id[job_id] for job_id in sorted(selected)], not_found_ids, not_found_urls
+
+
 @cli.command()
 @click.argument("job_ids", nargs=-1, type=int)
 @click.option("--url", "urls", multiple=True, help="Delete positions with this URL (repeatable).")
@@ -883,35 +914,20 @@ def delete(
     if as_json and not yes:
         raise click.ClickException("--json requires --yes.")
 
-    jobs = db.get_jobs()
-    by_id = {job["id"]: job for job in jobs}
-    by_url = {job["job_url"]: job for job in jobs}
-    not_found_ids = [job_id for job_id in job_ids if job_id not in by_id]
-    not_found_urls = [url for url in wanted_urls if url not in by_url]
-
-    selected: dict[int, None] = {}
-    for job_id in job_ids:
-        if job_id in by_id:
-            selected[job_id] = None
-    for url in wanted_urls:
-        job = by_url.get(url)
-        if job is not None:
-            selected[job["id"]] = None
-    if has_filter:
-        for job in _filtered_jobs(status, search, min_salary, max_salary, salary_currency, tags):
-            selected[job["id"]] = None
-    target = sorted(selected)
+    target_jobs, not_found_ids, not_found_urls = _resolve_delete(
+        job_ids, wanted_urls, status, search, min_salary, max_salary, salary_currency, tags
+    )
+    target = [job["id"] for job in target_jobs]
 
     if not as_json:
-        for job_id in target[:5]:
-            job = by_id[job_id]
+        for job in target_jobs[:5]:
             title = job["title"] or "Untitled position"
             company = job["company"] or "Unknown company"
-            click.echo(f"  {job_id}. {title} — {company}")
-        if len(target) > 5:
-            click.echo(f"  … and {len(target) - 5} more")
-    if target and not yes:
-        click.confirm(f"Delete {len(target)} position(s)? This cannot be undone.", abort=True)
+            click.echo(f"  {job['id']}. {title} — {company}")
+        if len(target_jobs) > 5:
+            click.echo(f"  … and {len(target_jobs) - 5} more")
+    if target_jobs and not yes:
+        click.confirm(f"Delete {len(target_jobs)} position(s)? This cannot be undone.", abort=True)
     for job_id in target:
         db.delete_job(job_id)
 
