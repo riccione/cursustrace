@@ -165,6 +165,131 @@ def test_scan_json_includes_similar(runner: CliRunner, monkeypatch: pytest.Monke
     assert payload["similar"][0]["url"] == "https://a.com/1"
 
 
+_DISCOVER_HTML = (
+    '<a href="/jobs/111">one</a>'
+    '<a href="https://board.example/jobs/222?ref=x">two</a>'
+    '<a href="https://board.example/">home</a>'
+)
+
+
+def test_discover_json_lists_new_and_known(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    job_id = db.add_job("https://board.example/jobs/111", "Engineer", "Acme", None, "Body")
+    assert job_id is not None
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+
+    result = runner.invoke(cli_module.cli, ["discover", "https://board.example", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["source"] == {
+        "input": "https://board.example",
+        "url": "https://board.example",
+        "site": None,
+        "site_status": None,
+    }
+    assert payload["extracted"] == 2
+    assert payload["new_count"] == 1
+    assert payload["known_count"] == 1
+    assert payload["known_by_status"] == {"unapplied": 1}
+    assert payload["candidates"] == [
+        {
+            "url": "https://board.example/jobs/111",
+            "known": True,
+            "status": "unapplied",
+            "id": job_id,
+            "title": "Engineer",
+        },
+        {"url": "https://board.example/jobs/222?ref=x", "known": False},
+    ]
+    assert "added" not in payload
+
+
+def test_discover_human_output(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+
+    result = runner.invoke(cli_module.cli, ["discover", "https://board.example"])
+
+    assert result.exit_code == 0
+    assert "Extracted 2 links · 2 new · 0 already in database" in result.output
+    assert "https://board.example/jobs/111" in result.output
+    assert "Tip: add --add" in result.output
+
+
+def test_discover_resolves_job_source_name(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+
+    result = runner.invoke(cli_module.cli, ["discover", "RemoteOK", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["source"]["site"] == "RemoteOK"
+    assert payload["source"]["site_status"] == "live"
+    assert payload["source"]["url"] == "https://remoteok.com"
+
+
+def test_discover_add_ingests_new_positions(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    db.add_job("https://board.example/jobs/111", "Engineer", "Acme", None, "Body")
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+    monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
+
+    result = runner.invoke(cli_module.cli, ["discover", "https://board.example", "--add", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["added"] == 1
+    assert payload["skipped"] == 0
+    assert payload["errors"] == []
+    urls = [job["job_url"] for job in db.get_jobs()]
+    assert "https://board.example/jobs/222?ref=x" in urls
+
+
+def test_discover_add_reports_errors_and_exits_nonzero(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+
+    def boom(url: str) -> scraper.ScrapedJob:
+        raise ScrapeError(f"Blocked: {url}")
+
+    monkeypatch.setattr(scraper, "scrape_job", boom)
+
+    result = runner.invoke(cli_module.cli, ["discover", "https://board.example", "--add", "--json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["added"] == 0
+    assert len(payload["errors"]) == 2
+    assert "Blocked" in payload["errors"][0]["error"]
+
+
+def test_discover_unknown_source_fails(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "NotASite"])
+
+    assert result.exit_code == 1
+    assert "Unknown source" in result.stderr
+
+
+def test_discover_fetch_failure_json(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(url: str) -> str:
+        raise ScrapeError(f"Unable to fetch page {url}: 403 Forbidden")
+
+    monkeypatch.setattr(scraper, "fetch_html", boom)
+
+    result = runner.invoke(cli_module.cli, ["discover", "https://x.example/jobs", "--json"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert "403 Forbidden" in payload["error"]
+
+
 def test_add_rejects_invalid_url(runner: CliRunner) -> None:
     result = runner.invoke(cli_module.cli, ["add", "--url", "not-a-url", *ADD_ARGS[3:]])
 

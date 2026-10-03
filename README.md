@@ -148,6 +148,10 @@ uv run cursustrace add --url https://example.com/job/1 \
 # scrape and add one or more URLs
 uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --json
 
+# discover candidate listing links from a source page (URL or job-sources site name)
+uv run cursustrace discover RemoteOK --json
+uv run cursustrace discover https://example.com/jobs --add --json
+
 # batch import a JSON array (structured items and/or URL-only items) from a file or stdin
 uv run cursustrace import jobs.json --json
 echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
@@ -195,6 +199,38 @@ fill the missing fields). `export` writes that same shape, so
 stage comments, and tags survive the round trip (unknown tags are created),
 timestamps are re-stamped on import. The CSV variant is a flat spreadsheet view
 with tags joined by `;` — `import` reads JSON only.
+
+### Discovering positions with an AI agent
+
+`discover` fetches one source page (a search or board page), extracts candidate
+listing links, and checks each against the database. It never talks to an LLM —
+the reasoning is done by an AI agent (or you) on top of its JSON output:
+
+```sh
+# by site name from job-sources/ or by URL; --limit caps candidates (default 100)
+uv run cursustrace discover RemoteOK --json
+uv run cursustrace discover https://example.com/jobs --limit 50 --json
+
+# or scrape and add every new link in one step (no agent needed)
+uv run cursustrace discover https://example.com/jobs --add --json
+```
+
+The JSON payload reports `source` (input, resolved URL, job-sources status),
+`extracted` / `new_count` / `known_count`, `known_by_status` (so already-applied
+positions are visible), and one `candidates` entry per link — `known: false`
+for new ones, plus `status`, `id`, `title` for known ones. With `--add` it also
+returns `added`, `skipped`, `errors` and `similar`, and exits non-zero when any
+scrape failed; a failed fetch prints an `error` key. Candidates that are already
+in the database are skipped whatever their stage, so discovery never re-adds an
+applied position.
+
+A ready-to-paste workflow for an AI agent:
+
+> Discover positions for me from `<source>`. Run
+> `cursustrace discover <source> --json`, review the candidates with
+> `known: false` and keep only the ones matching my profile, then run
+> `cursustrace scan <chosen urls> --json` and summarize what was added, what
+> was already tracked, and what you skipped and why.
 
 ## Development
 
