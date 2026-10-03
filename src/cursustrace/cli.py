@@ -298,6 +298,14 @@ def run_command(
     run(settings)
 
 
+@cli.command(name="mcp")
+def mcp_command() -> None:
+    """Run the MCP server over stdio for AI agent access."""
+    from cursustrace.mcp_server import main as mcp_main
+
+    mcp_main()
+
+
 @cli.command()
 @click.option("--url", required=True, help="Full job posting URL.")
 @click.option("--title", required=True)
