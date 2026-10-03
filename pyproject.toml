@@ -14,6 +14,7 @@ dependencies = [
     "markdown-it-py>=4.2.0",
     "nicegui>=3.17.1",
     "click>=8.5.0",
+    "mcp>=2.3.0",
 ]
 
 [project.scripts]
