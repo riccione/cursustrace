@@ -82,6 +82,16 @@ def _extract_description(html: str, url: str, soup: BeautifulSoup) -> str | None
     return fallback or None
 
 
+def fetch_html(url: str) -> str:
+    """Fetch any page with the shared browser UA and timeout; raise ScrapeError on failure."""
+    try:
+        response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise ScrapeError(f"Unable to fetch page {url}: {exc}") from exc
+    return response.text
+
+
 def scrape_job(url: str) -> ScrapedJob:
     """Fetch a job listing and extract its title, company, location and description."""
     try:
