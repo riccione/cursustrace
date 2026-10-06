@@ -29,7 +29,14 @@ mcp = MCPServer(
         "(the default) to see what would be removed, then repeat with confirm=true "
         "to execute. discover lists candidate links only; scan or "
         "discover(add=true) ingest them. Tags are case-insensitive and unknown "
-        "tags are created on write."
+        "tags are created on write. When adding, call scrape_position first and "
+        "read the listing: the owner applies only to Serbia-based or remote-EU "
+        "roles, never listings restricted to working in another country, and "
+        "form fields should come from the scraped data. add_position, scan and "
+        "discover(add=true) answer with status=flagged (or a flagged list) "
+        "instead of ingesting when the location or description looks tied to a "
+        "specific place; review the position and repeat with force=true when "
+        "it fits."
     ),
 )
 
@@ -45,6 +52,19 @@ def _with_tags(jobs: list[db.Job]) -> list[dict[str, object]]:
         {**dict(job), "status": db.job_status(job), "tags": tags_by_id.get(job["id"], [])}
         for job in jobs
     ]
+
+
+def _flagged_payload(url: str, flags: list[str], job: scraper.ScrapedJob) -> dict[str, object]:
+    return {
+        "url": url,
+        "applicability": {"flags": flags},
+        "position": {
+            "title": job["title"],
+            "company": job["company"],
+            "location": job["location"],
+            "description": job["description"],
+        },
+    }
 
 
 def _position_or_error(job_id: int) -> db.Job:
@@ -158,12 +178,18 @@ def add_position(
     salary_max: int | None = None,
     salary_currency: str | None = None,
     salary_period: str | None = None,
+    force: bool = False,
 ) -> dict[str, object]:
-    """Add a position; missing title/company/description are scraped from the URL.
+    """Add a position; missing title/company/description/location are scraped from the URL.
 
-    Known URLs are reported as duplicates and never overwritten. Returns the
-    add result with status (added/duplicate) and, when added, the id and any
-    similar positions worth checking.
+    Known URLs are reported as duplicates and never overwritten. When the
+    fields being stored look tied to a specific country or work authorization,
+    nothing is ingested: the response carries status=flagged with the reasons
+    and the position fields for review — call again with force=true if the
+    listing still fits a Serbia/remote-EU applicant. Explicitly passed fields
+    override scraped values, so prefer passing what scrape_position returned.
+    Returns the add result with status (added/duplicate/flagged) and, when
+    added, the id and any similar positions worth checking.
     """
     db.init_db()
     _validate_choice(status, STATUSES, "status")
@@ -174,8 +200,10 @@ def add_position(
     ):
         raise ToolError("salary_currency and salary_period are required with amounts.")
     cleaned_url = url.strip()
+    if db.check_duplicate(cleaned_url):
+        return {"status": "duplicate", "url": cleaned_url}
     scraped: scraper.ScrapedJob | None = None
-    if title is None or company is None or description is None:
+    if title is None or company is None or description is None or location is None:
         try:
             scraped = scraper.scrape_job(cleaned_url)
         except ScrapeError as exc:
@@ -190,12 +218,32 @@ def add_position(
     if error is not None:
         raise ToolError(error)
     assert title is not None and company is not None and description is not None
-    return _ingest(
+    clean_title = title.strip()
+    clean_company = company.strip()
+    clean_description = description.strip()
+    flags = applicability.check_applicability(location, clean_description)
+    if flags and not force:
+        return {
+            "status": "flagged",
+            "url": cleaned_url,
+            "applicability": {"flags": flags},
+            "position": {
+                "title": clean_title,
+                "company": clean_company,
+                "location": location,
+                "description": clean_description,
+            },
+            "hint": (
+                "Read the listing; if it still fits a Serbia/remote-EU applicant, "
+                "call again with force=true."
+            ),
+        }
+    result = _ingest(
         cleaned_url,
-        title.strip(),
-        company.strip(),
+        clean_title,
+        clean_company,
         location,
-        description.strip(),
+        clean_description,
         status,
         salary_min=salary_min,
         salary_max=salary_max,
@@ -203,13 +251,19 @@ def add_position(
         salary_period=salary_period,
         tags=tuple(tags or ()),
     )
+    result["applicability"] = {"flags": flags}
+    return result
 
 
 @mcp.tool()
-def scan(urls: list[str], tags: list[str] | None = None) -> dict[str, object]:
+def scan(urls: list[str], tags: list[str] | None = None, force: bool = False) -> dict[str, object]:
     """Scrape and add the positions at each URL; duplicates are skipped.
 
-    Returns added/skipped counts plus per-URL errors and any similar matches.
+    Listings whose fields look tied to a specific country are held back under
+    flagged (with the reasons and the position fields for review) instead of
+    being added; re-scan those URLs with force=true after reading them.
+    Returns added/skipped counts plus per-URL errors, flagged entries and any
+    similar matches.
     """
     db.init_db()
     tag_tuple = tuple(tags or ())
@@ -217,11 +271,19 @@ def scan(urls: list[str], tags: list[str] | None = None) -> dict[str, object]:
     skipped = 0
     errors: list[dict[str, str]] = []
     similar: list[dict[str, object]] = []
+    flagged: list[dict[str, object]] = []
     for url in urls:
         try:
             job = scraper.scrape_job(url)
         except ScrapeError as exc:
             errors.append({"url": url, "error": str(exc)})
+            continue
+        if db.check_duplicate(url):
+            skipped += 1
+            continue
+        flags = applicability.check_applicability(job["location"], job["description"])
+        if flags and not force:
+            flagged.append(_flagged_payload(url, flags, job))
             continue
         result = _ingest(
             url, job["title"], job["company"], job["location"], job["description"], tags=tag_tuple
@@ -234,6 +296,8 @@ def scan(urls: list[str], tags: list[str] | None = None) -> dict[str, object]:
         else:
             skipped += 1
     payload: dict[str, object] = {"added": added, "skipped": skipped, "errors": errors}
+    if flagged:
+        payload["flagged"] = flagged
     if similar:
         payload["similar"] = similar
     return payload
@@ -245,11 +309,14 @@ def discover(
     limit: int = discovery.DEFAULT_LIMIT,
     add: bool = False,
     tags: list[str] | None = None,
+    force: bool = False,
 ) -> dict[str, object]:
     """Extract candidate listing links from a job source (URL or job-sources name).
 
     Without add, returns the candidates split into new-vs-known. With
-    add=true, scrapes and ingests every new candidate like scan does.
+    add=true, scrapes and ingests every new candidate like scan does;
+    candidates whose fields look tied to a specific country are held back
+    under flagged (with the reasons and fields for review) unless force=true.
     """
     db.init_db()
     if not 1 <= limit <= discovery.MAX_LIMIT:
@@ -281,12 +348,17 @@ def discover(
         skipped = 0
         errors: list[dict[str, str]] = []
         similar: list[dict[str, object]] = []
+        flagged: list[dict[str, object]] = []
         tag_tuple = tuple(tags or ())
         for url in result.new_urls:
             try:
                 job = scraper.scrape_job(url)
             except ScrapeError as exc:
                 errors.append({"url": url, "error": str(exc)})
+                continue
+            flags = applicability.check_applicability(job["location"], job["description"])
+            if flags and not force:
+                flagged.append(_flagged_payload(url, flags, job))
                 continue
             ingested = _ingest(
                 url,
@@ -306,6 +378,8 @@ def discover(
         payload["added"] = added
         payload["skipped"] = skipped
         payload["errors"] = errors
+        if flagged:
+            payload["flagged"] = flagged
         if similar:
             payload["similar"] = similar
     return payload
