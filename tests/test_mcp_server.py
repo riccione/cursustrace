@@ -98,6 +98,53 @@ async def test_get_stats_and_list_tags() -> None:
         assert tags["tags"] == {"qa": 1, "remote": 1}
 
 
+async def test_scrape_position_returns_fields_and_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "QA Engineer",
+            "company": "ACME",
+            "location": "Berlin, Germany",
+            "description": "You must be authorized to work in Germany.",
+        },
+    )
+    async with Client(mcp) as client:
+        flagged = await ok(client, "scrape_position", {"url": "https://example.com/jobs/9"})
+        assert flagged["title"] == "QA Engineer"
+        assert flagged["company"] == "ACME"
+        assert flagged["location"] == "Berlin, Germany"
+        flags = flagged["applicability"]["flags"]
+        assert any("Germany" in flag for flag in flags)
+
+        monkeypatch.setattr(
+            scraper,
+            "scrape_job",
+            lambda url: {
+                "title": "SDET",
+                "company": "Globex",
+                "location": "Remote (EU)",
+                "description": "Remote-first team across Europe.",
+            },
+        )
+        clear = await ok(client, "scrape_position", {"url": "https://example.com/jobs/10"})
+        assert clear["applicability"]["flags"] == []
+
+
+async def test_scrape_position_surfaces_scrape_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(url: str) -> scraper.ScrapedJob:
+        raise ScrapeError("site unreachable")
+
+    monkeypatch.setattr(scraper, "scrape_job", boom)
+    async with Client(mcp) as client:
+        message = await err(client, "scrape_position", {"url": "https://example.com/jobs/11"})
+        assert "site unreachable" in message
+
+
 async def test_add_position_scrapes_then_reports_duplicate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -107,7 +154,7 @@ async def test_add_position_scrapes_then_reports_duplicate(
         lambda url: {
             "title": "Scraped title",
             "company": "Scraped co",
-            "location": "Hamburg, DE",
+            "location": "Remote (EU)",
             "description": "Scraped body",
         },
     )
@@ -133,6 +180,37 @@ async def test_add_position_surfaces_scrape_errors(
         assert "site unreachable" in message
 
 
+async def test_add_position_flags_country_restricted_then_force(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "QA Engineer",
+            "company": "SAP",
+            "location": "Walldorf, Germany",
+            "description": "You must be authorized to work in Germany.",
+        },
+    )
+    url = "https://example.com/jobs/12"
+    async with Client(mcp) as client:
+        flagged = await ok(client, "add_position", {"url": url})
+        assert flagged["status"] == "flagged"
+        assert any("Germany" in flag for flag in flagged["applicability"]["flags"])
+        assert flagged["position"]["company"] == "SAP"
+        assert flagged["hint"]
+        assert (await ok(client, "list_positions"))["count"] == 0
+
+        forced = await ok(client, "add_position", {"url": url, "force": True})
+        assert forced["status"] == "added"
+        assert forced["applicability"]["flags"]
+
+        duplicate = await ok(client, "add_position", {"url": url})
+        assert duplicate["status"] == "duplicate"
+        assert (await ok(client, "list_positions"))["count"] == 1
+
+
 async def test_scan_collects_added_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def scrape(url: str) -> scraper.ScrapedJob:
         if "bad" in url:
@@ -140,7 +218,7 @@ async def test_scan_collects_added_and_errors(monkeypatch: pytest.MonkeyPatch) -
         return {
             "title": "Test role",
             "company": "Co",
-            "location": "Berlin, DE",
+            "location": "Remote (EU)",
             "description": "Body",
         }
 
@@ -156,6 +234,44 @@ async def test_scan_collects_added_and_errors(monkeypatch: pytest.MonkeyPatch) -
         assert payload["errors"] == [{"url": "https://example.com/bad", "error": "boom"}]
         listed = await ok(client, "list_positions", {"tags": ["qa"]})
         assert listed["count"] == 1
+
+
+async def test_scan_flags_restricted_listings_until_forced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = {
+        "https://example.com/clear": {
+            "title": "SDET",
+            "company": "Globex",
+            "location": "Remote (EU)",
+            "description": "Remote-first.",
+        },
+        "https://example.com/restricted": {
+            "title": "QA Engineer",
+            "company": "SAP",
+            "location": "Hamburg, Germany",
+            "description": "Must reside in Germany.",
+        },
+    }
+    monkeypatch.setattr(scraper, "scrape_job", lambda url: responses[url])
+
+    async with Client(mcp) as client:
+        result = await ok(client, "scan", {"urls": list(responses)})
+        assert result["added"] == 1
+        assert result["skipped"] == 0
+        assert [entry["url"] for entry in result["flagged"]] == ["https://example.com/restricted"]
+        assert result["flagged"][0]["position"]["company"] == "SAP"
+        assert (await ok(client, "list_positions"))["count"] == 1
+
+        forced = await ok(
+            client, "scan", {"urls": ["https://example.com/restricted"], "force": True}
+        )
+        assert forced["added"] == 1
+        assert "flagged" not in forced
+        assert (await ok(client, "list_positions"))["count"] == 2
+
+        again = await ok(client, "scan", {"urls": ["https://example.com/clear"]})
+        assert again["skipped"] == 1
 
 
 async def test_discover_add_ingests_new_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,6 +310,45 @@ async def test_discover_add_ingests_new_candidates(monkeypatch: pytest.MonkeyPat
 
         message = await err(client, "discover", {"source": source.url, "limit": 0})
         assert "limit must be between" in message
+
+
+async def test_discover_add_flags_restricted_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = discovery.SourceRef(
+        input="https://example.com/jobs",
+        url="https://example.com/jobs",
+        site=None,
+        site_status=None,
+    )
+    result = discovery.DiscoveryResult(
+        source=source,
+        candidates=({"url": "https://example.com/jobs/13"},),
+        new_urls=("https://example.com/jobs/13",),
+        status_counts={},
+    )
+    monkeypatch.setattr(discovery, "discover", lambda src, limit=100: result)
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "Onsite QA",
+            "company": "Corp",
+            "location": "Munich, Germany",
+            "description": "Hybrid role in the office.",
+        },
+    )
+
+    async with Client(mcp) as client:
+        payload = await ok(client, "discover", {"source": source.url, "add": True})
+        assert payload["added"] == 0
+        assert [entry["url"] for entry in payload["flagged"]] == ["https://example.com/jobs/13"]
+        assert (await ok(client, "list_positions"))["count"] == 0
+
+        forced = await ok(client, "discover", {"source": source.url, "add": True, "force": True})
+        assert forced["added"] == 1
+        assert "flagged" not in forced
+        assert (await ok(client, "list_positions"))["count"] == 1
 
 
 async def test_update_status_with_and_without_comment() -> None:

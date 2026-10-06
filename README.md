@@ -251,14 +251,22 @@ shelling out to the CLI:
 uv run cursustrace mcp   # stdio transport; blocks until the client disconnects
 ```
 
-It exposes 12 tools: `list_positions`, `get_position`, `get_stats`,
-`list_tags`, `add_position`, `scan`, `discover`, `update_status`, `set_tags`,
-`delete_positions`, `rename_tag`, and `delete_tag`. Tool failures come back
-with `is_error` set and the real reason, adding never overwrites (known URLs
-report as duplicates), and `delete_positions` is preview-first: call it with
-`confirm=false` to see what matches, then repeat with `confirm=true` to
-delete. The database path is relative to the server's working directory, so
-the MCP client's cwd decides which tracker it talks to.
+It exposes 13 tools: `list_positions`, `get_position`, `get_stats`,
+`list_tags`, `scrape_position`, `add_position`, `scan`, `discover`,
+`update_status`, `set_tags`, `delete_positions`, `rename_tag`, and
+`delete_tag`. Tool failures come back with `is_error` set and the real
+reason, adding never overwrites (known URLs report as duplicates), and
+`delete_positions` is preview-first: call it with `confirm=false` to see
+what matches, then repeat with `confirm=true` to delete. The database path
+is relative to the server's working directory, so the MCP client's cwd
+decides which tracker it talks to.
+
+Adds are applicability-gated for agents: `scrape_position` returns the
+scraped listing with `applicability.flags`, and `add_position`, `scan`
+and `discover(add=true)` answer `status=flagged` (or a `flagged` list)
+instead of ingesting when the location or description looks tied to a
+specific country or work authorization — read the listing, then retry
+with `force=true` if it fits a Serbia/remote-EU applicant.
 
 ### opencode
 
