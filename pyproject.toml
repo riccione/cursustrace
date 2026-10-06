@@ -15,6 +15,7 @@ dependencies = [
     "nicegui>=3.17.1",
     "click>=8.5.0",
     "mcp>=2.3.0",
+    "curl-cffi==0.16.3",
 ]
 
 [project.scripts]
