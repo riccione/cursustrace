@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import curl_cffi
 import pytest
-import requests
 import trafilatura
+from curl_cffi.requests.exceptions import HTTPError, Timeout
 
 from cursustrace import scraper
 from cursustrace.errors import ScrapeError
@@ -29,7 +30,7 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise requests.HTTPError(f"HTTP {self.status_code}")
+            raise HTTPError(f"HTTP {self.status_code}")
 
 
 @pytest.fixture(autouse=True)
@@ -46,14 +47,17 @@ def _patch_get(
     def _get(
         url: str,
         headers: dict[str, str] | None = None,
+        impersonate: str | None = None,
         timeout: float | None = None,
+        **kwargs: object,
     ) -> _FakeResponse:
         if captured is not None:
             captured["headers"] = headers
+            captured["impersonate"] = impersonate
             captured["timeout"] = timeout
         return _FakeResponse(html, status_code)
 
-    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(curl_cffi, "get", _get)
 
 
 def test_scrape_job_extracts_open_graph(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,13 +69,12 @@ def test_scrape_job_extracts_open_graph(monkeypatch: pytest.MonkeyPatch) -> None
     assert job["description"] == "# Clean body"
 
 
-def test_scrape_job_sends_chrome_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scrape_job_impersonates_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     _patch_get(monkeypatch, OG_HTML, captured=captured)
     scraper.scrape_job("https://jobs.example.com/1")
-    headers = captured["headers"]
-    assert isinstance(headers, dict)
-    assert "Chrome" in str(headers.get("User-Agent"))
+    assert captured["impersonate"] == "chrome"
+    assert captured["headers"] is None
     assert captured["timeout"] == scraper.REQUEST_TIMEOUT
 
 
@@ -214,13 +217,9 @@ def test_http_error_raises_scrape_error(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_timeout_raises_scrape_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _get(
-        url: str,
-        headers: dict[str, str] | None = None,
-        timeout: float | None = None,
-    ) -> _FakeResponse:
-        raise requests.Timeout("timed out")
+    def _get(url: str, **kwargs: object) -> _FakeResponse:
+        raise Timeout("timed out")
 
-    monkeypatch.setattr(requests, "get", _get)
+    monkeypatch.setattr(curl_cffi, "get", _get)
     with pytest.raises(ScrapeError):
         scraper.scrape_job("https://example.com/slow")

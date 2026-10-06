@@ -7,16 +7,13 @@ import re
 from typing import TypedDict
 from urllib.parse import urlparse
 
-import requests
+import curl_cffi
 import trafilatura
 from bs4 import BeautifulSoup, Tag
+from curl_cffi.requests.exceptions import RequestException
 
 from cursustrace.errors import ScrapeError
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-)
 REQUEST_TIMEOUT = 15
 DEFAULT_LOCATION = "Not Specified"
 
@@ -149,12 +146,21 @@ def _extract_location(soup: BeautifulSoup, description: str | None) -> str | Non
     return None
 
 
+def _get(url: str, headers: dict[str, str] | None = None) -> curl_cffi.Response:
+    """GET through Chrome impersonation so TLS/HTTP2 fingerprints match the headers.
+
+    Raises a curl_cffi ``RequestException`` on transport failures and HTTP errors.
+    """
+    response = curl_cffi.get(url, headers=headers, impersonate="chrome", timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()  # type: ignore[no-untyped-call]
+    return response
+
+
 def fetch_html(url: str) -> str:
-    """Fetch any page with the shared browser UA and timeout; raise ScrapeError on failure."""
+    """Fetch any page with the shared timeout; raise ScrapeError on failure."""
     try:
-        response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-    except requests.RequestException as exc:
+        response = _get(url)
+    except RequestException as exc:
         raise ScrapeError(f"Unable to fetch page {url}: {exc}") from exc
     return response.text
 
@@ -162,9 +168,8 @@ def fetch_html(url: str) -> str:
 def scrape_job(url: str) -> ScrapedJob:
     """Fetch a job listing and extract its title, company, location and description."""
     try:
-        response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-    except requests.RequestException as exc:
+        response = _get(url)
+    except RequestException as exc:
         raise ScrapeError(f"Unable to fetch job listing {url}: {exc}") from exc
 
     html = response.text
