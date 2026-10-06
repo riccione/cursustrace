@@ -7,7 +7,7 @@ from typing import cast
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from cursustrace import db, discovery, salary, scraper
+from cursustrace import applicability, db, discovery, salary, scraper
 from cursustrace.cli import (
     SORT_ORDERS,
     STATUSES,
@@ -117,6 +117,32 @@ def list_tags() -> dict[str, object]:
     """List tags with their position counts."""
     db.init_db()
     return {"tags": db.tag_counts()}
+
+
+@mcp.tool()
+def scrape_position(url: str) -> dict[str, object]:
+    """Scrape a job listing and return its fields plus applicability flags (read-only).
+
+    Call this before add_position: read the returned description and judge
+    whether the role fits — the tracker only wants Serbia-based or remote-EU
+    positions, never listings restricted to working in another country. Then
+    pass the scraped fields on to add_position so the stored form is filled
+    from real page data instead of guesses.
+    """
+    cleaned_url = url.strip()
+    try:
+        job = scraper.scrape_job(cleaned_url)
+    except ScrapeError as exc:
+        raise ToolError(str(exc)) from exc
+    flags = applicability.check_applicability(job["location"], job["description"])
+    return {
+        "url": cleaned_url,
+        "title": job["title"],
+        "company": job["company"],
+        "location": job["location"],
+        "description": job["description"],
+        "applicability": {"flags": flags},
+    }
 
 
 @mcp.tool()

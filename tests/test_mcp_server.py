@@ -98,6 +98,53 @@ async def test_get_stats_and_list_tags() -> None:
         assert tags["tags"] == {"qa": 1, "remote": 1}
 
 
+async def test_scrape_position_returns_fields_and_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "QA Engineer",
+            "company": "ACME",
+            "location": "Berlin, Germany",
+            "description": "You must be authorized to work in Germany.",
+        },
+    )
+    async with Client(mcp) as client:
+        flagged = await ok(client, "scrape_position", {"url": "https://example.com/jobs/9"})
+        assert flagged["title"] == "QA Engineer"
+        assert flagged["company"] == "ACME"
+        assert flagged["location"] == "Berlin, Germany"
+        flags = flagged["applicability"]["flags"]
+        assert any("Germany" in flag for flag in flags)
+
+        monkeypatch.setattr(
+            scraper,
+            "scrape_job",
+            lambda url: {
+                "title": "SDET",
+                "company": "Globex",
+                "location": "Remote (EU)",
+                "description": "Remote-first team across Europe.",
+            },
+        )
+        clear = await ok(client, "scrape_position", {"url": "https://example.com/jobs/10"})
+        assert clear["applicability"]["flags"] == []
+
+
+async def test_scrape_position_surfaces_scrape_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(url: str) -> scraper.ScrapedJob:
+        raise ScrapeError("site unreachable")
+
+    monkeypatch.setattr(scraper, "scrape_job", boom)
+    async with Client(mcp) as client:
+        message = await err(client, "scrape_position", {"url": "https://example.com/jobs/11"})
+        assert "site unreachable" in message
+
+
 async def test_add_position_scrapes_then_reports_duplicate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
