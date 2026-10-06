@@ -1190,6 +1190,81 @@ def _profile_select(user: User) -> ui.select:
     return cast(ui.select, user.find(marker="profile-select").elements.pop())
 
 
+async def test_profile_copy_buttons_render(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    for marker in (
+        "copy-full-name",
+        "copy-email",
+        "copy-phone",
+        "copy-linkedin",
+        "copy-github",
+        "copy-summary",
+        "copy-work-history",
+        "copy-education",
+        "copy-skills",
+    ):
+        user.find(marker=marker)
+
+
+async def test_profile_copy_copies_value_and_notifies(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+    user.find("Email").clear().type("jane@example.com")
+    await asyncio.sleep(0.1)
+
+    copied: list[str] = []
+    monkeypatch.setattr(ui.clipboard, "write", copied.append)
+
+    user.find(marker="copy-email").click()
+
+    await user.should_see("Copied Email!")
+    assert copied == ["jane@example.com"]
+
+
+async def test_profile_copy_empty_field_warns(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    user.find(marker="copy-phone").click()
+
+    await user.should_see("Phone Number is empty")
+
+
+async def test_profile_copy_textarea_copies_value_and_notifies(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+    user.find("Summary").clear().type("MARK_SUMMARY")
+    await asyncio.sleep(0.1)
+
+    copied: list[str] = []
+    monkeypatch.setattr(ui.clipboard, "write", copied.append)
+
+    user.find(marker="copy-summary").click()
+
+    await user.should_see("Copied Summary!")
+    assert copied == ["MARK_SUMMARY"]
+
+
+async def test_profile_copy_empty_textarea_warns(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    user.find(marker="copy-skills").click()
+
+    await user.should_see("Skills is empty")
+
+
 async def test_profile_empty_state_without_profiles(user: User) -> None:
     db.init_db()
     await user.open("/")

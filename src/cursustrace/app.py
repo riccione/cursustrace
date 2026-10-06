@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from types import FrameType
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict, TypeVar, cast
 from urllib.parse import quote
 
 from nicegui import app, events, ui
@@ -1014,16 +1014,46 @@ def _render_profile_editor() -> None:
         render_topbar()
         render_form()
 
+    _FieldT = TypeVar("_FieldT", bound=ui.input)
+
+    def _attach_copy_button(field: _FieldT, label: str, marker: str) -> _FieldT:
+        """Add an in-field copy-to-clipboard button to an input or textarea."""
+
+        def copy() -> None:
+            if not field.value:
+                ui.notify(f"{label} is empty", type="warning")
+                return
+            ui.clipboard.write(field.value)
+            ui.notify(f"Copied {label}!", type="positive")
+
+        with field.add_slot("append"):
+            ui.button(icon="content_copy", on_click=copy).props("flat dense").mark(marker)
+        return field
+
+    def _copyable_input(label: str, value: str, marker: str) -> ui.input:
+        """Profile contact field with an in-field copy-to-clipboard button."""
+        return _attach_copy_button(ui.input(label, value=value), label, marker)
+
+    def _copyable_textarea(label: str, value: str, marker: str) -> ui.textarea:
+        """CV markdown section with an in-field copy-to-clipboard button."""
+        return _attach_copy_button(
+            ui.textarea(label, value=value)
+            .classes("w-full")
+            .props('autogrow input-style="min-height: 140px"'),
+            label,
+            marker,
+        )
+
     def _render_profile_fields(profile: db.Profile) -> None:
         with ui.row().classes("w-full gap-8"):
             with ui.column().classes("flex-1 gap-2"):
-                name = ui.input("Full Name", value=profile["full_name"])
-                email = ui.input("Email", value=profile["email"])
-                linkedin = ui.input("LinkedIn URL", value=profile["linkedin_url"])
+                name = _copyable_input("Full Name", profile["full_name"], "copy-full-name")
+                email = _copyable_input("Email", profile["email"], "copy-email")
+                linkedin = _copyable_input("LinkedIn URL", profile["linkedin_url"], "copy-linkedin")
             with ui.column().classes("flex-1 gap-2"):
                 location = ui.input("Location", value=profile["location"])
-                phone = ui.input("Phone Number", value=profile["phone"])
-                github = ui.input("GitHub URL", value=profile["github_url"])
+                phone = _copyable_input("Phone Number", profile["phone"], "copy-phone")
+                github = _copyable_input("GitHub URL", profile["github_url"], "copy-github")
 
         def combined_markdown() -> str:
             sections = (
@@ -1037,26 +1067,12 @@ def _render_profile_editor() -> None:
         ui.label("Markdown CV").classes("text-h6")
         with ui.row().classes("w-full gap-4"):
             with ui.column().classes("flex-1 gap-4"):
-                summary = (
-                    ui.textarea("Summary", value=profile["summary"])
-                    .classes("w-full")
-                    .props('autogrow input-style="min-height: 140px"')
+                summary = _copyable_textarea("Summary", profile["summary"], "copy-summary")
+                work_history = _copyable_textarea(
+                    "Work History", profile["work_history"], "copy-work-history"
                 )
-                work_history = (
-                    ui.textarea("Work History", value=profile["work_history"])
-                    .classes("w-full")
-                    .props('autogrow input-style="min-height: 140px"')
-                )
-                education = (
-                    ui.textarea("Education", value=profile["education"])
-                    .classes("w-full")
-                    .props('autogrow input-style="min-height: 140px"')
-                )
-                skills = (
-                    ui.textarea("Skills", value=profile["skills"])
-                    .classes("w-full")
-                    .props('autogrow input-style="min-height: 140px"')
-                )
+                education = _copyable_textarea("Education", profile["education"], "copy-education")
+                skills = _copyable_textarea("Skills", profile["skills"], "copy-skills")
             with ui.column().classes("flex-1"):
                 ui.label("Live preview").classes("font-bold")
                 preview = ui.markdown(combined_markdown() or "_Nothing to preview yet._")
