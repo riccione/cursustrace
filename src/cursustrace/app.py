@@ -1014,16 +1014,31 @@ def _render_profile_editor() -> None:
         render_topbar()
         render_form()
 
+    def _copyable_input(label: str, value: str, marker: str) -> ui.input:
+        """Profile contact field with an in-field copy-to-clipboard button."""
+        field = ui.input(label, value=value)
+
+        def copy() -> None:
+            if not field.value:
+                ui.notify(f"{label} is empty", type="warning")
+                return
+            ui.clipboard.write(field.value)
+            ui.notify(f"Copied {label}!", type="positive")
+
+        with field.add_slot("append"):
+            ui.button(icon="content_copy", on_click=copy).props("flat dense").mark(marker)
+        return field
+
     def _render_profile_fields(profile: db.Profile) -> None:
         with ui.row().classes("w-full gap-8"):
             with ui.column().classes("flex-1 gap-2"):
-                name = ui.input("Full Name", value=profile["full_name"])
-                email = ui.input("Email", value=profile["email"])
-                linkedin = ui.input("LinkedIn URL", value=profile["linkedin_url"])
+                name = _copyable_input("Full Name", profile["full_name"], "copy-full-name")
+                email = _copyable_input("Email", profile["email"], "copy-email")
+                linkedin = _copyable_input("LinkedIn URL", profile["linkedin_url"], "copy-linkedin")
             with ui.column().classes("flex-1 gap-2"):
                 location = ui.input("Location", value=profile["location"])
-                phone = ui.input("Phone Number", value=profile["phone"])
-                github = ui.input("GitHub URL", value=profile["github_url"])
+                phone = _copyable_input("Phone Number", profile["phone"], "copy-phone")
+                github = _copyable_input("GitHub URL", profile["github_url"], "copy-github")
 
         def combined_markdown() -> str:
             sections = (
