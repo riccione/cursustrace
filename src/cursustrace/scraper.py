@@ -15,6 +15,7 @@ import trafilatura
 from bs4 import BeautifulSoup, Tag
 from curl_cffi.requests.exceptions import RequestException
 
+from cursustrace import config, renderer
 from cursustrace.errors import ScrapeError
 from cursustrace.validation import normalize_deadline
 
@@ -614,6 +615,33 @@ def _attempt_known_board(static: ScrapedJob, url: str, html: str) -> ScrapedJob:
     return _merge_board(static, board)
 
 
+def _merge_rendered(static: ScrapedJob, rendered: ScrapedJob) -> ScrapedJob:
+    """Prefer rendered fields over the static shell, but only when they add value."""
+    return ScrapedJob(
+        title=rendered["title"] or static["title"],
+        company=rendered["company"] or static["company"],
+        location=(
+            static["location"] if rendered["location"] == DEFAULT_LOCATION else rendered["location"]
+        ),
+        description=(
+            rendered["description"]
+            if _is_better_description(rendered["description"] or "", static["description"])
+            else static["description"]
+        ),
+        deadline=static["deadline"] or rendered["deadline"],
+    )
+
+
+def _attempt_render(static: ScrapedJob, url: str) -> ScrapedJob:
+    """Render the page with lightpanda when enabled; None results fall through."""
+    if config.load_settings().render != "auto":
+        return static
+    html = renderer.render_html(url)
+    if html is None:
+        return static
+    return _merge_rendered(static, _extract_job(html, url))
+
+
 def scrape_job(url: str) -> ScrapedJob:
     """Fetch a job listing and extract title, company, location, description and deadline.
 
@@ -629,6 +657,9 @@ def scrape_job(url: str) -> ScrapedJob:
     if data_is_sufficient(job):
         return job
     job = _attempt_known_board(job, url, response.text)
+    if data_is_sufficient(job):
+        return job
+    job = _attempt_render(job, url)
     if data_is_sufficient(job):
         return job
     raise ScrapeError(

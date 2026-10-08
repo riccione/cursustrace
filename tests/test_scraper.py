@@ -9,7 +9,7 @@ import trafilatura
 from bs4 import BeautifulSoup
 from curl_cffi.requests.exceptions import HTTPError, Timeout
 
-from cursustrace import scraper
+from cursustrace import config, renderer, scraper
 from cursustrace.errors import ScrapeError
 
 OG_HTML = """
@@ -42,6 +42,11 @@ class _FakeResponse:
 @pytest.fixture(autouse=True)
 def _stub_extract(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(trafilatura, "extract", lambda *args, **kwargs: "# Clean body")
+
+
+@pytest.fixture(autouse=True)
+def _stub_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(renderer, "render_html", lambda url: None)
 
 
 def _patch_get(
@@ -333,6 +338,49 @@ def test_get_json_returns_none_on_decode_error(monkeypatch: pytest.MonkeyPatch) 
         httpx, "get", lambda *args, **kwargs: _FakeHttpResponse(error=ValueError("not json"))
     )
     assert scraper._get_json("https://example.com/api") is None
+
+
+def test_scrape_job_render_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+
+    def _render(url: str) -> str | None:
+        return (
+            "<html><head><title>Rendered Job</title>"
+            f'<meta property="og:description" content="{LONG_BODY}" />'
+            "</head><body></body></html>"
+        )
+
+    monkeypatch.setattr(renderer, "render_html", _render)
+    job = scraper.scrape_job("https://example.com/job")
+    assert job["title"] == "Rendered Job"
+    assert job["description"] == LONG_BODY
+
+
+def test_scrape_job_skips_render_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+    monkeypatch.setattr(config, "load_settings", lambda **kwargs: config.Settings(render="never"))
+
+    def _unexpected(url: str) -> str | None:
+        raise AssertionError("render must not run when render = never")
+
+    monkeypatch.setattr(renderer, "render_html", _unexpected)
+    with pytest.raises(ScrapeError, match="JavaScript-rendered"):
+        scraper.scrape_job("https://example.com/job")
+
+
+def test_merge_rendered_prefers_better_description() -> None:
+    static = _job_with(LONG_BODY, title="Shell Title")
+    rendered = _job_with("tiny", title="Rendered Title")
+    merged = scraper._merge_rendered(static, rendered)
+    assert merged["title"] == "Rendered Title"
+    assert merged["description"] == LONG_BODY
+
+
+def test_merge_rendered_adopts_better_rendered_description() -> None:
+    static = _job_with("shell junk")
+    rendered = _job_with(LONG_BODY, title="Rendered Title")
+    merged = scraper._merge_rendered(static, rendered)
+    assert merged["description"] == LONG_BODY
 
 
 def test_title_falls_back_to_h1() -> None:
