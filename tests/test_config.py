@@ -215,3 +215,69 @@ def test_empty_backup_dir_falls_back_to_default(config_file: Path) -> None:
 def test_invalid_backup_keep_raises(config_file: Path, value: str) -> None:
     with pytest.raises(ConfigError, match="backup_keep"):
         config.load_settings(env={"CURSUS_BACKUP_KEEP": value})
+
+
+def test_attention_threshold_defaults(config_file: Path) -> None:
+    settings = config.load_settings(env={})
+
+    assert settings.stale_applied_days == 21
+    assert settings.stale_unapplied_days == 10
+    assert settings.deadline_warning_days == 7
+
+
+def test_attention_thresholds_file_overrides_defaults(config_file: Path) -> None:
+    config_file.write_text(
+        "[cursustrace]\n"
+        "stale_applied_days = 14\n"
+        "stale_unapplied_days = 5\n"
+        "deadline_warning_days = 3\n",
+        encoding="utf-8",
+    )
+
+    settings = config.load_settings(env={})
+
+    assert settings.stale_applied_days == 14
+    assert settings.stale_unapplied_days == 5
+    assert settings.deadline_warning_days == 3
+
+
+def test_attention_thresholds_env_and_flags_override(config_file: Path) -> None:
+    config_file.write_text("[cursustrace]\nstale_applied_days = 14\n", encoding="utf-8")
+
+    settings = config.load_settings(
+        stale_applied_days=30,
+        deadline_warning_days=2,
+        env={
+            "CURSUS_STALE_APPLIED_DAYS": "10",
+            "CURSUS_STALE_UNAPPLIED_DAYS": "6",
+        },
+    )
+
+    assert settings.stale_applied_days == 30
+    assert settings.stale_unapplied_days == 6
+    assert settings.deadline_warning_days == 2
+
+
+@pytest.mark.parametrize(
+    ("env_name", "key"),
+    [
+        ("CURSUS_STALE_APPLIED_DAYS", "stale_applied_days"),
+        ("CURSUS_STALE_UNAPPLIED_DAYS", "stale_unapplied_days"),
+        ("CURSUS_DEADLINE_WARNING_DAYS", "deadline_warning_days"),
+    ],
+)
+def test_invalid_attention_threshold_raises(config_file: Path, env_name: str, key: str) -> None:
+    with pytest.raises(ConfigError, match=key):
+        config.load_settings(env={env_name: "-1"})
+
+
+@pytest.mark.parametrize("value", ["abc", "-1"])
+def test_invalid_deadline_warning_days_raises(config_file: Path, value: str) -> None:
+    with pytest.raises(ConfigError, match="deadline_warning_days"):
+        config.load_settings(env={"CURSUS_DEADLINE_WARNING_DAYS": value})
+
+
+def test_zero_attention_threshold_is_allowed(config_file: Path) -> None:
+    settings = config.load_settings(env={"CURSUS_DEADLINE_WARNING_DAYS": "0"})
+
+    assert settings.deadline_warning_days == 0
