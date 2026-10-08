@@ -156,6 +156,7 @@ def test_scan_json_includes_similar(runner: CliRunner, monkeypatch: pytest.Monke
             "company": "Acme",
             "location": "Remote",
             "description": "Body",
+            "deadline": None,
         },
     )
 
@@ -376,6 +377,28 @@ def test_add_salary_requires_currency_and_period(runner: CliRunner) -> None:
     assert db.get_jobs() == []
 
 
+def test_add_with_deadline_stores_it(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, [*ADD_ARGS, "--deadline", "2026-12-31"])
+
+    assert result.exit_code == 0
+    assert db.get_jobs()[0]["deadline"] == "2026-12-31"
+
+
+def test_add_normalizes_deadline_datetime(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, [*ADD_ARGS, "--deadline", "2026-12-31T23:59:59+01:00"])
+
+    assert result.exit_code == 0
+    assert db.get_jobs()[0]["deadline"] == "2026-12-31"
+
+
+def test_add_rejects_invalid_deadline(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, [*ADD_ARGS, "--deadline", "soon"])
+
+    assert result.exit_code == 1
+    assert "Invalid deadline" in result.stderr
+    assert db.get_jobs() == []
+
+
 def test_scan_adds_positions(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
 
@@ -408,6 +431,24 @@ def test_scan_assigns_tags(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -
 
     assert result.exit_code == 0
     assert db.tag_counts() == {"qa": 1, "remote": 1}
+
+
+def test_scan_stores_deadline(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    def scrape(url: str) -> scraper.ScrapedJob:
+        return {
+            "title": "Engineer",
+            "company": "Acme",
+            "location": "Remote",
+            "description": "Body",
+            "deadline": "2026-11-30",
+        }
+
+    monkeypatch.setattr(scraper, "scrape_job", scrape)
+
+    result = runner.invoke(cli_module.cli, ["scan", "https://a.com/1"])
+
+    assert result.exit_code == 0
+    assert db.get_jobs()[0]["deadline"] == "2026-11-30"
 
 
 def test_import_from_file(
@@ -467,6 +508,41 @@ def test_import_reads_salary(runner: CliRunner) -> None:
     assert job["salary_period"] == "month"
 
 
+def test_import_reads_deadline(runner: CliRunner) -> None:
+    payload = [
+        {
+            "url": "https://a.com/1",
+            "title": "Dated",
+            "company": "Acme",
+            "description": "Body",
+            "deadline": "2026-12-31",
+        },
+    ]
+
+    result = runner.invoke(cli_module.cli, ["import"], input=json.dumps(payload))
+
+    assert result.exit_code == 0
+    assert db.get_jobs()[0]["deadline"] == "2026-12-31"
+
+
+def test_import_rejects_invalid_deadline(runner: CliRunner) -> None:
+    payload = [
+        {
+            "url": "https://a.com/1",
+            "title": "T",
+            "company": "C",
+            "description": "D",
+            "deadline": "soon",
+        },
+    ]
+
+    result = runner.invoke(cli_module.cli, ["import", "--json"], input=json.dumps(payload))
+
+    assert result.exit_code == 1
+    assert json.loads(result.output)["errors"][0]["error"] == "invalid deadline: soon"
+    assert db.get_jobs() == []
+
+
 def test_import_skips_duplicates(runner: CliRunner) -> None:
     runner.invoke(cli_module.cli, ADD_ARGS)
     payload = [{"url": "https://a.com/1", "title": "E", "company": "A", "description": "B"}]
@@ -494,6 +570,18 @@ def test_list_json(runner: CliRunner) -> None:
     jobs = json.loads(result.output)
     assert len(jobs) == 1
     assert jobs[0]["title"] == "Engineer"
+
+
+def test_list_text_appends_deadline(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Engineer", "Acme", "Remote", "Body", deadline="2026-12-31")
+    db.add_job("https://a.com/2", "Designer", "Beta", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["list"])
+
+    assert result.exit_code == 0
+    assert "⏰ 2026-12-31" in result.output
+    assert result.output.count("⏰") == 1
 
 
 def test_list_filters_by_status(runner: CliRunner) -> None:
@@ -681,6 +769,7 @@ def test_export_json_round_trips_through_import(runner: CliRunner, tmp_path: Pat
         salary_currency="EUR",
         salary_period="year",
         salary_note="plus bonus",
+        deadline="2026-12-31",
     )
     assert job_id is not None
     db.set_job_status(job_id, "interview")
@@ -705,6 +794,7 @@ def test_export_json_round_trips_through_import(runner: CliRunner, tmp_path: Pat
     assert job["salary_max"] == 80000
     assert job["salary_currency"] == "EUR"
     assert job["salary_note"] == "plus bonus"
+    assert job["deadline"] == "2026-12-31"
     assert db.job_status(job) == "interview"
     assert job["interview_comment"] == "tech round"
     assert db.job_tags(job["id"]) == ["remote", "startup"]  # tags survive too
