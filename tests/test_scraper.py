@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import curl_cffi
+import httpx
 import pytest
 import trafilatura
 from bs4 import BeautifulSoup
@@ -173,6 +174,165 @@ def test_scrape_job_falls_back_to_payload_description(monkeypatch: pytest.Monkey
     _patch_get(monkeypatch, _zoho_like_html(f"<p>{plain}</p>"))
     job = scraper.scrape_job("https://example.com/job")
     assert job["description"] == plain
+
+
+SHELL_HTML = "<html><head><title>Job Shell</title></head><body></body></html>"
+
+
+def _patch_get_json(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object | None,
+    seen: list[str] | None = None,
+) -> None:
+    def _get_json(url: str) -> object | None:
+        if seen is not None:
+            seen.append(url)
+        return payload
+
+    monkeypatch.setattr(scraper, "_get_json", _get_json)
+
+
+def test_scrape_job_greenhouse_api_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+    seen: list[str] = []
+    _patch_get_json(
+        monkeypatch,
+        {
+            "title": "QA Engineer",
+            "company_name": "JetBrains",
+            "location": {"name": "Belgrade, Serbia"},
+            "content": f"&lt;p&gt;{LONG_BODY}&lt;/p&gt;",
+            "application_deadline": "2026-11-30",
+        },
+        seen,
+    )
+    job = scraper.scrape_job("https://job-boards.eu.greenhouse.io/acme/jobs/123456")
+    assert seen == ["https://boards-api.greenhouse.io/v1/boards/acme/jobs/123456"]
+    assert job["title"] == "QA Engineer"
+    assert job["company"] == "JetBrains"
+    assert job["location"] == "Belgrade, Serbia"
+    assert job["description"] == LONG_BODY
+    assert job["deadline"] == "2026-11-30"
+
+
+def test_scrape_job_lever_api_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+    seen: list[str] = []
+    posting = {
+        "id": "97951083-5465-4382-bb4d-ac9d89458a21",
+        "text": "Software Engineer 2026",
+        "categories": {"location": "Remote - US", "commitment": "Full Time"},
+        "descriptionPlain": LONG_BODY,
+        "deadline": None,
+        "lists": [{"title": None, "content": "<p>Extra responsibilities paragraph.</p>"}],
+    }
+    _patch_get_json(monkeypatch, [posting], seen)
+    job = scraper.scrape_job(
+        "https://jobs.lever.co/acme/97951083-5465-4382-bb4d-ac9d89458a21/apply"
+    )
+    assert seen == ["https://api.lever.co/v0/postings/acme?mode=json"]
+    assert job["title"] == "Software Engineer 2026"
+    assert job["company"] == "Acme"
+    assert job["location"] == "Remote - US"
+    assert job["description"] is not None
+    assert job["description"].startswith(LONG_BODY)
+    assert "Extra responsibilities paragraph." in job["description"]
+
+
+def test_scrape_job_ashbyhq_api_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+    seen: list[str] = []
+    _patch_get_json(
+        monkeypatch,
+        {
+            "jobs": [
+                {
+                    "id": "d0b278b9-2548-4fe3-8878-bcd7989944b9",
+                    "title": "Senior Embedded Engineer",
+                    "location": "London, United Kingdom",
+                    "descriptionPlain": LONG_BODY,
+                    "descriptionHtml": f"<p>{LONG_BODY}</p>",
+                }
+            ]
+        },
+        seen,
+    )
+    job = scraper.scrape_job("https://jobs.ashbyhq.com/wayve/d0b278b9-2548-4fe3-8878-bcd7989944b9")
+    assert seen == ["https://api.ashbyhq.com/posting-api/job-board/wayve"]
+    assert job["title"] == "Senior Embedded Engineer"
+    assert job["company"] == "Wayve"
+    assert job["location"] == "London, United Kingdom"
+    assert job["description"] == LONG_BODY
+
+
+def test_scrape_job_board_fallback_uses_canonical_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = (
+        "<html><head><title>Job Shell</title>"
+        '<link rel="canonical" href="https://job-boards.greenhouse.io/acme/jobs/789" />'
+        "</head><body></body></html>"
+    )
+    _patch_get(monkeypatch, html)
+    seen: list[str] = []
+    _patch_get_json(
+        monkeypatch,
+        {"title": "Platform Engineer", "content": f"<p>{LONG_BODY}</p>"},
+        seen,
+    )
+    job = scraper.scrape_job("https://careers.example.com/job/1")
+    assert seen == ["https://boards-api.greenhouse.io/v1/boards/acme/jobs/789"]
+    assert job["title"] == "Platform Engineer"
+
+
+def test_scrape_job_skips_board_api_without_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+
+    def _unexpected(url: str) -> object | None:
+        raise AssertionError(f"board API must not be called, got {url}")
+
+    monkeypatch.setattr(scraper, "_get_json", _unexpected)
+    with pytest.raises(ScrapeError, match="JavaScript-rendered"):
+        scraper.scrape_job("https://example.com/job")
+
+
+def test_scrape_job_raises_when_board_api_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+    _patch_get_json(monkeypatch, None)
+    with pytest.raises(ScrapeError, match="JavaScript-rendered"):
+        scraper.scrape_job("https://job-boards.eu.greenhouse.io/acme/jobs/123456")
+
+
+class _FakeHttpResponse:
+    def __init__(self, data: object | None = None, error: Exception | None = None) -> None:
+        self._data = data
+        self._error = error
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        if self._error is not None:
+            raise self._error
+        return self._data
+
+
+def test_get_json_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: _FakeHttpResponse({"ok": True}))
+    assert scraper._get_json("https://example.com/api") == {"ok": True}
+
+
+def test_get_json_returns_none_on_transport_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*args: object, **kwargs: object) -> _FakeHttpResponse:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "get", _boom)
+    assert scraper._get_json("https://example.com/api") is None
+
+
+def test_get_json_returns_none_on_decode_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        httpx, "get", lambda *args, **kwargs: _FakeHttpResponse(error=ValueError("not json"))
+    )
+    assert scraper._get_json("https://example.com/api") is None
 
 
 def test_title_falls_back_to_h1() -> None:

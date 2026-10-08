@@ -15,6 +15,7 @@ dependencies = [
     "click>=8.5.0",
     "mcp>=2.3.0",
     "curl-cffi==0.16.3",
+    "httpx>=0.28",
 ]
 
 [project.scripts]
