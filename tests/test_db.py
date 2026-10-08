@@ -224,6 +224,7 @@ def _job(
         "salary_currency": None,
         "salary_period": None,
         "salary_note": None,
+        "deadline": None,
         "fingerprint": None,
     }
 
@@ -680,6 +681,7 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
         "applied_comment",
         "interview_comment",
         "rejected_comment",
+        "deadline",
     } <= columns
 
 
@@ -712,6 +714,27 @@ def test_add_job_stores_salary(db_path: Path) -> None:
     assert job["salary_currency"] == "EUR"
     assert job["salary_period"] == "year"
     assert job["salary_note"] == "plus bonus"
+
+
+def test_add_job_stores_deadline(db_path: Path) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/1",
+        "Engineer",
+        "Acme",
+        "Remote",
+        "body",
+        deadline="2026-12-31",
+    )
+
+    assert db.get_jobs()[0]["deadline"] == "2026-12-31"
+
+
+def test_add_job_deadline_defaults_to_null(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+
+    assert db.get_jobs()[0]["deadline"] is None
 
 
 def test_init_db_adds_salary_columns(db_path: Path) -> None:
@@ -913,6 +936,29 @@ def test_update_job_updates_salary(db_path: Path) -> None:
     assert job["salary_max"] is None
     assert job["salary_currency"] == "USD"
     assert job["salary_period"] == "month"
+
+
+def test_update_job_sets_and_clears_deadline(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    def update(deadline: str | None = None) -> bool:
+        return db.update_job(
+            job_id,
+            "https://example.com/1",
+            "Engineer",
+            "Acme",
+            "Remote",
+            "body",
+            deadline=deadline,
+        )
+
+    assert update("2026-12-31") is True
+    assert db.get_jobs()[0]["deadline"] == "2026-12-31"
+
+    assert update() is True
+    assert db.get_jobs()[0]["deadline"] is None
 
 
 def test_update_job_rejects_duplicate_url(db_path: Path) -> None:

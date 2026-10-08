@@ -14,7 +14,7 @@ from cursustrace import backup, db, discovery, exporters, salary, scraper
 from cursustrace.config import LOG_LEVELS, load_settings
 from cursustrace.errors import ConfigError, ScrapeError
 from cursustrace.logsetup import setup_logging
-from cursustrace.validation import required_error, validate_url
+from cursustrace.validation import normalize_deadline, required_error, validate_url
 
 STATUSES = ["unapplied", "applied", "interview", "rejected"]
 SORT_ORDERS = ["newest", "oldest", "company", "company_desc", "status"]
@@ -64,6 +64,7 @@ def _ingest(
     salary_currency: str | None = None,
     salary_period: str | None = None,
     salary_note: str | None = None,
+    deadline: str | None = None,
     tags: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if db.check_duplicate(url):
@@ -81,6 +82,7 @@ def _ingest(
         salary_currency=salary_currency,
         salary_period=salary_period,
         salary_note=salary_note,
+        deadline=deadline,
     )
     if job_id is None:
         logger.info("Skipped duplicate: %s", url)
@@ -144,6 +146,12 @@ def _ingest_item(
     status = _optional_str(item.get("status")) or "unapplied"
     if status not in STATUSES:
         return ("error", {"item": str(index), "error": f"invalid status: {status}"}, [])
+    deadline = _optional_str(item.get("deadline"))
+    if deadline is not None:
+        normalized = normalize_deadline(deadline)
+        if normalized is None:
+            return ("error", {"item": str(index), "error": f"invalid deadline: {deadline}"}, [])
+        deadline = normalized
     if not (title and company and description):
         try:
             scraped = scraper.scrape_job(url)
@@ -153,6 +161,7 @@ def _ingest_item(
         company = company or scraped["company"]
         location = location or scraped["location"]
         description = description or scraped["description"]
+        deadline = deadline or scraped["deadline"]
 
     result = _ingest(
         url,
@@ -166,6 +175,7 @@ def _ingest_item(
         salary_currency=_optional_str(item.get("salary_currency")),
         salary_period=_optional_str(item.get("salary_period")),
         salary_note=_optional_str(item.get("salary_note")),
+        deadline=deadline,
         tags=_optional_tags(item.get("tags")),
     )
     similar = cast("list[dict[str, object]]", result.get("similar", []))
@@ -319,6 +329,11 @@ def mcp_command() -> None:
 @click.option("--salary-period", type=click.Choice(salary.PERIODS), default=None)
 @click.option("--salary-note", default=None, help="Free-text salary note.")
 @click.option(
+    "--deadline",
+    default=None,
+    help="Application deadline as an ISO date or datetime (e.g. 2026-12-31).",
+)
+@click.option(
     "--tag",
     "tags",
     multiple=True,
@@ -337,6 +352,7 @@ def add(
     salary_currency: str | None,
     salary_period: str | None,
     salary_note: str | None,
+    deadline: str | None,
     tags: tuple[str, ...],
     as_json: bool,
 ) -> None:
@@ -350,6 +366,13 @@ def add(
         raise click.ClickException(
             "--salary-currency and --salary-period are required with amounts."
         )
+    normalized_deadline: str | None = None
+    if deadline is not None and deadline.strip():
+        normalized_deadline = normalize_deadline(deadline)
+        if normalized_deadline is None:
+            raise click.ClickException(
+                f"Invalid deadline {deadline!r}: expected an ISO date like 2026-12-31."
+            )
 
     clean_url = url.strip()
     clean_title = title.strip()
@@ -365,6 +388,7 @@ def add(
         salary_currency=salary_currency if has_amount else None,
         salary_period=salary_period if has_amount else None,
         salary_note=salary_note,
+        deadline=normalized_deadline,
         tags=tags,
     )
     if as_json:
@@ -404,7 +428,13 @@ def scan(urls: tuple[str, ...], tags: tuple[str, ...], as_json: bool) -> None:
             errors.append({"url": url, "error": str(exc)})
             continue
         result = _ingest(
-            url, job["title"], job["company"], job["location"], job["description"], tags=tags
+            url,
+            job["title"],
+            job["company"],
+            job["location"],
+            job["description"],
+            deadline=job["deadline"],
+            tags=tags,
         )
         if result["status"] == "duplicate":
             skipped += 1
@@ -464,6 +494,7 @@ def discover(
                 job["company"],
                 job["location"],
                 job["description"],
+                deadline=job["deadline"],
                 tags=tags,
             )
             if ingest["status"] == "duplicate":
@@ -646,7 +677,10 @@ def list_jobs(
     for job in jobs:
         title = job["title"] or "Untitled position"
         company = job["company"] or "Unknown company"
-        click.echo(f"{job['id']}. {title} — {company} [{db.job_status(job)}]")
+        line = f"{job['id']}. {title} — {company} [{db.job_status(job)}]"
+        if job["deadline"]:
+            line += f" ⏰ {job['deadline']}"
+        click.echo(line)
 
 
 @cli.command()

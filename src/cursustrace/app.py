@@ -9,7 +9,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import FrameType
 from typing import Literal, TypedDict, TypeVar, cast
@@ -23,7 +23,7 @@ from cursustrace import backup, config, db, salary, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.logsetup import setup_logging
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
-from cursustrace.validation import validate_required, validate_url
+from cursustrace.validation import normalize_deadline, validate_required, validate_url
 
 APP_TITLE = "CursusTrace — Job Application Tracker"
 
@@ -220,6 +220,29 @@ def _days_since_applied(job: db.Job) -> int | None:
     return (date(now.tm_year, now.tm_mon, now.tm_mday) - applied).days
 
 
+def _deadline_text(deadline: str | None, today: date | None = None) -> str | None:
+    """Describe a deadline relative to today, or None when it is unset or invalid."""
+    if not deadline:
+        return None
+    try:
+        parsed = datetime.fromisoformat(deadline).date()
+    except ValueError:
+        return None
+    if today is None:
+        now = time.localtime()
+        today = date(now.tm_year, now.tm_mon, now.tm_mday)
+    delta = (parsed - today).days
+    if delta == 0:
+        return "— is today"
+    if delta == 1:
+        return "— in 1 day"
+    if delta == -1:
+        return "— passed 1 day ago"
+    if delta > 1:
+        return f"— in {delta} days"
+    return f"— passed {-delta} days ago"
+
+
 def _render_job_card(
     job: db.Job,
     refresh: Callable[[], None],
@@ -248,6 +271,9 @@ def _render_job_card(
         salary_text = salary.format_salary(job)
         if salary_text:
             ui.markdown(f"**Salary:** {salary_text}").mark("salary")
+        deadline_text = _deadline_text(job["deadline"])
+        if deadline_text is not None:
+            ui.markdown(f"**Deadline:** {job['deadline']} {deadline_text}").mark("deadline")
         days_applied = _days_since_applied(job)
         if days_applied is not None:
             ui.label(f"Applied {days_applied} days ago").classes("text-caption").mark(
@@ -402,6 +428,7 @@ def _scan_url(url: str) -> tuple[str, str, list[db.Job]]:
         job["company"],
         job["location"],
         job["description"],
+        deadline=job["deadline"],
     )
     if job_id is None:
         return ("duplicate", url, [])
@@ -668,6 +695,7 @@ class JobFormValues:
     salary_currency: str = ""
     salary_period: str = ""
     salary_note: str = ""
+    deadline: str = ""
     applied_comment: str = ""
     interview_comment: str = ""
     rejected_comment: str = ""
@@ -711,6 +739,7 @@ def _job_form_dialog(
     salary_currency = (values["salary_currency"] or "") if values else "EUR"
     salary_period = (values["salary_period"] or "") if values else "year"
     salary_note = (values["salary_note"] or "") if values else ""
+    deadline_value = (values["deadline"] or "") if values else ""
     current_tags = db.job_tags(values["id"]) if values is not None else []
 
     with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl"):
@@ -738,6 +767,11 @@ def _job_form_dialog(
                 list(salary.PERIODS), value=salary_period or None, label="Period"
             ).classes("flex-1")
         salary_note_input = ui.input("Salary note", value=salary_note).classes("w-full")
+        deadline_input = (
+            ui.input("Deadline", value=deadline_value, placeholder="2026-12-31")
+            .classes("w-full")
+            .mark("deadline-field")
+        )
         tags_input = (
             ui.select(
                 db.list_tags(),
@@ -792,6 +826,10 @@ def _job_form_dialog(
             ):
                 ui.notify("Choose a currency and period for the salary.", type="warning")
                 return
+            cleaned_deadline = (deadline_input.value or "").strip()
+            if cleaned_deadline and normalize_deadline(cleaned_deadline) is None:
+                ui.notify("Deadline must be an ISO date like 2026-12-31.", type="warning")
+                return
             result = on_save(
                 JobFormValues(
                     url=(url.value or "").strip(),
@@ -804,6 +842,7 @@ def _job_form_dialog(
                     salary_currency=salary_currency_input.value or "",
                     salary_period=salary_period_input.value or "",
                     salary_note=(salary_note_input.value or "").strip(),
+                    deadline=normalize_deadline(cleaned_deadline) or "",
                     applied_comment=(comment_inputs["applied"].value or "")
                     if with_comments
                     else "",
@@ -836,6 +875,7 @@ def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> boo
         values.company,
         values.location or None,
         values.description,
+        deadline=values.deadline or None,
         **_salary_kwargs(values),
     )
     if job_id is None:
@@ -859,6 +899,7 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.company,
         values.location or None,
         values.description,
+        deadline=values.deadline or None,
         **_salary_kwargs(values),
     ):
         logger.warning("Rejected duplicate update: %s", values.url)
@@ -1489,6 +1530,9 @@ def job_detail_page(job_id: int) -> None:
         ui.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
         ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
         ui.markdown(f"**Added:** {job['date_added']}")
+        detail_deadline_text = _deadline_text(job["deadline"])
+        if detail_deadline_text is not None:
+            ui.markdown(f"**Deadline:** {job['deadline']} {detail_deadline_text}").mark("deadline")
         ui.markdown(f"**Status:** {db.job_status(job).title()}")
         detail_tags = db.job_tags(job["id"])
         if detail_tags:

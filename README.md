@@ -108,8 +108,11 @@ and metadata. The **Search company** box matches fuzzy company names across
 `[Applied]`).
 
 When scraping fails (or for a listing you track by hand), use **➕ Add Manually**
-to enter a position's URL, title, company, and description, and edit those fields
-from the position's detail page.
+to enter a position's URL, title, company, description, and an optional
+application deadline, and edit those fields from the position's detail page.
+Cards and the detail page show the deadline with a relative countdown (e.g.
+`2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
+`validThrough` date or type it as an ISO date like `2026-12-31`.
 
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
 your CV in Markdown as four sections — Summary, Work History, Education, and
@@ -149,7 +152,7 @@ machine-readable output.
 # add one position from explicit fields
 uv run cursustrace add --url https://example.com/job/1 \
   --title "Backend Engineer" --company Acme --description "Build APIs" \
-  --location Remote --status applied --tag remote --json
+  --location Remote --status applied --deadline 2026-12-31 --tag remote --json
 
 # scrape and add one or more URLs (repeatable --tag labels the whole batch)
 uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --tag qa --json
@@ -206,14 +209,15 @@ uv run cursustrace clear --all --yes
 ```
 
 Each JSON item may be structured (`url`, `title`, `company`, `location`,
-`description`, `status`, `salary_*`, `tags`) or URL-only (the URL is scraped to
-fill the missing fields). Scraped positions resolve `location` from the page's
-Open Graph meta, then its JSON-LD `JobPosting` address, then a `📍Location:`
-line in the description. `export` writes that same shape, so
+`description`, `status`, `salary_*`, `deadline`, `tags`) or URL-only (the URL is
+scraped to fill the missing fields). Scraped positions resolve `location` from
+the page's Open Graph meta, then its JSON-LD `JobPosting` address, then a
+`📍Location:` line in the description, and `deadline` from the JSON-LD
+`validThrough` date. `export` writes that same shape, so
 `cursustrace export jobs.json` can be edited and fed back into `import`: status,
-stage comments, and tags survive the round trip (unknown tags are created),
-timestamps are re-stamped on import. The CSV variant is a flat spreadsheet view
-with tags joined by `;` — `import` reads JSON only.
+stage comments, tags, and deadlines survive the round trip (unknown tags are
+created), timestamps are re-stamped on import. The CSV variant is a flat
+spreadsheet view with tags joined by `;` — `import` reads JSON only.
 
 ### Discovering positions with an AI agent
 
@@ -272,7 +276,11 @@ scraped listing with `applicability.flags`, and `add_position`, `scan`
 and `discover(add=true)` answer `status=flagged` (or a `flagged` list)
 instead of ingesting when the location or description looks tied to a
 specific country or work authorization — read the listing, then retry
-with `force=true` if it fits a Serbia/remote-EU applicant.
+with `force=true` if it fits a Serbia/remote-EU applicant. Deadlines
+flow through the same way: `scrape_position` returns the listing's
+`deadline` (ISO date from `validThrough`), `add_position` accepts one
+via its `deadline` argument (scraped when omitted), and every stored
+position reports it back from `get_position` and `list_positions`.
 
 ### opencode
 

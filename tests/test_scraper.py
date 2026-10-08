@@ -67,6 +67,7 @@ def test_scrape_job_extracts_open_graph(monkeypatch: pytest.MonkeyPatch) -> None
     assert job["company"] == "Acme Corp"
     assert job["location"] == "Berlin"
     assert job["description"] == "# Clean body"
+    assert job["deadline"] is None
 
 
 def test_scrape_job_impersonates_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,6 +197,78 @@ def test_location_from_description_marker(monkeypatch: pytest.MonkeyPatch) -> No
     )
     _patch_get(monkeypatch, "<html><body><p>Role text</p></body></html>")
     assert scraper.scrape_job("https://example.com")["location"] == "Croatia"
+
+
+def test_deadline_from_jsonld_valid_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "JobPosting", "title": "QA Engineer", "validThrough": "2026-12-31"}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["deadline"] == "2026-12-31"
+
+
+def test_deadline_datetime_normalized_to_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "JobPosting", "validThrough": "2026-12-31T23:59:59+01:00"}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["deadline"] == "2026-12-31"
+
+
+def test_deadline_none_when_valid_through_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "JobPosting", "title": "QA Engineer"}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["deadline"] is None
+
+
+def test_deadline_none_when_unparseable(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "JobPosting", "validThrough": "soon"}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["deadline"] is None
+
+
+def test_deadline_ignores_non_jobposting_jsonld(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@type": "Organization", "validThrough": "2026-12-31"}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["deadline"] is None
+
+
+def test_deadline_from_jsonld_graph_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    html = """
+    <html><head>
+    <script type="application/ld+json">
+    {"@graph": [{"@type": "JobPosting", "validThrough": "2026-11-30"}]}
+    </script>
+    </head><body></body></html>
+    """
+    _patch_get(monkeypatch, html)
+    assert scraper.scrape_job("https://example.com")["deadline"] == "2026-11-30"
 
 
 def test_description_falls_back_to_page_text(monkeypatch: pytest.MonkeyPatch) -> None:

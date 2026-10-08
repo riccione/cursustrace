@@ -17,6 +17,7 @@ from cursustrace.cli import (
     _resolve_delete,
 )
 from cursustrace.errors import ScrapeError
+from cursustrace.validation import normalize_deadline
 
 mcp = MCPServer(
     "cursustrace",
@@ -63,6 +64,7 @@ def _flagged_payload(url: str, flags: list[str], job: scraper.ScrapedJob) -> dic
             "company": job["company"],
             "location": job["location"],
             "description": job["description"],
+            "deadline": job["deadline"],
         },
     }
 
@@ -161,6 +163,7 @@ def scrape_position(url: str) -> dict[str, object]:
         "company": job["company"],
         "location": job["location"],
         "description": job["description"],
+        "deadline": job["deadline"],
         "applicability": {"flags": flags},
     }
 
@@ -178,6 +181,7 @@ def add_position(
     salary_max: int | None = None,
     salary_currency: str | None = None,
     salary_period: str | None = None,
+    deadline: str | None = None,
     force: bool = False,
 ) -> dict[str, object]:
     """Add a position; missing title/company/description/location are scraped from the URL.
@@ -188,8 +192,10 @@ def add_position(
     and the position fields for review — call again with force=true if the
     listing still fits a Serbia/remote-EU applicant. Explicitly passed fields
     override scraped values, so prefer passing what scrape_position returned.
-    Returns the add result with status (added/duplicate/flagged) and, when
-    added, the id and any similar positions worth checking.
+    deadline is an ISO date or datetime (e.g. 2026-12-31); when omitted it is
+    scraped from the listing's validThrough if present. Returns the add result
+    with status (added/duplicate/flagged) and, when added, the id and any
+    similar positions worth checking.
     """
     db.init_db()
     _validate_choice(status, STATUSES, "status")
@@ -199,6 +205,11 @@ def add_position(
         salary_currency and salary_period
     ):
         raise ToolError("salary_currency and salary_period are required with amounts.")
+    if deadline is not None and deadline.strip():
+        normalized_deadline = normalize_deadline(deadline)
+        if normalized_deadline is None:
+            raise ToolError(f"Invalid deadline {deadline!r}: expected an ISO date like 2026-12-31.")
+        deadline = normalized_deadline
     cleaned_url = url.strip()
     if db.check_duplicate(cleaned_url):
         return {"status": "duplicate", "url": cleaned_url}
@@ -214,6 +225,8 @@ def add_position(
         description = description if description is not None else scraped["description"]
         if location is None:
             location = scraped["location"]
+        if deadline is None:
+            deadline = scraped["deadline"]
     error = _check_fields(cleaned_url, title, company, description)
     if error is not None:
         raise ToolError(error)
@@ -232,6 +245,7 @@ def add_position(
                 "company": clean_company,
                 "location": location,
                 "description": clean_description,
+                "deadline": deadline,
             },
             "hint": (
                 "Read the listing; if it still fits a Serbia/remote-EU applicant, "
@@ -249,6 +263,7 @@ def add_position(
         salary_max=salary_max,
         salary_currency=salary_currency,
         salary_period=salary_period,
+        deadline=deadline,
         tags=tuple(tags or ()),
     )
     result["applicability"] = {"flags": flags}
@@ -286,7 +301,13 @@ def scan(urls: list[str], tags: list[str] | None = None, force: bool = False) ->
             flagged.append(_flagged_payload(url, flags, job))
             continue
         result = _ingest(
-            url, job["title"], job["company"], job["location"], job["description"], tags=tag_tuple
+            url,
+            job["title"],
+            job["company"],
+            job["location"],
+            job["description"],
+            deadline=job["deadline"],
+            tags=tag_tuple,
         )
         if result["status"] == "added":
             added += 1
@@ -366,6 +387,7 @@ def discover(
                 job["company"],
                 job["location"],
                 job["description"],
+                deadline=job["deadline"],
                 tags=tag_tuple,
             )
             if ingested["status"] == "added":

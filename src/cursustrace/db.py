@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     salary_currency TEXT,
     salary_period TEXT,
     salary_note TEXT,
+    deadline TEXT,
     fingerprint TEXT UNIQUE
 )
 """
@@ -131,6 +132,7 @@ class Job(TypedDict):
     salary_currency: str | None
     salary_period: str | None
     salary_note: str | None
+    deadline: str | None
     fingerprint: str | None
 
 
@@ -247,6 +249,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("salary_currency", "TEXT"),
         ("salary_period", "TEXT"),
         ("salary_note", "TEXT"),
+        ("deadline", "TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
@@ -437,6 +440,7 @@ def add_job(
     salary_currency: str | None = None,
     salary_period: str | None = None,
     salary_note: str | None = None,
+    deadline: str | None = None,
 ) -> int | None:
     """Insert a job listing; return the new id, or None when the URL/fingerprint exists."""
     fingerprint = generate_fingerprint(url, company, title)
@@ -446,8 +450,8 @@ def add_job(
             cursor = conn.execute(
                 "INSERT INTO jobs "
                 "(job_url, title, company, location, description, date_added, fingerprint, "
-                "salary_min, salary_max, salary_currency, salary_period, salary_note) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "salary_min, salary_max, salary_currency, salary_period, salary_note, deadline) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url,
                     title,
@@ -461,6 +465,7 @@ def add_job(
                     salary_currency,
                     salary_period,
                     salary_note,
+                    deadline,
                 ),
             )
             rowid = cursor.lastrowid
@@ -856,6 +861,7 @@ def update_job(
     salary_currency: str | None = None,
     salary_period: str | None = None,
     salary_note: str | None = None,
+    deadline: str | None = None,
 ) -> bool:
     """Update a job's editable fields; return False when the URL or fingerprint collides."""
     fingerprint = generate_fingerprint(url, company, title)
@@ -864,7 +870,8 @@ def update_job(
             conn.execute(
                 "UPDATE jobs SET job_url = ?, title = ?, company = ?, location = ?, "
                 "description = ?, fingerprint = ?, salary_min = ?, salary_max = ?, "
-                "salary_currency = ?, salary_period = ?, salary_note = ? WHERE id = ?",
+                "salary_currency = ?, salary_period = ?, salary_note = ?, deadline = ? "
+                "WHERE id = ?",
                 (
                     url,
                     title,
@@ -877,6 +884,7 @@ def update_job(
                     salary_currency,
                     salary_period,
                     salary_note,
+                    deadline,
                     job_id,
                 ),
             )
