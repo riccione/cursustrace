@@ -71,8 +71,20 @@ FUNNEL_STAGES: tuple[tuple[str, str], ...] = (
     ("interview", "Interview"),
 )
 
-WEBAPP_CSS_PATH = Path("styles/webapp.css")
-GLOBAL_CSS = WEBAPP_CSS_PATH.read_text(encoding="utf-8")
+WEBAPP_CSS_PATH: Path = Path("styles/webapp.css")
+
+
+def load_webapp_css(path: Path | None = None) -> str:
+    """Read the customizable webapp stylesheet; exit with guidance when missing."""
+    stylesheet = path if path is not None else WEBAPP_CSS_PATH
+    try:
+        return stylesheet.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"Webapp stylesheet not found at {stylesheet} — "
+            "run cursustrace from the repository root"
+        ) from exc
+
 
 DARK_MODE_KEY = "dark_mode"
 SIMILAR_NOTICE_KEY = "similar_notice"
@@ -1565,7 +1577,7 @@ def run(settings: config.Settings | None = None) -> None:
         _backup_on_startup(_settings)
     else:
         print("Backup skipped: backup_on_start is disabled", flush=True)
-    ui.add_css(GLOBAL_CSS, shared=True)
+    ui.add_css(load_webapp_css(), shared=True)
     shutdown_signal: int | None = None
 
     def handle_shutdown(signum: int, _frame: FrameType | None) -> None:

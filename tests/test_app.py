@@ -1466,19 +1466,27 @@ async def test_main_tabs_render_inside_header(user: User) -> None:
 
 
 def test_global_css_styles_all_textareas() -> None:
-    assert ".q-textarea .q-field__native" in app.GLOBAL_CSS
-    assert "line-height: 1.7" in app.GLOBAL_CSS
+    css = app.load_webapp_css()
+    assert ".q-textarea .q-field__native" in css
+    assert "line-height: 1.7" in css
 
 
 def test_global_css_scrolls_header_tabs_when_narrow() -> None:
-    assert ".header-tabs .q-tabs__content" in app.GLOBAL_CSS
-    assert "overflow-x: auto" in app.GLOBAL_CSS
-    assert "@media (max-width: 999px)" in app.GLOBAL_CSS
+    css = app.load_webapp_css()
+    assert ".header-tabs .q-tabs__content" in css
+    assert "overflow-x: auto" in css
+    assert "@media (max-width: 999px)" in css
 
 
 def test_global_css_wraps_markdown_pre() -> None:
-    assert ".nicegui-markdown pre" in app.GLOBAL_CSS
-    assert "white-space: pre-wrap" in app.GLOBAL_CSS
+    css = app.load_webapp_css()
+    assert ".nicegui-markdown pre" in css
+    assert "white-space: pre-wrap" in css
+
+
+def test_load_webapp_css_missing_file_raises(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="Webapp stylesheet not found"):
+        app.load_webapp_css(tmp_path / "missing.css")
 
 
 async def test_theme_toggle_persists_dark(user: User) -> None:
