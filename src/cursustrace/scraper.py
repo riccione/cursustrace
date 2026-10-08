@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup, Tag
 from curl_cffi.requests.exceptions import RequestException
 
 from cursustrace.errors import ScrapeError
+from cursustrace.validation import normalize_deadline
 
 REQUEST_TIMEOUT = 15
 DEFAULT_LOCATION = "Not Specified"
@@ -27,6 +28,7 @@ class ScrapedJob(TypedDict):
     company: str | None
     location: str
     description: str | None
+    deadline: str | None
 
 
 def _meta_content(soup: BeautifulSoup, *names: str) -> str | None:
@@ -81,8 +83,8 @@ def _extract_description(html: str, url: str, soup: BeautifulSoup) -> str | None
     return fallback or None
 
 
-def _jsonld_location(data: object) -> str | None:
-    """Pull a location string from a parsed JSON-LD JobPosting payload."""
+def _jsonld_jobposting_items(data: object) -> list[dict[str, object]]:
+    """Return every JobPosting item in a parsed JSON-LD payload (incl. @graph)."""
     items: list[object]
     if isinstance(data, list):
         items = list(data)
@@ -92,13 +94,20 @@ def _jsonld_location(data: object) -> str | None:
             items.extend(data["@graph"])
     else:
         items = []
+    found: list[dict[str, object]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
         jtype = item.get("@type")
         types = [jtype] if isinstance(jtype, str) else jtype if isinstance(jtype, list) else []
-        if not any(isinstance(entry, str) and entry.lower() == "jobposting" for entry in types):
-            continue
+        if any(isinstance(entry, str) and entry.lower() == "jobposting" for entry in types):
+            found.append(item)
+    return found
+
+
+def _jsonld_location(data: object) -> str | None:
+    """Pull a location string from a parsed JSON-LD JobPosting payload."""
+    for item in _jsonld_jobposting_items(data):
         location = item.get("jobLocation")
         if isinstance(location, list):
             location = next((entry for entry in location if isinstance(entry, dict)), None)
@@ -120,6 +129,15 @@ def _jsonld_location(data: object) -> str | None:
                     parts.append(value.strip())
         if parts:
             return ", ".join(parts)
+    return None
+
+
+def _jsonld_deadline(data: object) -> str | None:
+    """Pull the validThrough deadline from a parsed JSON-LD JobPosting payload."""
+    for item in _jsonld_jobposting_items(data):
+        valid_through = item.get("validThrough")
+        if isinstance(valid_through, str) and valid_through.strip():
+            return normalize_deadline(valid_through)
     return None
 
 
@@ -146,6 +164,22 @@ def _extract_location(soup: BeautifulSoup, description: str | None) -> str | Non
     return None
 
 
+def _extract_deadline(soup: BeautifulSoup) -> str | None:
+    """Resolve the application deadline from JSON-LD validThrough, normalized to YYYY-MM-DD."""
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        text = tag.string or ""
+        if not text.strip():
+            continue
+        try:
+            data = json.loads(text)
+        except ValueError:
+            continue
+        found = _jsonld_deadline(data)
+        if found is not None:
+            return found
+    return None
+
+
 def _get(url: str, headers: dict[str, str] | None = None) -> curl_cffi.Response:
     """GET through Chrome impersonation so TLS/HTTP2 fingerprints match the headers.
 
@@ -166,7 +200,7 @@ def fetch_html(url: str) -> str:
 
 
 def scrape_job(url: str) -> ScrapedJob:
-    """Fetch a job listing and extract its title, company, location and description."""
+    """Fetch a job listing and extract title, company, location, description and deadline."""
     try:
         response = _get(url)
     except RequestException as exc:
@@ -185,4 +219,5 @@ def scrape_job(url: str) -> ScrapedJob:
         company=_meta_content(soup, "og:site_name") or _infer_company(url),
         location=_extract_location(soup, description) or DEFAULT_LOCATION,
         description=description,
+        deadline=_extract_deadline(soup),
     )

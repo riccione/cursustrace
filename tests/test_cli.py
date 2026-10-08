@@ -56,6 +56,7 @@ def _varying_scrape(url: str) -> scraper.ScrapedJob:
         "company": "ScrapeCo",
         "location": "Remote",
         "description": f"Body {slug}",
+        "deadline": None,
     }
 
 

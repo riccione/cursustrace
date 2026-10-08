@@ -28,6 +28,7 @@ def fake_scrape(url: str) -> scraper.ScrapedJob:
         "company": "Acme",
         "location": "Remote",
         "description": "Body text",
+        "deadline": None,
     }
 
 

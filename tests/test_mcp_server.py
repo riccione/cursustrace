@@ -220,6 +220,7 @@ async def test_scan_collects_added_and_errors(monkeypatch: pytest.MonkeyPatch) -
             "company": "Co",
             "location": "Remote (EU)",
             "description": "Body",
+            "deadline": None,
         }
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)

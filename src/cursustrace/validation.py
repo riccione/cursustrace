@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from urllib.parse import urlparse
 
 
@@ -15,6 +16,17 @@ def validate_url(value: str | None) -> str | None:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return "Enter a full URL starting with http:// or https://."
     return None
+
+
+def normalize_deadline(value: str | None) -> str | None:
+    """Return an ISO YYYY-MM-DD deadline, or None when the value is blank or unparseable."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text).date().isoformat()
+    except ValueError:
+        return None
 
 
 def required_error(label: str, value: str | None) -> str | None:

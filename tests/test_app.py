@@ -170,6 +170,7 @@ async def test_scan_multiple_urls_saves_all(user: User, monkeypatch: pytest.Monk
             "company": "Acme",
             "location": "Remote",
             "description": f"Body {slug}",
+            "deadline": None,
         }
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
@@ -196,6 +197,7 @@ async def test_scan_multiple_reports_mixed_outcomes(
             "company": "Acme",
             "location": "Remote",
             "description": f"Body {slug}",
+            "deadline": None,
         }
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
@@ -235,6 +237,7 @@ async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatc
             "company": "Acme",
             "location": "Remote",
             "description": "Body",
+            "deadline": None,
         }
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
