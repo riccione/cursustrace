@@ -133,6 +133,12 @@ The PDF stylesheet lives at [`styles/cv.css`](styles/cv.css). Edit it to change
 the fonts, margins, colours, spacing, or page footer — the file is read on every
 export, so changes apply immediately without restarting the app.
 
+## Customizing the webapp CSS
+
+Global UI styles live at [`styles/webapp.css`](styles/webapp.css) — font sizes,
+Quasar overrides, markdown overflow, and the header tab rules. Unlike the CV
+stylesheet, it is read once at startup, so restart the app after editing.
+
 ## Command-line ingestion (for AI agents)
 
 The `cursustrace` command also offers headless subcommands for adding positions
