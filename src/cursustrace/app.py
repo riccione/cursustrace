@@ -71,24 +71,20 @@ FUNNEL_STAGES: tuple[tuple[str, str], ...] = (
     ("interview", "Interview"),
 )
 
-GLOBAL_CSS = """
-html { font-size: 22px; }
-body { font-size: 22px; }
-.q-btn, .q-field, .q-field__label, .q-tab__label, .q-item, .q-checkbox,
-.q-notification { font-size: inherit; }
-body.body--dark .q-drawer { background: #1d1d1d; }
-.q-textarea .q-field__native { line-height: 1.7; }
-.nicegui-markdown { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-.nicegui-markdown pre,
-.nicegui-markdown code { white-space: pre-wrap; overflow-wrap: anywhere; }
-.nicegui-markdown pre { overflow-x: auto; }
-.nicegui-markdown img,
-.nicegui-markdown table { max-width: 100%; }
-.nicegui-markdown table { display: block; overflow-x: auto; }
-.header-tabs { flex: 0 0 auto; min-width: 0; }
-.header-tabs .q-tabs__content { overflow-x: auto; scrollbar-width: thin; }
-@media (max-width: 999px) { .header-tabs { flex: 1 1 0%; } }
-"""
+WEBAPP_CSS_PATH: Path = Path("styles/webapp.css")
+
+
+def load_webapp_css(path: Path | None = None) -> str:
+    """Read the customizable webapp stylesheet; exit with guidance when missing."""
+    stylesheet = path if path is not None else WEBAPP_CSS_PATH
+    try:
+        return stylesheet.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"Webapp stylesheet not found at {stylesheet} — "
+            "run cursustrace from the repository root"
+        ) from exc
+
 
 DARK_MODE_KEY = "dark_mode"
 SIMILAR_NOTICE_KEY = "similar_notice"
@@ -1581,7 +1577,7 @@ def run(settings: config.Settings | None = None) -> None:
         _backup_on_startup(_settings)
     else:
         print("Backup skipped: backup_on_start is disabled", flush=True)
-    ui.add_css(GLOBAL_CSS, shared=True)
+    ui.add_css(load_webapp_css(), shared=True)
     shutdown_signal: int | None = None
 
     def handle_shutdown(signum: int, _frame: FrameType | None) -> None:
