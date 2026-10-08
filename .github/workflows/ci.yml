@@ -30,7 +30,7 @@ permissions:
 jobs:
   call-ci:
     if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
-    uses: riccione/github-workflows/.github/workflows/rust-ci.yml@628b13e094babbaa3481b28b390e1cbd86673a3d
+    uses: riccione/github-workflows/.github/workflows/python-ci.yml@628b13e094babbaa3481b28b390e1cbd86673a3d
     # Optional input override:
     # with:
     #   python-version: "3.11"
