@@ -36,15 +36,17 @@ async def err(client: Client, name: str, args: dict[str, Any] | None = None) -> 
     return _message(result)
 
 
-def seed(url: str, title: str = "QA Engineer", company: str = "ACME") -> int:
+def seed(
+    url: str, title: str = "QA Engineer", company: str = "ACME", deadline: str | None = None
+) -> int:
     db.init_db()
-    job_id = db.add_job(url, title, company, "Berlin, DE", "Test everything.")
+    job_id = db.add_job(url, title, company, "Berlin, DE", "Test everything.", deadline=deadline)
     assert job_id is not None
     return job_id
 
 
 async def test_list_positions_filters_and_tags() -> None:
-    first = seed("https://example.com/jobs/1")
+    first = seed("https://example.com/jobs/1", deadline="2026-12-31")
     second = seed("https://example.com/jobs/2", title="SDET")
     db.set_job_tags(first, ["qa"])
 
@@ -54,7 +56,9 @@ async def test_list_positions_filters_and_tags() -> None:
         by_id = {position["id"]: position for position in payload["positions"]}
         assert by_id[first]["tags"] == ["qa"]
         assert by_id[first]["status"] == "unapplied"
+        assert by_id[first]["deadline"] == "2026-12-31"
         assert by_id[second]["tags"] == []
+        assert by_id[second]["deadline"] is None
 
         tagged = await ok(client, "list_positions", {"tags": ["qa"]})
         assert [position["id"] for position in tagged["positions"]] == [first]
@@ -72,7 +76,7 @@ async def test_list_positions_filters_and_tags() -> None:
 
 
 async def test_get_position_and_events() -> None:
-    job_id = seed("https://example.com/jobs/3")
+    job_id = seed("https://example.com/jobs/3", deadline="2026-11-30")
     db.set_job_status(job_id, "applied")
     db.set_job_comment(job_id, "applied", "referral sent")
 
@@ -81,6 +85,7 @@ async def test_get_position_and_events() -> None:
         assert payload["position"]["status"] == "applied"
         assert payload["position"]["applied_comment"] == "referral sent"
         assert payload["position"]["tags"] == []
+        assert payload["position"]["deadline"] == "2026-11-30"
         assert payload["events"][-1]["status"] == "applied"
 
         message = await err(client, "get_position", {"job_id": 999_999})
@@ -109,6 +114,7 @@ async def test_scrape_position_returns_fields_and_flags(
             "company": "ACME",
             "location": "Berlin, Germany",
             "description": "You must be authorized to work in Germany.",
+            "deadline": "2026-12-31",
         },
     )
     async with Client(mcp) as client:
@@ -116,6 +122,7 @@ async def test_scrape_position_returns_fields_and_flags(
         assert flagged["title"] == "QA Engineer"
         assert flagged["company"] == "ACME"
         assert flagged["location"] == "Berlin, Germany"
+        assert flagged["deadline"] == "2026-12-31"
         flags = flagged["applicability"]["flags"]
         assert any("Germany" in flag for flag in flags)
 
@@ -127,10 +134,12 @@ async def test_scrape_position_returns_fields_and_flags(
                 "company": "Globex",
                 "location": "Remote (EU)",
                 "description": "Remote-first team across Europe.",
+                "deadline": None,
             },
         )
         clear = await ok(client, "scrape_position", {"url": "https://example.com/jobs/10"})
         assert clear["applicability"]["flags"] == []
+        assert clear["deadline"] is None
 
 
 async def test_scrape_position_surfaces_scrape_errors(
@@ -156,6 +165,7 @@ async def test_add_position_scrapes_then_reports_duplicate(
             "company": "Scraped co",
             "location": "Remote (EU)",
             "description": "Scraped body",
+            "deadline": "2026-11-30",
         },
     )
 
@@ -163,6 +173,8 @@ async def test_add_position_scrapes_then_reports_duplicate(
         added = await ok(client, "add_position", {"url": "https://example.com/jobs/5"})
         assert added["status"] == "added"
         assert added["id"] is not None
+        stored = await ok(client, "get_position", {"job_id": added["id"]})
+        assert stored["position"]["deadline"] == "2026-11-30"
 
         duplicate = await ok(client, "add_position", {"url": "https://example.com/jobs/5"})
         assert duplicate["status"] == "duplicate"
@@ -191,6 +203,7 @@ async def test_add_position_flags_country_restricted_then_force(
             "company": "SAP",
             "location": "Walldorf, Germany",
             "description": "You must be authorized to work in Germany.",
+            "deadline": "2026-10-15",
         },
     )
     url = "https://example.com/jobs/12"
@@ -199,6 +212,7 @@ async def test_add_position_flags_country_restricted_then_force(
         assert flagged["status"] == "flagged"
         assert any("Germany" in flag for flag in flagged["applicability"]["flags"])
         assert flagged["position"]["company"] == "SAP"
+        assert flagged["position"]["deadline"] == "2026-10-15"
         assert flagged["hint"]
         assert (await ok(client, "list_positions"))["count"] == 0
 
@@ -211,6 +225,43 @@ async def test_add_position_flags_country_restricted_then_force(
         assert (await ok(client, "list_positions"))["count"] == 1
 
 
+async def test_add_position_stores_explicit_deadline() -> None:
+    async with Client(mcp) as client:
+        added = await ok(
+            client,
+            "add_position",
+            {
+                "url": "https://example.com/jobs/14",
+                "title": "Engineer",
+                "company": "Acme",
+                "description": "Body",
+                "location": "Remote (EU)",
+                "deadline": "2026-12-31T12:00:00Z",
+            },
+        )
+        assert added["status"] == "added"
+        stored = await ok(client, "get_position", {"job_id": added["id"]})
+        assert stored["position"]["deadline"] == "2026-12-31"
+
+
+async def test_add_position_rejects_invalid_deadline() -> None:
+    async with Client(mcp) as client:
+        message = await err(
+            client,
+            "add_position",
+            {
+                "url": "https://example.com/jobs/15",
+                "title": "Engineer",
+                "company": "Acme",
+                "description": "Body",
+                "location": "Remote (EU)",
+                "deadline": "soon",
+            },
+        )
+        assert "Invalid deadline" in message
+        assert (await ok(client, "list_positions"))["count"] == 0
+
+
 async def test_scan_collects_added_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def scrape(url: str) -> scraper.ScrapedJob:
         if "bad" in url:
@@ -220,7 +271,7 @@ async def test_scan_collects_added_and_errors(monkeypatch: pytest.MonkeyPatch) -
             "company": "Co",
             "location": "Remote (EU)",
             "description": "Body",
-            "deadline": None,
+            "deadline": "2026-08-15",
         }
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
@@ -235,6 +286,7 @@ async def test_scan_collects_added_and_errors(monkeypatch: pytest.MonkeyPatch) -
         assert payload["errors"] == [{"url": "https://example.com/bad", "error": "boom"}]
         listed = await ok(client, "list_positions", {"tags": ["qa"]})
         assert listed["count"] == 1
+        assert listed["positions"][0]["deadline"] == "2026-08-15"
 
 
 async def test_scan_flags_restricted_listings_until_forced(
@@ -246,12 +298,14 @@ async def test_scan_flags_restricted_listings_until_forced(
             "company": "Globex",
             "location": "Remote (EU)",
             "description": "Remote-first.",
+            "deadline": None,
         },
         "https://example.com/restricted": {
             "title": "QA Engineer",
             "company": "SAP",
             "location": "Hamburg, Germany",
             "description": "Must reside in Germany.",
+            "deadline": "2026-09-01",
         },
     }
     monkeypatch.setattr(scraper, "scrape_job", lambda url: responses[url])
@@ -262,6 +316,7 @@ async def test_scan_flags_restricted_listings_until_forced(
         assert result["skipped"] == 0
         assert [entry["url"] for entry in result["flagged"]] == ["https://example.com/restricted"]
         assert result["flagged"][0]["position"]["company"] == "SAP"
+        assert result["flagged"][0]["position"]["deadline"] == "2026-09-01"
         assert (await ok(client, "list_positions"))["count"] == 1
 
         forced = await ok(
@@ -297,6 +352,7 @@ async def test_discover_add_ingests_new_candidates(monkeypatch: pytest.MonkeyPat
             "company": "Co",
             "location": "Remote, EU",
             "description": "Body",
+            "deadline": "2026-12-01",
         },
     )
 
@@ -308,6 +364,7 @@ async def test_discover_add_ingests_new_candidates(monkeypatch: pytest.MonkeyPat
         assert payload["errors"] == []
         listed = await ok(client, "list_positions")
         assert listed["count"] == 1
+        assert listed["positions"][0]["deadline"] == "2026-12-01"
 
         message = await err(client, "discover", {"source": source.url, "limit": 0})
         assert "limit must be between" in message
@@ -337,6 +394,7 @@ async def test_discover_add_flags_restricted_candidates(
             "company": "Corp",
             "location": "Munich, Germany",
             "description": "Hybrid role in the office.",
+            "deadline": None,
         },
     )
 
