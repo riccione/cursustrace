@@ -84,6 +84,25 @@ async def test_scan_saves_position(user: User) -> None:
     assert jobs[0]["company"] == "Acme"
 
 
+async def test_scan_saves_deadline(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        scraper,
+        "scrape_job",
+        lambda url: {
+            "title": "Senior Engineer",
+            "company": "Acme",
+            "location": "Remote",
+            "description": "Body text",
+            "deadline": "2026-12-31",
+        },
+    )
+    await user.open("/")
+    await _scan(user)
+
+    await user.should_see("Saved 1")
+    assert db.get_jobs()[0]["deadline"] == "2026-12-31"
+
+
 async def test_duplicate_url_shows_warning(user: User) -> None:
     await user.open("/")
     await _scan(user)
@@ -110,6 +129,7 @@ async def test_similar_position_added_with_notice(
             "company": "Acme",
             "location": "Remote",
             "description": "Body text",
+            "deadline": None,
         },
     )
     await _scan(user, "https://other.com/jobs/999")
@@ -134,6 +154,7 @@ async def test_similar_notice_can_be_disabled(user: User, monkeypatch: pytest.Mo
             "company": "Acme",
             "location": "Remote",
             "description": "Body text",
+            "deadline": None,
         },
     )
     await _scan(user, "https://other.com/jobs/999")
@@ -529,6 +550,38 @@ async def test_add_job_manually_rejects_inverted_salary(user: User) -> None:
     assert db.get_jobs() == []
 
 
+async def test_add_job_manually_with_deadline(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/5")
+        user.find("Title").clear().type("Dated Engineer")
+        user.find("Company").clear().type("Acme")
+        user.find("Description").clear().type("Body")
+        user.find("Deadline").clear().type("2026-12-31")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    assert db.get_jobs()[0]["deadline"] == "2026-12-31"
+
+
+async def test_add_job_manually_rejects_invalid_deadline(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/6")
+        user.find("Title").clear().type("Dated Engineer")
+        user.find("Company").clear().type("Acme")
+        user.find("Description").clear().type("Body")
+        user.find("Deadline").clear().type("soon")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await asyncio.sleep(0.1)
+    assert db.get_jobs() == []
+
+
 async def test_card_and_detail_show_salary(user: User) -> None:
     db.init_db()
     db.add_job(
@@ -549,6 +602,34 @@ async def test_card_and_detail_show_salary(user: User) -> None:
 
     await user.open(f"/job/{job_id}")
     await user.should_see("€60,000 – €80,000 / year")
+
+
+async def test_card_and_detail_show_deadline(user: User) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/dated",
+        "Dated Engineer",
+        "Acme",
+        "Remote",
+        "Body",
+        deadline="2099-12-31",
+    )
+    job_id = db.get_jobs()[0]["id"]
+
+    await user.open("/")
+    await user.should_see("2099-12-31")
+    assert user.find(marker="deadline").elements
+
+    await user.open(f"/job/{job_id}")
+    await user.should_see("2099-12-31")
+    assert user.find(marker="deadline").elements
+
+
+async def test_card_hides_deadline_when_unset(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    await user.should_not_see(marker="deadline")
 
 
 async def test_salary_filter_narrows_status_lists(user: User) -> None:
@@ -687,6 +768,50 @@ async def test_edit_job_from_detail(user: User) -> None:
     await _wait_for(lambda: db.get_jobs()[0]["title"] == "Updated Title")
     await user.should_see("Position updated.")
     assert db.get_jobs()[0]["company"] == "UpdatedCo"
+
+
+async def test_edit_form_updates_deadline(user: User) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/edit-deadline",
+        "Dated Engineer",
+        "Acme",
+        "Remote",
+        "Body",
+        deadline="2026-12-31",
+    )
+    job_id = db.get_jobs()[0]["id"]
+    await user.open(f"/job/{job_id}")
+
+    user.find("✏️ Edit").click()
+    with user.scope(marker="job-form"):
+        user.find("Deadline").clear().type("2027-01-15")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: db.get_jobs()[0]["deadline"] == "2027-01-15")
+
+
+async def test_edit_form_clears_deadline(user: User) -> None:
+    db.init_db()
+    db.add_job(
+        "https://example.com/clear-deadline",
+        "Dated Engineer",
+        "Acme",
+        "Remote",
+        "Body",
+        deadline="2026-12-31",
+    )
+    job_id = db.get_jobs()[0]["id"]
+    await user.open(f"/job/{job_id}")
+
+    user.find("✏️ Edit").click()
+    with user.scope(marker="job-form"):
+        user.find("Deadline").clear()
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: db.get_jobs()[0]["deadline"] is None)
 
 
 async def test_edit_job_rejects_duplicate_url(user: User) -> None:
@@ -1027,6 +1152,18 @@ def test_days_since_applied_handles_missing_and_bad_dates() -> None:
     today = date(now.tm_year, now.tm_mon, now.tm_mday)
     three_days_ago = (today - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
     assert app._days_since_applied(cast(db.Job, {"date_applied": three_days_ago})) == 3
+
+
+def test_deadline_text_relative_phrases() -> None:
+    today = date(2026, 10, 8)
+    assert app._deadline_text(None, today) is None
+    assert app._deadline_text("", today) is None
+    assert app._deadline_text("not-a-date", today) is None
+    assert app._deadline_text("2026-10-11", today) == "— in 3 days"
+    assert app._deadline_text("2026-10-09", today) == "— in 1 day"
+    assert app._deadline_text("2026-10-08", today) == "— is today"
+    assert app._deadline_text("2026-10-07", today) == "— passed 1 day ago"
+    assert app._deadline_text("2026-10-06", today) == "— passed 2 days ago"
 
 
 async def test_card_shows_days_since_applied(user: User) -> None:
