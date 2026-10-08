@@ -53,13 +53,14 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   stale_applied_days = 21
   stale_unapplied_days = 10
   deadline_warning_days = 7
+  render = "auto"
   ```
 
 - **Environment variables:** `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
   `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`,
   `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`,
   `CURSUS_STALE_APPLIED_DAYS`, `CURSUS_STALE_UNAPPLIED_DAYS`,
-  `CURSUS_DEADLINE_WARNING_DAYS`.
+  `CURSUS_DEADLINE_WARNING_DAYS`, `CURSUS_RENDER`.
 - **`cursustrace run` flags:** `--host`, `--port`, `--reload/--no-reload`,
   `--show/--no-show`, `--css PATH`, `--config PATH`.
 - **Group flag (all commands):** `--log-level`, e.g.
@@ -69,6 +70,32 @@ Settings are resolved with the precedence **CLI flags > environment variables >
 (see below). On start the dashboard prints which source it resolved from:
 `Config: using config file cursustrace.toml` or `Config: no config file found,
 using hardcoded default values`.
+
+### Scraping
+
+Scans extract a listing through a fallback chain; each step runs only while
+the description so far is too thin (under 600 characters, or just the page
+title repeated):
+
+1. **Static HTML** — trafilatura and page text plus the page's metadata,
+   including job descriptions embedded in inline scripts (Zoho Recruit and
+   similar boards hide theirs inside JavaScript-escaped strings).
+2. **Known-board APIs** — when the URL, or the page's canonical link,
+   points at a Greenhouse, Lever, or Ashby listing, its public JSON API
+   supplies the real title, company, location, description, and deadline.
+3. **Browser render** — with `render = "auto"` (the default), pages that
+   are still JavaScript shells are rendered once with
+   [lightpanda](https://lightpanda.io) and the final DOM is re-extracted.
+   Install `lightpanda` on your `PATH` or point `CURSUS_LIGHTPANDA` at
+   the binary; each render is capped at 20 seconds. Set
+   `render = "never"` (or `CURSUS_RENDER=never`) to skip this tier on
+   hosts where no browser may run.
+
+If every step comes up empty the scan fails with a
+`JavaScript-rendered or blocked` error and the position is left for
+manual entry — partial junk is never stored. Render problems (missing
+binary, timeout) are logged at `log_level = "warning"` and simply fall
+through to that error.
 
 ### Logging
 
@@ -230,7 +257,8 @@ uv run cursustrace clear --all --yes
 
 Each JSON item may be structured (`url`, `title`, `company`, `location`,
 `description`, `status`, `salary_*`, `deadline`, `tags`) or URL-only (the URL is
-scraped to fill the missing fields). Scraped positions resolve `location` from
+scraped to fill the missing fields; see **Scraping** under Configuration for
+the extraction and fallback chain). Scraped positions resolve `location` from
 the page's Open Graph meta, then its JSON-LD `JobPosting` address, then a
 `📍Location:` line in the description, and `deadline` from the JSON-LD
 `validThrough` date. `export` writes that same shape, so
