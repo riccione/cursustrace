@@ -10,7 +10,7 @@ from typing import TextIO, cast
 
 import click
 
-from cursustrace import backup, db, discovery, exporters, salary, scraper
+from cursustrace import attention, backup, db, discovery, exporters, salary, scraper
 from cursustrace.config import LOG_LEVELS, load_settings
 from cursustrace.errors import ConfigError, ScrapeError
 from cursustrace.logsetup import setup_logging
@@ -628,6 +628,12 @@ def _filtered_jobs(
     help="Only positions with this tag (repeatable, any-match).",
 )
 @click.option(
+    "--attention",
+    "needs_attention",
+    is_flag=True,
+    help="Only positions needing attention: stale stage or deadline within the warning window.",
+)
+@click.option(
     "--sort",
     "sort_order",
     type=click.Choice(SORT_ORDERS),
@@ -654,6 +660,7 @@ def list_jobs(
     max_salary: int | None,
     salary_currency: str | None,
     tags: tuple[str, ...],
+    needs_attention: bool,
     sort_order: str | None,
     limit: int | None,
     offset: int,
@@ -662,6 +669,10 @@ def list_jobs(
     """List stored positions."""
     db.init_db()
     jobs = _filtered_jobs(status, search, min_salary, max_salary, salary_currency, tags)
+    thresholds: attention.Thresholds | None = None
+    if needs_attention:
+        thresholds = attention.Thresholds.from_settings(load_settings())
+        jobs = [job for job in jobs if attention.reasons_for(job, thresholds)]
     if sort_order is not None:
         jobs = db.sort_jobs(jobs, cast("db.JobSort", sort_order))
     if offset:
@@ -672,7 +683,7 @@ def list_jobs(
         click.echo(json_module.dumps([dict(job) for job in jobs]))
         return
     if not jobs:
-        click.echo("No positions.")
+        click.echo("Nothing needs attention." if needs_attention else "No positions.")
         return
     for job in jobs:
         title = job["title"] or "Untitled position"
@@ -680,6 +691,10 @@ def list_jobs(
         line = f"{job['id']}. {title} — {company} [{db.job_status(job)}]"
         if job["deadline"]:
             line += f" ⏰ {job['deadline']}"
+        if thresholds is not None:
+            reasons = attention.reasons_for(job, thresholds)
+            if reasons:
+                line += f" · {'; '.join(reasons)}"
         click.echo(line)
 
 

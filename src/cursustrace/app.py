@@ -19,7 +19,7 @@ from nicegui import app, events, ui
 from nicegui.run import io_bound
 from starlette.requests import Request
 
-from cursustrace import backup, config, db, salary, scraper
+from cursustrace import attention, backup, config, db, salary, scraper
 from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.logsetup import setup_logging
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
@@ -88,6 +88,7 @@ def load_webapp_css(path: Path | None = None) -> str:
 
 DARK_MODE_KEY = "dark_mode"
 SIMILAR_NOTICE_KEY = "similar_notice"
+ATTENTION_NOTICE_KEY = "attention_notice"
 SELECTED_PROFILE_KEY = "selected_profile_id"
 DARK_MODE_OPTIONS: dict[str, str] = {
     "light": "☀️ Light",
@@ -100,8 +101,61 @@ def _similar_notice_enabled() -> bool:
     return db.get_setting(SIMILAR_NOTICE_KEY, "on") != "off"
 
 
+def _attention_banner_enabled() -> bool:
+    return db.get_setting(ATTENTION_NOTICE_KEY, "on") != "off"
+
+
+def _attention_thresholds() -> attention.Thresholds:
+    settings = _settings if _settings is not None else config.load_settings()
+    return attention.Thresholds.from_settings(settings)
+
+
 def _job_label(job: db.Job) -> str:
     return f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}"
+
+
+def _attention_sort_key(
+    entry: tuple[db.Job, list[str]], today: date | None
+) -> tuple[int, int, str]:
+    """Urgency: deadline positions first (soonest or most overdue), then longest silence."""
+    job, reasons = entry
+    remaining = attention.days_until_deadline(job["deadline"], today)
+    if remaining is not None and any(reason.startswith("deadline") for reason in reasons):
+        return (0, remaining, "")
+    stage = job["date_applied"] if db.job_status(job) == "applied" else job["date_added"]
+    return (1, 0, stage or "")
+
+
+def _attention_items(
+    jobs: list[db.Job], thresholds: attention.Thresholds, *, today: date | None = None
+) -> list[tuple[db.Job, list[str]]]:
+    """Flagged positions with their reasons, ordered most urgent first."""
+    flagged = [
+        (job, reasons)
+        for job in jobs
+        if (reasons := attention.reasons_for(job, thresholds, today=today))
+    ]
+    return sorted(flagged, key=lambda entry: _attention_sort_key(entry, today))
+
+
+def _render_attention_banner(container: ui.column) -> None:
+    container.clear()
+    if not _attention_banner_enabled():
+        return
+    items = _attention_items(db.get_jobs(), _attention_thresholds())
+    if not items:
+        return
+    count = len(items)
+    with container, ui.card().classes("w-full").mark("attention-banner"):
+        needs = "needs" if count == 1 else "need"
+        plural = "" if count == 1 else "s"
+        ui.label(f"⚠️ {count} position{plural} {needs} attention").classes("text-subtitle1")
+        for job, reasons in items[:5]:
+            with ui.row().classes("w-full items-center gap-2").mark("attention-item"):
+                ui.link(_job_label(job), f"/job/{job['id']}")
+                ui.label("; ".join(reasons)).classes("text-caption")
+        if count > 5:
+            ui.label(f"+{count - 5} more").classes("text-caption")
 
 
 def _similar_summary(matches: list[db.Job], shown: int = 2) -> str:
@@ -529,6 +583,18 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
         db.set_setting(SIMILAR_NOTICE_KEY, "on" if event.value else "off")
 
     similar_toggle.on_value_change(update_similar)
+
+    attention_toggle = (
+        ui.switch("Show needs-attention banner", value=_attention_banner_enabled())
+        .classes("w-full")
+        .mark("attention-banner-toggle")
+    )
+
+    def update_attention(event: events.ValueChangeEventArguments[bool | None]) -> None:
+        db.set_setting(ATTENTION_NOTICE_KEY, "on" if event.value else "off")
+        refresh()
+
+    attention_toggle.on_value_change(update_attention)
 
     ui.separator()
     ui.label("🏷️ Tags").classes("text-h6")
@@ -1169,6 +1235,7 @@ def dashboard_page(request: Request) -> None:
     containers: dict[db.JobStatus, ui.column] = {}
     stats_container: ui.column | None = None
     results_container: ui.column | None = None
+    attention_container: ui.column | None = None
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
     advanced_bar: ui.expansion | None = None
@@ -1312,6 +1379,8 @@ def dashboard_page(request: Request) -> None:
             stats_container.clear()
             with stats_container:
                 _render_statistics(dark.value is True)
+        if attention_container is not None:
+            _render_attention_banner(attention_container)
 
     with ui.header().classes("items-center flex-nowrap"):
         ui.label(APP_TITLE).classes("text-h6 flex-1 truncate min-w-0")
@@ -1357,6 +1426,7 @@ def dashboard_page(request: Request) -> None:
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
+                attention_container = ui.column().classes("w-full")
                 search_input = (
                     ui.input("Search company", placeholder="e.g. Adapty")
                     .props("clearable debounce=300")

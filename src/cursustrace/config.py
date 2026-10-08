@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +23,9 @@ ENV_LOG_RETENTION_DAYS = "CURSUS_LOG_RETENTION_DAYS"
 ENV_BACKUP_DIR = "CURSUS_BACKUP_DIR"
 ENV_BACKUP_KEEP = "CURSUS_BACKUP_KEEP"
 ENV_BACKUP_ON_START = "CURSUS_BACKUP_ON_START"
+ENV_STALE_APPLIED_DAYS = "CURSUS_STALE_APPLIED_DAYS"
+ENV_STALE_UNAPPLIED_DAYS = "CURSUS_STALE_UNAPPLIED_DAYS"
+ENV_DEADLINE_WARNING_DAYS = "CURSUS_DEADLINE_WARNING_DAYS"
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
@@ -32,6 +35,9 @@ DEFAULT_LOG_RETENTION_DAYS = 7
 DEFAULT_BACKUP_DIR = Path("backups")
 DEFAULT_BACKUP_KEEP = 14
 DEFAULT_BACKUP_ON_START = True
+DEFAULT_STALE_APPLIED_DAYS = 21
+DEFAULT_STALE_UNAPPLIED_DAYS = 10
+DEFAULT_DEADLINE_WARNING_DAYS = 7
 LOG_DIR = Path("logs")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 
@@ -53,6 +59,9 @@ class Settings:
     backup_dir: Path = DEFAULT_BACKUP_DIR
     backup_keep: int = DEFAULT_BACKUP_KEEP
     backup_on_start: bool = DEFAULT_BACKUP_ON_START
+    stale_applied_days: int = DEFAULT_STALE_APPLIED_DAYS
+    stale_unapplied_days: int = DEFAULT_STALE_UNAPPLIED_DAYS
+    deadline_warning_days: int = DEFAULT_DEADLINE_WARNING_DAYS
     config_file: Path | None = None
 
 
@@ -68,6 +77,9 @@ def load_settings(
     backup_dir: str | Path | None = None,
     backup_keep: int | str | None = None,
     backup_on_start: bool | None = None,
+    stale_applied_days: int | str | None = None,
+    stale_unapplied_days: int | str | None = None,
+    deadline_warning_days: int | str | None = None,
     config_path: str | Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Settings:
@@ -86,6 +98,9 @@ def load_settings(
         ("backup_dir", ENV_BACKUP_DIR),
         ("backup_keep", ENV_BACKUP_KEEP),
         ("backup_on_start", ENV_BACKUP_ON_START),
+        ("stale_applied_days", ENV_STALE_APPLIED_DAYS),
+        ("stale_unapplied_days", ENV_STALE_UNAPPLIED_DAYS),
+        ("deadline_warning_days", ENV_DEADLINE_WARNING_DAYS),
     ):
         raw = environ.get(env_name)
         if raw is not None:
@@ -111,6 +126,12 @@ def load_settings(
         values["backup_keep"] = backup_keep
     if backup_on_start is not None:
         values["backup_on_start"] = backup_on_start
+    if stale_applied_days is not None:
+        values["stale_applied_days"] = stale_applied_days
+    if stale_unapplied_days is not None:
+        values["stale_unapplied_days"] = stale_unapplied_days
+    if deadline_warning_days is not None:
+        values["deadline_warning_days"] = deadline_warning_days
 
     return Settings(
         host=_as_str(values, "host", DEFAULT_HOST),
@@ -125,6 +146,15 @@ def load_settings(
         backup_dir=_as_backup_dir(values.get("backup_dir"), DEFAULT_BACKUP_DIR),
         backup_keep=_as_backup_keep(values.get("backup_keep", DEFAULT_BACKUP_KEEP)),
         backup_on_start=_as_bool(values, "backup_on_start", DEFAULT_BACKUP_ON_START),
+        stale_applied_days=_as_stale_applied_days(
+            values.get("stale_applied_days", DEFAULT_STALE_APPLIED_DAYS)
+        ),
+        stale_unapplied_days=_as_stale_unapplied_days(
+            values.get("stale_unapplied_days", DEFAULT_STALE_UNAPPLIED_DAYS)
+        ),
+        deadline_warning_days=_as_deadline_warning_days(
+            values.get("deadline_warning_days", DEFAULT_DEADLINE_WARNING_DAYS)
+        ),
         config_file=config_file,
     )
 
@@ -190,16 +220,22 @@ def _as_log_level(values: dict[str, object], key: str, default: str) -> str:
     raise ConfigError(f"'{key}' must be one of: {', '.join(LOG_LEVELS)}")
 
 
-def _as_retention_days(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        raise ConfigError("'log_retention_days' must be a non-negative integer")
-    try:
-        days = int(value)
-    except ValueError as exc:
-        raise ConfigError("'log_retention_days' must be a non-negative integer") from exc
-    if days < 0:
-        raise ConfigError("'log_retention_days' must be a non-negative integer")
-    return days
+def _non_negative_int(key: str) -> Callable[[object], int]:
+    """Build a coercer that accepts a non-negative integer for the named setting."""
+
+    def coerce(value: object) -> int:
+        message = f"'{key}' must be a non-negative integer"
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise ConfigError(message)
+        try:
+            days = int(value)
+        except ValueError as exc:
+            raise ConfigError(message) from exc
+        if days < 0:
+            raise ConfigError(message)
+        return days
+
+    return coerce
 
 
 def _as_backup_dir(value: object, default: Path) -> Path:
@@ -213,13 +249,8 @@ def _as_backup_dir(value: object, default: Path) -> Path:
     raise ConfigError("'backup_dir' must be a non-empty string")
 
 
-def _as_backup_keep(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        raise ConfigError("'backup_keep' must be a non-negative integer")
-    try:
-        keep = int(value)
-    except ValueError as exc:
-        raise ConfigError("'backup_keep' must be a non-negative integer") from exc
-    if keep < 0:
-        raise ConfigError("'backup_keep' must be a non-negative integer")
-    return keep
+_as_retention_days = _non_negative_int("log_retention_days")
+_as_backup_keep = _non_negative_int("backup_keep")
+_as_stale_applied_days = _non_negative_int("stale_applied_days")
+_as_stale_unapplied_days = _non_negative_int("stale_unapplied_days")
+_as_deadline_warning_days = _non_negative_int("deadline_warning_days")

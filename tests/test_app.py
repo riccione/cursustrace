@@ -16,7 +16,7 @@ from nicegui import ui
 from nicegui.testing import User
 from pypdf import PdfReader
 
-from cursustrace import app, config, db, logsetup, scraper
+from cursustrace import app, attention, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
 
 JOB_URL = "https://example.com/jobs/1"
@@ -43,6 +43,21 @@ def _seed_job(title: str = "Senior Engineer", description: str = "Body text") ->
     db.init_db()
     db.add_job(JOB_URL, title, "Acme", "Remote", description)
     return db.get_jobs()[0]["id"]
+
+
+def _days_ago_stamp(days: int) -> str:
+    now = time.localtime()
+    today = date(now.tm_year, now.tm_mon, now.tm_mday)
+    return (today - timedelta(days=days)).strftime("%Y-%m-%d 09:00:00")
+
+
+def _seed_stale_job(days: int = 15) -> int:
+    db.init_db()
+    job_id = db.add_job(JOB_URL, "Stale Lead", "Acme", "Remote", "Body")
+    assert job_id is not None
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET date_added = ? WHERE id = ?", (_days_ago_stamp(days), job_id))
+    return job_id
 
 
 def _profile_payload(
@@ -632,6 +647,68 @@ async def test_card_hides_deadline_when_unset(user: User) -> None:
     await user.should_not_see(marker="deadline")
 
 
+async def test_banner_shows_stale_unapplied_position(user: User) -> None:
+    _seed_stale_job(15)
+
+    await user.open("/")
+
+    await user.should_see("1 position needs attention")
+    await user.should_see("added 15 days ago, not applied")
+    assert user.find(marker="attention-item").elements
+
+
+async def test_banner_shows_imminent_deadline(user: User) -> None:
+    db.init_db()
+    now = time.localtime()
+    in_three_days = date(now.tm_year, now.tm_mon, now.tm_mday) + timedelta(days=3)
+    db.add_job(
+        "https://example.com/dated",
+        "Dated Lead",
+        "Acme",
+        "Remote",
+        "Body",
+        deadline=in_three_days.isoformat(),
+    )
+
+    await user.open("/")
+
+    await user.should_see("deadline in 3 days")
+    assert user.find(marker="attention-item").elements
+
+
+async def test_banner_hidden_when_nothing_needs_attention(user: User) -> None:
+    _seed_job()
+
+    await user.open("/")
+
+    await user.should_not_see(marker="attention-banner")
+
+
+async def test_banner_clears_after_marking_applied(user: User) -> None:
+    _seed_stale_job(15)
+    await user.open("/")
+    await user.should_see("added 15 days ago, not applied")
+
+    user.find(kind=ui.checkbox, content="Applied").click()
+
+    await user.should_not_see(marker="attention-banner")
+
+
+async def test_banner_toggle_hides_and_persists(user: User) -> None:
+    _seed_stale_job(15)
+    await user.open("/")
+    await user.should_see(marker="attention-banner")
+
+    user.find(marker="settings-button").click()
+    user.find(marker="attention-banner-toggle").click()
+
+    await user.should_not_see(marker="attention-banner")
+    assert db.get_setting("attention_notice") == "off"
+
+    await user.open("/")
+    await user.should_not_see(marker="attention-banner")
+
+
 async def test_salary_filter_narrows_status_lists(user: User) -> None:
     db.init_db()
     db.add_job("https://example.com/unknown", "Unknown Salary", "Acme", "Remote", "Body")
@@ -1164,6 +1241,37 @@ def test_deadline_text_relative_phrases() -> None:
     assert app._deadline_text("2026-10-08", today) == "— is today"
     assert app._deadline_text("2026-10-07", today) == "— passed 1 day ago"
     assert app._deadline_text("2026-10-06", today) == "— passed 2 days ago"
+
+
+def test_attention_items_orders_deadlines_before_staleness() -> None:
+    today = date(2026, 10, 8)
+    thresholds = attention.Thresholds(21, 10, 7)
+
+    def entry(job_id: int, **overrides: object) -> db.Job:
+        row: dict[str, object] = {
+            "id": job_id,
+            "applied": 0,
+            "interview": 0,
+            "rejected": 0,
+            "date_added": "2026-10-01 09:00:00",
+            "date_applied": None,
+            "date_interview": None,
+            "date_rejected": None,
+            "deadline": None,
+        }
+        row.update(overrides)
+        return cast(db.Job, row)
+
+    stale_older = entry(1, date_added="2020-01-01 09:00:00")
+    stale_newer = entry(2, date_added="2025-06-01 09:00:00")
+    dated_soon = entry(3, deadline="2026-10-10")
+    dated_later = entry(4, deadline="2026-10-14")
+
+    items = app._attention_items(
+        [stale_newer, dated_later, stale_older, dated_soon], thresholds, today=today
+    )
+
+    assert [job["id"] for job, _reasons in items] == [3, 4, 1, 2]
 
 
 async def test_card_shows_days_since_applied(user: User) -> None:

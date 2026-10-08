@@ -50,11 +50,16 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   backup_dir = "backups"
   backup_keep = 14
   backup_on_start = true
+  stale_applied_days = 21
+  stale_unapplied_days = 10
+  deadline_warning_days = 7
   ```
 
 - **Environment variables:** `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
   `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`,
-  `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`.
+  `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`,
+  `CURSUS_STALE_APPLIED_DAYS`, `CURSUS_STALE_UNAPPLIED_DAYS`,
+  `CURSUS_DEADLINE_WARNING_DAYS`.
 - **`cursustrace run` flags:** `--host`, `--port`, `--reload/--no-reload`,
   `--show/--no-show`, `--css PATH`, `--config PATH`.
 - **Group flag (all commands):** `--log-level`, e.g.
@@ -114,6 +119,16 @@ Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
 `validThrough` date or type it as an ISO date like `2026-12-31`.
 
+The dashboard opens with a **needs-attention banner** whenever any position is
+stale or has an imminent deadline: applied with no response for
+`stale_applied_days` (default `21`), unapplied and untouched for
+`stale_unapplied_days` (default `10`), or a deadline due within
+`deadline_warning_days` (default `7`) — already-overdue deadlines count too.
+Entries with deadlines come first (soonest or most overdue first), then the
+longest-silent stages; each links to its position with the reason, and the
+banner clears itself as soon as positions move on. Switch it off under the
+settings drawer's Notifications section (the choice persists).
+
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
 your CV in Markdown as four sections — Summary, Work History, Education, and
 Skills — with a live preview combining them in export order. Your profile and CV
@@ -168,6 +183,11 @@ echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
 # list stored positions (repeatable --tag filters match any tag)
 uv run cursustrace list --status applied --json
 uv run cursustrace list --tag remote --tag startup --json
+
+# only positions needing attention: stale stage or deadline in the warning
+# window (composes with --status/--tag/etc.; text output appends the reasons)
+uv run cursustrace list --attention
+uv run cursustrace list --attention --status applied --json
 
 # sort (newest, oldest, company, company_desc, status) and paginate
 uv run cursustrace list --sort company --limit 50 --json

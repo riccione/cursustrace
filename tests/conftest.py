@@ -40,7 +40,14 @@ async def user(
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(config, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
-    for name in ("CURSUS_BACKUP_DIR", "CURSUS_BACKUP_KEEP", "CURSUS_BACKUP_ON_START"):
+    for name in (
+        "CURSUS_BACKUP_DIR",
+        "CURSUS_BACKUP_KEEP",
+        "CURSUS_BACKUP_ON_START",
+        "CURSUS_STALE_APPLIED_DAYS",
+        "CURSUS_STALE_UNAPPLIED_DAYS",
+        "CURSUS_DEADLINE_WARNING_DAYS",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(scraper, "scrape_job", fake_scrape)
     async with user_simulation(main_file=APP_PATH) as simulated_user:
