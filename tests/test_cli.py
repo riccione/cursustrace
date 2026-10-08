@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import json
+import time
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -36,6 +38,9 @@ _CURSUS_ENV = (
     "CURSUS_BACKUP_DIR",
     "CURSUS_BACKUP_KEEP",
     "CURSUS_BACKUP_ON_START",
+    "CURSUS_STALE_APPLIED_DAYS",
+    "CURSUS_STALE_UNAPPLIED_DAYS",
+    "CURSUS_DEADLINE_WARNING_DAYS",
 )
 
 
@@ -582,6 +587,130 @@ def test_list_text_appends_deadline(runner: CliRunner) -> None:
     assert result.exit_code == 0
     assert "⏰ 2026-12-31" in result.output
     assert result.output.count("⏰") == 1
+
+
+def _today() -> date:
+    now = time.localtime()
+    return date(now.tm_year, now.tm_mon, now.tm_mday)
+
+
+def _days_ago_stamp(days: int) -> str:
+    return (_today() - timedelta(days=days)).strftime("%Y-%m-%d 09:00:00")
+
+
+def _applied_days_ago(url: str, days: int) -> int:
+    job_id = db.add_job(url, "Quiet", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "applied")
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_applied = ? WHERE id = ?", (_days_ago_stamp(days), job_id)
+        )
+    return job_id
+
+
+def test_list_attention_filters_stale_applied(runner: CliRunner) -> None:
+    db.init_db()
+    stale = _applied_days_ago("https://a.com/1", 25)
+    _applied_days_ago("https://a.com/2", 5)
+
+    result = runner.invoke(cli_module.cli, ["list", "--attention", "--json"])
+
+    assert result.exit_code == 0
+    assert [job["id"] for job in json.loads(result.output)] == [stale]
+
+
+def test_list_attention_filters_stale_unapplied_and_deadlines(runner: CliRunner) -> None:
+    db.init_db()
+    sitting = db.add_job("https://a.com/1", "Sitting", "Acme", "Remote", "Body")
+    assert sitting is not None
+    db.add_job("https://a.com/2", "Recent", "Beta", "Remote", "Body")
+    dated = db.add_job(
+        "https://a.com/3",
+        "Dated",
+        "Gamma",
+        "Remote",
+        "Body",
+        deadline=(_today() + timedelta(days=3)).isoformat(),
+    )
+    assert dated is not None
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET date_added = ? WHERE id = ?", (_days_ago_stamp(15), sitting))
+
+    result = runner.invoke(cli_module.cli, ["list", "--attention", "--json"])
+
+    ids = [job["id"] for job in json.loads(result.output)]
+    assert sorted(ids) == sorted([sitting, dated])
+
+
+def test_list_attention_composes_with_status_filter(runner: CliRunner) -> None:
+    db.init_db()
+    stale_applied = _applied_days_ago("https://a.com/1", 25)
+    sitting = db.add_job("https://a.com/2", "Sitting", "Acme", "Remote", "Body")
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET date_added = ? WHERE id = ?", (_days_ago_stamp(15), sitting))
+
+    result = runner.invoke(cli_module.cli, ["list", "--attention", "--status", "applied", "--json"])
+
+    assert [job["id"] for job in json.loads(result.output)] == [stale_applied]
+
+
+def test_list_attention_appends_reasons_to_text(runner: CliRunner) -> None:
+    db.init_db()
+    _applied_days_ago("https://a.com/1", 25)
+    db.add_job(
+        "https://a.com/2",
+        "Dated",
+        "Beta",
+        "Remote",
+        "Body",
+        deadline=(_today() + timedelta(days=3)).isoformat(),
+    )
+    db.add_job("https://a.com/3", "Fresh", "Gamma", "Remote", "Body")
+
+    result = runner.invoke(cli_module.cli, ["list", "--attention"])
+
+    lines = result.output.splitlines()
+    applied_line = next(line for line in lines if "Quiet" in line)
+    assert "[applied]" in applied_line
+    assert applied_line.endswith("· no response in 25 days")
+    dated_line = next(line for line in lines if "Dated" in line)
+    assert "⏰" in dated_line
+    assert dated_line.endswith("· deadline in 3 days")
+    assert "Fresh" not in result.output
+
+
+def test_list_attention_empty_message(runner: CliRunner) -> None:
+    db.init_db()
+
+    result = runner.invoke(cli_module.cli, ["list", "--attention"])
+
+    assert result.output.strip() == "Nothing needs attention."
+
+
+def test_list_attention_json_rows_stay_import_compatible(runner: CliRunner) -> None:
+    db.init_db()
+    _applied_days_ago("https://a.com/1", 25)
+
+    result = runner.invoke(cli_module.cli, ["list", "--attention", "--json"])
+
+    rows = json.loads(result.output)
+    assert len(rows) == 1
+    assert "reasons" not in rows[0]
+    assert "deadline" in rows[0]
+
+
+def test_list_attention_respects_env_thresholds(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    stale = _applied_days_ago("https://a.com/1", 5)
+    _applied_days_ago("https://a.com/2", 2)
+    monkeypatch.setenv("CURSUS_STALE_APPLIED_DAYS", "3")
+
+    result = runner.invoke(cli_module.cli, ["list", "--attention", "--json"])
+
+    assert [job["id"] for job in json.loads(result.output)] == [stale]
 
 
 def test_list_filters_by_status(runner: CliRunner) -> None:
