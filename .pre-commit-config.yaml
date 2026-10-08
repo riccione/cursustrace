@@ -1,11 +1,17 @@
+---
 default_stages: [pre-commit]
+
+# Exclude markdown and YAML files globally from all hooks
+exclude: '^.*\.(md|yaml|yml)$'
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.8
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
+
   - repo: local
     hooks:
       - id: pytest
@@ -13,4 +19,4 @@ repos:
         entry: uv run pytest
         language: system
         pass_filenames: false
-        always_run: true
+        files: '\.py$'  # Runs ONLY when .py files are modified
