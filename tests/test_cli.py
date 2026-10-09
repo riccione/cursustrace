@@ -1014,6 +1014,7 @@ def test_stats(runner: CliRunner) -> None:
         "applied": 1,
         "interview": 0,
         "rejected": 0,
+        "outdated": 0,
     }
 
     human_result = runner.invoke(cli_module.cli, ["stats"])

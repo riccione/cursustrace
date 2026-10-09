@@ -21,6 +21,7 @@ def _job(**overrides: object) -> db.Job:
         "applied": 0,
         "interview": 0,
         "rejected": 0,
+        "outdated": 0,
         "date_added": "2026-10-01 09:00:00",
         "date_applied": None,
         "date_interview": None,

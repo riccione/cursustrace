@@ -32,10 +32,12 @@ CREATE TABLE IF NOT EXISTS jobs (
     applied INTEGER DEFAULT 0,
     interview INTEGER DEFAULT 0,
     rejected INTEGER DEFAULT 0,
+    outdated INTEGER DEFAULT 0,
     date_added TEXT NOT NULL,
     date_applied TEXT,
     date_interview TEXT,
     date_rejected TEXT,
+    date_outdated TEXT,
     applied_comment TEXT,
     interview_comment TEXT,
     rejected_comment TEXT,
@@ -120,10 +122,12 @@ class Job(TypedDict):
     applied: int
     interview: int
     rejected: int
+    outdated: int
     date_added: str
     date_applied: str | None
     date_interview: str | None
     date_rejected: str | None
+    date_outdated: str | None
     applied_comment: str | None
     interview_comment: str | None
     rejected_comment: str | None
@@ -136,7 +140,7 @@ class Job(TypedDict):
     fingerprint: str | None
 
 
-JobStatus = Literal["unapplied", "applied", "interview", "rejected"]
+JobStatus = Literal["unapplied", "applied", "interview", "rejected", "outdated"]
 JobFlag = Literal["applied", "interview", "rejected"]
 
 
@@ -155,6 +159,8 @@ def job_status(job: Job) -> JobStatus:
         return "interview"
     if job["rejected"]:
         return "rejected"
+    if job["outdated"]:
+        return "outdated"
     if job["applied"]:
         return "applied"
     return "unapplied"
@@ -167,6 +173,7 @@ STATUS_ORDER: dict[JobStatus, int] = {
     "applied": 1,
     "interview": 2,
     "rejected": 3,
+    "outdated": 4,
 }
 
 
@@ -239,8 +246,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for column, definition in (
         ("interview", "INTEGER DEFAULT 0"),
         ("rejected", "INTEGER DEFAULT 0"),
+        ("outdated", "INTEGER DEFAULT 0"),
         ("date_interview", "TEXT"),
         ("date_rejected", "TEXT"),
+        ("date_outdated", "TEXT"),
         ("applied_comment", "TEXT"),
         ("interview_comment", "TEXT"),
         ("rejected_comment", "TEXT"),
@@ -495,6 +504,15 @@ def get_events(job_id: int) -> list[Event]:
     return [cast(Event, dict(row)) for row in rows]
 
 
+def job_ids_with_status_event(status: JobStatus) -> set[int]:
+    """Return the ids of every job whose event log contains this status."""
+    with closing(get_connection()) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT job_id FROM events WHERE status = ?", (status,)
+        ).fetchall()
+    return {int(row[0]) for row in rows}
+
+
 def set_job_status(job_id: int, status: JobStatus) -> None:
     """Move a job to a pipeline stage, stamping its date and preserving earlier ones."""
     with closing(get_connection()) as conn:
@@ -505,28 +523,37 @@ def set_job_status(job_id: int, status: JobStatus) -> None:
         previous = job_status(cast(Job, dict(row)))
         now = _now()
         if status == "unapplied":
-            applied = interview = rejected = 0
-            date_applied = date_interview = date_rejected = None
+            applied = interview = rejected = outdated = 0
+            date_applied = date_interview = date_rejected = date_outdated = None
         else:
             applied = 1 if status == "applied" else 0
             interview = 1 if status == "interview" else 0
             rejected = 1 if status == "rejected" else 0
-            date_applied = row["date_applied"] or now
+            outdated = 1 if status == "outdated" else 0
+            if status == "outdated":
+                # Parking must never invent an application date.
+                date_applied = row["date_applied"]
+            else:
+                date_applied = row["date_applied"] or now
             date_interview = now if status == "interview" else None
             date_rejected = now if status == "rejected" else None
+            date_outdated = now if status == "outdated" else None
             if status == "rejected":
                 date_interview = row["date_interview"]
 
         conn.execute(
-            "UPDATE jobs SET applied = ?, interview = ?, rejected = ?, "
-            "date_applied = ?, date_interview = ?, date_rejected = ? WHERE id = ?",
+            "UPDATE jobs SET applied = ?, interview = ?, rejected = ?, outdated = ?, "
+            "date_applied = ?, date_interview = ?, date_rejected = ?, date_outdated = ? "
+            "WHERE id = ?",
             (
                 applied,
                 interview,
                 rejected,
+                outdated,
                 date_applied,
                 date_interview,
                 date_rejected,
+                date_outdated,
                 job_id,
             ),
         )
@@ -570,13 +597,15 @@ def get_jobs(status: JobStatus | None = None) -> list[Job]:
     query = "SELECT * FROM jobs"
     params: tuple[int, ...] = ()
     if status == "unapplied":
-        query += " WHERE applied = 0 AND interview = 0 AND rejected = 0"
+        query += " WHERE applied = 0 AND interview = 0 AND rejected = 0 AND outdated = 0"
     elif status == "applied":
         query += " WHERE applied = 1"
     elif status == "interview":
         query += " WHERE interview = 1"
     elif status == "rejected":
         query += " WHERE rejected = 1"
+    elif status == "outdated":
+        query += " WHERE outdated = 1"
     query += " ORDER BY id DESC"
 
     with closing(get_connection()) as conn:
@@ -591,18 +620,21 @@ def job_counts() -> dict[str, int]:
             "SELECT COUNT(*) AS total, "
             "COALESCE(SUM(applied), 0) AS applied, "
             "COALESCE(SUM(interview), 0) AS interview, "
-            "COALESCE(SUM(rejected), 0) AS rejected FROM jobs"
+            "COALESCE(SUM(rejected), 0) AS rejected, "
+            "COALESCE(SUM(outdated), 0) AS outdated FROM jobs"
         ).fetchone()
     total = int(row["total"])
     applied = int(row["applied"])
     interview = int(row["interview"])
     rejected = int(row["rejected"])
+    outdated = int(row["outdated"])
     return {
         "total": total,
-        "unapplied": total - applied - interview - rejected,
+        "unapplied": total - applied - interview - rejected - outdated,
         "applied": applied,
         "interview": interview,
         "rejected": rejected,
+        "outdated": outdated,
     }
 
 
@@ -621,14 +653,16 @@ def pipeline_funnel() -> dict[str, int]:
 
     Stages are counted from the event log so they survive unmarking a
     status (which clears ``date_applied``): ``applied`` counts jobs that
-    ever left the unapplied stage, ``response`` jobs that reached an
+    ever reached a real stage (applied, interview, or rejected — parking
+    in outdated does not count), ``response`` jobs that reached an
     interview or a rejection, and ``interview`` jobs that reached an
     interview. The subset relation guarantees a non-increasing funnel.
     """
     with closing(get_connection()) as conn:
         row = conn.execute(
             "SELECT "
-            "COUNT(DISTINCT CASE WHEN status != 'unapplied' THEN job_id END) AS applied, "
+            "COUNT(DISTINCT CASE WHEN status IN ('applied', 'interview', 'rejected') "
+            "THEN job_id END) AS applied, "
             "COUNT(DISTINCT CASE WHEN status IN ('interview', 'rejected') "
             "THEN job_id END) AS response, "
             "COUNT(DISTINCT CASE WHEN status = 'interview' THEN job_id END) AS interview "

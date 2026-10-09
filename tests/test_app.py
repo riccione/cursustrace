@@ -1334,6 +1334,7 @@ def test_attention_items_orders_deadlines_before_staleness() -> None:
             "applied": 0,
             "interview": 0,
             "rejected": 0,
+            "outdated": 0,
             "date_added": "2026-10-01 09:00:00",
             "date_applied": None,
             "date_interview": None,

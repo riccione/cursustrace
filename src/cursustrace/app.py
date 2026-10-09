@@ -337,7 +337,7 @@ def _render_job_card(
         ui.link("View full details", f"/job/{job['id']}")
         current = db.job_status(job)
         _render_status_controls(job, current, refresh)
-        if current != "unapplied":
+        if current in ("applied", "interview", "rejected"):
             _render_comment_box(job, current)
         _render_delete_controls(job, refresh)
 
