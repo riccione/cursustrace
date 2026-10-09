@@ -150,6 +150,34 @@ def test_invalid_log_level_raises(config_file: Path, value: str) -> None:
         config.load_settings(env={"CURSUS_LOG_LEVEL": value})
 
 
+def test_render_defaults_to_auto(config_file: Path) -> None:
+    assert config.load_settings(env={}).render == "auto"
+
+
+def test_render_file_overrides_default(config_file: Path) -> None:
+    config_file.write_text('[cursustrace]\nrender = "never"\n', encoding="utf-8")
+
+    assert config.load_settings(env={}).render == "never"
+
+
+def test_render_env_and_flag_override(config_file: Path) -> None:
+    config_file.write_text('[cursustrace]\nrender = "never"\n', encoding="utf-8")
+
+    settings = config.load_settings(render="auto", env={"CURSUS_RENDER": "never"})
+
+    assert settings.render == "auto"
+
+
+def test_render_is_case_insensitive(config_file: Path) -> None:
+    assert config.load_settings(env={"CURSUS_RENDER": "NEVER"}).render == "never"
+
+
+@pytest.mark.parametrize("value", ["sometimes", "", "2"])
+def test_invalid_render_raises(config_file: Path, value: str) -> None:
+    with pytest.raises(ConfigError, match="render"):
+        config.load_settings(env={"CURSUS_RENDER": value})
+
+
 @pytest.mark.parametrize("value", ["-1", "abc"])
 def test_invalid_log_retention_raises(config_file: Path, value: str) -> None:
     with pytest.raises(ConfigError, match="log_retention_days"):

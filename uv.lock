@@ -797,6 +797,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "click" },
     { name = "curl-cffi" },
+    { name = "httpx" },
     { name = "markdown-it-py" },
     { name = "mcp" },
     { name = "nicegui" },
@@ -821,6 +822,7 @@ requires-dist = [
     { name = "beautifulsoup4" },
     { name = "click", specifier = ">=8.5.0" },
     { name = "curl-cffi", specifier = "==0.16.3" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "markdown-it-py", specifier = ">=4.2.0" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "nicegui", specifier = ">=3.17.1" },
@@ -1118,8 +1120,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [

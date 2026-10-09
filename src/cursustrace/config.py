@@ -26,6 +26,7 @@ ENV_BACKUP_ON_START = "CURSUS_BACKUP_ON_START"
 ENV_STALE_APPLIED_DAYS = "CURSUS_STALE_APPLIED_DAYS"
 ENV_STALE_UNAPPLIED_DAYS = "CURSUS_STALE_UNAPPLIED_DAYS"
 ENV_DEADLINE_WARNING_DAYS = "CURSUS_DEADLINE_WARNING_DAYS"
+ENV_RENDER = "CURSUS_RENDER"
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
@@ -38,8 +39,10 @@ DEFAULT_BACKUP_ON_START = True
 DEFAULT_STALE_APPLIED_DAYS = 21
 DEFAULT_STALE_UNAPPLIED_DAYS = 10
 DEFAULT_DEADLINE_WARNING_DAYS = 7
+DEFAULT_RENDER = "auto"
 LOG_DIR = Path("logs")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
+RENDER_MODES = ("auto", "never")
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
@@ -62,6 +65,7 @@ class Settings:
     stale_applied_days: int = DEFAULT_STALE_APPLIED_DAYS
     stale_unapplied_days: int = DEFAULT_STALE_UNAPPLIED_DAYS
     deadline_warning_days: int = DEFAULT_DEADLINE_WARNING_DAYS
+    render: str = DEFAULT_RENDER
     config_file: Path | None = None
 
 
@@ -80,6 +84,7 @@ def load_settings(
     stale_applied_days: int | str | None = None,
     stale_unapplied_days: int | str | None = None,
     deadline_warning_days: int | str | None = None,
+    render: str | None = None,
     config_path: str | Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Settings:
@@ -101,6 +106,7 @@ def load_settings(
         ("stale_applied_days", ENV_STALE_APPLIED_DAYS),
         ("stale_unapplied_days", ENV_STALE_UNAPPLIED_DAYS),
         ("deadline_warning_days", ENV_DEADLINE_WARNING_DAYS),
+        ("render", ENV_RENDER),
     ):
         raw = environ.get(env_name)
         if raw is not None:
@@ -132,6 +138,8 @@ def load_settings(
         values["stale_unapplied_days"] = stale_unapplied_days
     if deadline_warning_days is not None:
         values["deadline_warning_days"] = deadline_warning_days
+    if render is not None:
+        values["render"] = render
 
     return Settings(
         host=_as_str(values, "host", DEFAULT_HOST),
@@ -155,6 +163,7 @@ def load_settings(
         deadline_warning_days=_as_deadline_warning_days(
             values.get("deadline_warning_days", DEFAULT_DEADLINE_WARNING_DAYS)
         ),
+        render=_as_render(values, "render", DEFAULT_RENDER),
         config_file=config_file,
     )
 
@@ -218,6 +227,15 @@ def _as_log_level(values: dict[str, object], key: str, default: str) -> str:
     if isinstance(value, str) and value.strip().lower() in LOG_LEVELS:
         return value.strip().lower()
     raise ConfigError(f"'{key}' must be one of: {', '.join(LOG_LEVELS)}")
+
+
+def _as_render(values: dict[str, object], key: str, default: str) -> str:
+    if key not in values:
+        return default
+    value = values[key]
+    if isinstance(value, str) and value.strip().lower() in RENDER_MODES:
+        return value.strip().lower()
+    raise ConfigError(f"'{key}' must be one of: {', '.join(RENDER_MODES)}")
 
 
 def _non_negative_int(key: str) -> Callable[[object], int]:
