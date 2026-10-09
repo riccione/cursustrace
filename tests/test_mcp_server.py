@@ -429,6 +429,26 @@ async def test_update_status_with_and_without_comment() -> None:
         assert "No position with id" in message
 
 
+async def test_update_status_outdated_and_list_filter() -> None:
+    job_id = seed("https://example.com/jobs/outdated")
+
+    async with Client(mcp) as client:
+        payload = await ok(client, "update_status", {"job_id": job_id, "status": "outdated"})
+        assert payload == {"id": job_id, "status": "outdated", "comment_set": False}
+
+        listed = await ok(client, "list_positions", {"status": "outdated"})
+        assert [position["id"] for position in listed["positions"]] == [job_id]
+        assert listed["positions"][0]["status"] == "outdated"
+
+        message = await err(
+            client, "update_status", {"job_id": job_id, "status": "outdated", "comment": "stale"}
+        )
+        assert "comment is not allowed for outdated" in message
+
+        message = await err(client, "list_positions", {"status": "maybe"})
+        assert "outdated" in message
+
+
 async def test_set_tags_adds_and_removes_case_insensitively() -> None:
     job_id = seed("https://example.com/jobs/9")
     db.set_job_tags(job_id, ["QA"])

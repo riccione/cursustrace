@@ -458,6 +458,46 @@ async def test_checkbox_states_rejected_from_interview(user: User) -> None:
     assert _checkbox(user, "Rejected").value is True
 
 
+async def test_checkbox_states_outdated(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "outdated")
+    await user.open("/")
+
+    assert _checkbox(user, "Outdated").enabled is False
+    assert _checkbox(user, "Outdated").value is True
+    assert _checkbox(user, "Applied").enabled is True
+    assert _checkbox(user, "Applied").value is False
+    assert _checkbox(user, "Interview").enabled is True
+    assert _checkbox(user, "Rejected").enabled is True
+
+
+async def test_outdated_checkbox_parks_position(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    user.find(kind=ui.checkbox, content="Outdated").click()
+    await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
+
+    assert db.job_status(db.get_jobs()[0]) == "outdated"
+    await user.should_see("No unapplied positions yet.")
+    assert _checkbox(user, "Outdated").value is True
+
+
+async def test_applied_checkbox_restores_parked_position(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "outdated")
+    await user.open("/")
+
+    user.find(kind=ui.checkbox, content="Applied").click()
+    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
+
+    job = db.get_jobs()[0]
+    assert db.job_status(job) == "applied"
+    assert job["date_applied"] is not None
+    assert job["date_outdated"] is None
+
+
 async def test_delete_requires_confirmation(user: User) -> None:
     await user.open("/")
     await _scan(user)
@@ -719,6 +759,53 @@ async def test_banner_toggle_hides_and_persists(user: User) -> None:
     await user.should_not_see(marker="attention-banner")
 
 
+def _seed_stale_applied_job(days: int) -> int:
+    db.init_db()
+    job_id = db.add_job(JOB_URL, "Silent Lead", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "applied")
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_applied = ? WHERE id = ?", (_days_ago_stamp(days), job_id)
+        )
+    return job_id
+
+
+async def test_banner_warns_before_parking(user: User) -> None:
+    _seed_stale_applied_job(25)
+
+    await user.open("/")
+
+    await user.should_see("1 position needs attention")
+    assert db.get_jobs()[0]["outdated"] == 0
+    assert db.job_status(db.get_jobs()[0]) == "applied"
+
+
+async def test_auto_parks_stale_applied_position(user: User) -> None:
+    _seed_stale_applied_job(35)
+
+    await user.open("/")
+
+    await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
+    assert db.job_status(db.get_jobs()[0]) == "outdated"
+    await user.should_not_see(marker="attention-banner")
+
+
+async def test_manual_restore_wins_over_parking(user: User) -> None:
+    _seed_stale_applied_job(35)
+
+    await user.open("/")
+    await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
+
+    user.find(kind=ui.checkbox, content="Applied").click()
+    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
+
+    await user.open("/")
+    await user.should_see("Silent Lead")
+    assert db.job_status(db.get_jobs()[0]) == "applied"
+    assert db.get_jobs()[0]["outdated"] == 0
+
+
 async def test_salary_filter_narrows_status_lists(user: User) -> None:
     db.init_db()
     db.add_job("https://example.com/unknown", "Unknown Salary", "Acme", "Remote", "Body")
@@ -926,6 +1013,17 @@ async def test_dashboard_lists_status_tabs(user: User) -> None:
     await user.should_see("No applied positions yet.")
     await user.should_see("No interview positions yet.")
     await user.should_see("No rejected positions yet.")
+    await user.should_see("No outdated positions yet.")
+
+
+async def test_dashboard_shows_parked_position(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "outdated")
+
+    await user.open("/")
+
+    await user.should_see("Senior Engineer")
+    await user.should_see("No unapplied positions yet.")
 
 
 async def test_company_search_filters_cards(user: User) -> None:
@@ -1033,6 +1131,7 @@ async def test_statistics_tab_shows_counts(user: User) -> None:
     assert stat("applied") == "1"
     assert stat("interview") == "0"
     assert stat("rejected") == "1"
+    assert stat("outdated") == "0"
 
 
 async def test_statistics_tab_shows_salary_chart(user: User) -> None:
@@ -1092,6 +1191,7 @@ async def test_statistics_status_pie(user: User) -> None:
         {"name": "Applied", "value": 1},
         {"name": "Interview", "value": 0},
         {"name": "Rejected", "value": 1},
+        {"name": "Outdated", "value": 0},
     ]
 
 
@@ -1214,6 +1314,19 @@ async def test_details_view_shows_tracking_fields(user: User) -> None:
     await user.should_see("**Added:**")
 
 
+async def test_detail_shows_outdated_stage(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    db.set_job_status(job_id, "outdated")
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("**Status:** Outdated")
+    await user.should_see("**Outdated:**")
+    checkbox = _checkbox(user, "Outdated")
+    assert checkbox.value is True
+    assert checkbox.enabled is False
+
+
 async def test_details_view_unknown_id_warns(user: User) -> None:
     await user.open("/job/999")
 
@@ -1334,6 +1447,7 @@ def test_attention_items_orders_deadlines_before_staleness() -> None:
             "applied": 0,
             "interview": 0,
             "rejected": 0,
+            "outdated": 0,
             "date_added": "2026-10-01 09:00:00",
             "date_applied": None,
             "date_interview": None,

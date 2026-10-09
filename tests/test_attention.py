@@ -21,6 +21,7 @@ def _job(**overrides: object) -> db.Job:
         "applied": 0,
         "interview": 0,
         "rejected": 0,
+        "outdated": 0,
         "date_added": "2026-10-01 09:00:00",
         "date_applied": None,
         "date_interview": None,
@@ -33,12 +34,15 @@ def _job(**overrides: object) -> db.Job:
 
 def test_from_settings_maps_each_threshold() -> None:
     settings = config.Settings(
-        stale_applied_days=14, stale_unapplied_days=5, deadline_warning_days=3
+        stale_applied_days=14,
+        stale_unapplied_days=5,
+        deadline_warning_days=3,
+        outdated_after_days=45,
     )
 
     thresholds = attention.Thresholds.from_settings(settings)
 
-    assert thresholds == attention.Thresholds(14, 5, 3)
+    assert thresholds == attention.Thresholds(14, 5, 3, 45)
 
 
 def test_applied_staleness_boundary() -> None:
@@ -161,3 +165,48 @@ def test_parse_day_handles_missing_and_bad_values() -> None:
     assert attention._parse_day("") is None
     assert attention._parse_day("not-a-date") is None
     assert attention._parse_day("2026-10-08 09:30:00") == TODAY
+
+
+def test_is_outdated_applied_is_graduated() -> None:
+    warned_only = _job(applied=1, date_applied="2026-09-13 10:00:00")  # 25 days
+    parked = _job(applied=1, date_applied="2026-09-08 10:00:00")  # 30 days
+
+    assert attention.reasons_for(warned_only, THRESHOLDS, today=TODAY)
+    assert not attention.is_outdated(warned_only, THRESHOLDS, today=TODAY)
+    assert attention.is_outdated(parked, THRESHOLDS, today=TODAY)
+
+
+def test_is_outdated_unapplied_boundary() -> None:
+    added_29_days_ago = _job(date_added="2026-09-09 09:00:00")
+    added_30_days_ago = _job(date_added="2026-09-08 09:00:00")
+
+    assert not attention.is_outdated(added_29_days_ago, THRESHOLDS, today=TODAY)
+    assert attention.is_outdated(added_30_days_ago, THRESHOLDS, today=TODAY)
+
+
+def test_is_outdated_waits_for_the_stage_threshold_too() -> None:
+    thresholds = attention.Thresholds(45, 10, 7, outdated_after_days=30)
+    stale_but_young = _job(applied=1, date_applied="2026-08-29 10:00:00")  # 40 days
+    past_both = _job(applied=1, date_applied="2026-08-24 10:00:00")  # 45 days
+
+    assert not attention.is_outdated(stale_but_young, thresholds, today=TODAY)
+    assert attention.is_outdated(past_both, thresholds, today=TODAY)
+
+
+def test_is_outdated_skips_other_stages() -> None:
+    old = "2020-01-01 09:00:00"
+    in_interview = _job(applied=1, interview=1, date_applied=old, date_interview=old)
+    rejected = _job(applied=1, rejected=1, date_applied=old, date_rejected=old)
+    parked = _job(outdated=1)
+
+    assert not attention.is_outdated(in_interview, THRESHOLDS, today=TODAY)
+    assert not attention.is_outdated(rejected, THRESHOLDS, today=TODAY)
+    assert not attention.is_outdated(parked, THRESHOLDS, today=TODAY)
+
+
+def test_is_outdated_handles_missing_and_bad_dates() -> None:
+    no_date = _job(applied=1, date_applied=None)
+    bad_date = _job(applied=1, date_applied="not-a-date")
+
+    assert not attention.is_outdated(no_date, THRESHOLDS, today=TODAY)
+    assert not attention.is_outdated(bad_date, THRESHOLDS, today=TODAY)

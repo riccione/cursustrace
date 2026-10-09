@@ -41,12 +41,14 @@ STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
     ("applied", "✅ Applied Positions", "No applied positions yet."),
     ("interview", "🗣️ Interview Positions", "No interview positions yet."),
     ("rejected", "❌ Rejected Positions", "No rejected positions yet."),
+    ("outdated", "🗄️ Outdated Positions", "No outdated positions yet."),
 )
 
-STATUS_CHECKBOXES: tuple[tuple[db.JobFlag, str], ...] = (
+STATUS_CHECKBOXES: tuple[tuple[db.JobFlag | Literal["outdated"], str], ...] = (
     ("applied", "Applied"),
     ("interview", "Interview"),
     ("rejected", "Rejected"),
+    ("outdated", "Outdated"),
 )
 
 STAT_CARDS: tuple[tuple[str, str], ...] = (
@@ -55,6 +57,7 @@ STAT_CARDS: tuple[tuple[str, str], ...] = (
     ("applied", "✅ Applied"),
     ("interview", "🗣️ Interview"),
     ("rejected", "❌ Rejected"),
+    ("outdated", "🗄️ Outdated"),
 )
 
 STATUS_NAMES: tuple[tuple[db.JobStatus, str], ...] = (
@@ -62,6 +65,7 @@ STATUS_NAMES: tuple[tuple[db.JobStatus, str], ...] = (
     ("applied", "Applied"),
     ("interview", "Interview"),
     ("rejected", "Rejected"),
+    ("outdated", "Outdated"),
 )
 
 FUNNEL_STAGES: tuple[tuple[str, str], ...] = (
@@ -138,6 +142,23 @@ def _attention_items(
     return sorted(flagged, key=lambda entry: _attention_sort_key(entry, today))
 
 
+def _park_stale_positions() -> None:
+    """Park stale unapplied/applied positions, at most once per job.
+
+    The graduated rule in attention.is_outdated requires both the stage's
+    staleness warning and outdated_after_days, so the banner always gets
+    to warn first. A job that ever carried an outdated event is skipped:
+    once the user pulls a position out of the parked stage it stays out.
+    """
+    thresholds = _attention_thresholds()
+    parked = db.job_ids_with_status_event("outdated")
+    for job in db.get_jobs():
+        if job["id"] in parked:
+            continue
+        if attention.is_outdated(job, thresholds):
+            db.set_job_status(job["id"], "outdated")
+
+
 def _render_attention_banner(container: ui.column) -> None:
     container.clear()
     if not _attention_banner_enabled():
@@ -185,29 +206,34 @@ def _apply_dark_mode() -> ui.dark_mode:
     return ui.dark_mode(value=_dark_mode_value(name))
 
 
-_DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobFlag]] = {
+_DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobStatus]] = {
     "unapplied": frozenset(),
     "applied": frozenset({"applied"}),
     "interview": frozenset({"applied", "interview"}),
     "rejected": frozenset({"applied", "interview"}),
+    "outdated": frozenset({"outdated"}),
 }
 
 
-def _checked_flags(job: db.Job) -> frozenset[db.JobFlag]:
+def _checked_flags(job: db.Job) -> frozenset[db.JobStatus]:
     status = db.job_status(job)
     if status == "applied":
         return frozenset({"applied"})
     if status == "interview":
         return frozenset({"applied", "interview"})
     if status == "rejected":
-        flags: set[db.JobFlag] = {"applied", "rejected"}
+        flags: set[db.JobStatus] = {"applied", "rejected"}
         if job["date_interview"]:
             flags.add("interview")
         return frozenset(flags)
+    if status == "outdated":
+        return frozenset({"outdated"})
     return frozenset()
 
 
-def _stage_comment(job: db.Job, stage: db.JobFlag) -> str:
+def _stage_comment(job: db.Job, stage: db.JobStatus) -> str:
+    if stage == "outdated":
+        return ""
     if stage == "applied":
         return job["applied_comment"] or ""
     if stage == "interview":
@@ -217,7 +243,7 @@ def _stage_comment(job: db.Job, stage: db.JobFlag) -> str:
 
 def _status_handler(
     job_id: int,
-    status: db.JobFlag,
+    status: db.JobStatus,
     refresh: Callable[[], None],
 ) -> Callable[[events.ValueChangeEventArguments[bool | None]], None]:
     def handler(event: events.ValueChangeEventArguments[bool | None]) -> None:
@@ -337,7 +363,7 @@ def _render_job_card(
         ui.link("View full details", f"/job/{job['id']}")
         current = db.job_status(job)
         _render_status_controls(job, current, refresh)
-        if current != "unapplied":
+        if current in ("applied", "interview", "rejected"):
             _render_comment_box(job, current)
         _render_delete_controls(job, refresh)
 
@@ -863,6 +889,8 @@ def _job_form_dialog(
         comment_inputs: dict[db.JobFlag, ui.textarea] = {}
         if with_comments:
             for stage, label in STATUS_CHECKBOXES:
+                if stage == "outdated":
+                    continue
                 comment_inputs[stage] = (
                     ui.textarea(
                         f"{label} comment",
@@ -1306,6 +1334,7 @@ def dashboard_page(request: Request) -> None:
         return (page_count, page, len(jobs))
 
     def refresh() -> None:
+        _park_stale_positions()
         if tag_filter_select is not None:
             names = db.list_tags()
             tag_filter_select.options = names
@@ -1678,6 +1707,8 @@ def job_detail_page(job_id: int) -> None:
                 ui.markdown(f"**Interview:** {job['date_interview']}")
             if job["date_rejected"]:
                 ui.markdown(f"**Rejected:** {job['date_rejected']}")
+            if job["date_outdated"]:
+                ui.markdown(f"**Outdated:** {job['date_outdated']}")
             for stage, label in STATUS_CHECKBOXES:
                 comment = _stage_comment(job, stage)
                 if comment:

@@ -251,6 +251,7 @@ def test_attention_threshold_defaults(config_file: Path) -> None:
     assert settings.stale_applied_days == 21
     assert settings.stale_unapplied_days == 10
     assert settings.deadline_warning_days == 7
+    assert settings.outdated_after_days == 30
 
 
 def test_attention_thresholds_file_overrides_defaults(config_file: Path) -> None:
@@ -258,7 +259,8 @@ def test_attention_thresholds_file_overrides_defaults(config_file: Path) -> None
         "[cursustrace]\n"
         "stale_applied_days = 14\n"
         "stale_unapplied_days = 5\n"
-        "deadline_warning_days = 3\n",
+        "deadline_warning_days = 3\n"
+        "outdated_after_days = 45\n",
         encoding="utf-8",
     )
 
@@ -267,6 +269,7 @@ def test_attention_thresholds_file_overrides_defaults(config_file: Path) -> None
     assert settings.stale_applied_days == 14
     assert settings.stale_unapplied_days == 5
     assert settings.deadline_warning_days == 3
+    assert settings.outdated_after_days == 45
 
 
 def test_attention_thresholds_env_and_flags_override(config_file: Path) -> None:
@@ -275,15 +278,18 @@ def test_attention_thresholds_env_and_flags_override(config_file: Path) -> None:
     settings = config.load_settings(
         stale_applied_days=30,
         deadline_warning_days=2,
+        outdated_after_days=60,
         env={
             "CURSUS_STALE_APPLIED_DAYS": "10",
             "CURSUS_STALE_UNAPPLIED_DAYS": "6",
+            "CURSUS_OUTDATED_AFTER_DAYS": "45",
         },
     )
 
     assert settings.stale_applied_days == 30
     assert settings.stale_unapplied_days == 6
     assert settings.deadline_warning_days == 2
+    assert settings.outdated_after_days == 60
 
 
 @pytest.mark.parametrize(
@@ -292,6 +298,7 @@ def test_attention_thresholds_env_and_flags_override(config_file: Path) -> None:
         ("CURSUS_STALE_APPLIED_DAYS", "stale_applied_days"),
         ("CURSUS_STALE_UNAPPLIED_DAYS", "stale_unapplied_days"),
         ("CURSUS_DEADLINE_WARNING_DAYS", "deadline_warning_days"),
+        ("CURSUS_OUTDATED_AFTER_DAYS", "outdated_after_days"),
     ],
 )
 def test_invalid_attention_threshold_raises(config_file: Path, env_name: str, key: str) -> None:

@@ -127,16 +127,19 @@ def test_get_jobs_status_filter(db_path: Path) -> None:
     _add("https://example.com/1", "Engineer One")
     _add("https://example.com/2", "Engineer Two")
     _add("https://example.com/3", "Engineer Three")
+    _add("https://example.com/4", "Engineer Four")
     jobs = db.get_jobs()
     db.set_job_status(jobs[0]["id"], "applied")
     db.set_job_status(jobs[1]["id"], "interview")
     db.set_job_status(jobs[2]["id"], "rejected")
+    db.set_job_status(jobs[3]["id"], "outdated")
 
-    assert [j["job_url"] for j in db.get_jobs(status="applied")] == ["https://example.com/3"]
-    assert [j["job_url"] for j in db.get_jobs(status="interview")] == ["https://example.com/2"]
-    assert [j["job_url"] for j in db.get_jobs(status="rejected")] == ["https://example.com/1"]
+    assert [j["job_url"] for j in db.get_jobs(status="applied")] == ["https://example.com/4"]
+    assert [j["job_url"] for j in db.get_jobs(status="interview")] == ["https://example.com/3"]
+    assert [j["job_url"] for j in db.get_jobs(status="rejected")] == ["https://example.com/2"]
+    assert [j["job_url"] for j in db.get_jobs(status="outdated")] == ["https://example.com/1"]
     assert db.get_jobs(status="unapplied") == []
-    assert len(db.get_jobs(status=None)) == 3
+    assert len(db.get_jobs(status=None)) == 4
 
 
 def test_search_jobs_matches_company_fuzzy(db_path: Path) -> None:
@@ -201,6 +204,7 @@ def _job(
     applied: bool = False,
     interview: bool = False,
     rejected: bool = False,
+    outdated: bool = False,
 ) -> db.Job:
     return {
         "id": job_id,
@@ -212,10 +216,12 @@ def _job(
         "applied": int(applied),
         "interview": int(interview),
         "rejected": int(rejected),
+        "outdated": int(outdated),
         "date_added": date_added,
         "date_applied": None,
         "date_interview": None,
         "date_rejected": None,
+        "date_outdated": None,
         "applied_comment": None,
         "interview_comment": None,
         "rejected_comment": None,
@@ -284,10 +290,11 @@ def test_sort_jobs_status_uses_pipeline_order() -> None:
         _job(3),
         _job(4, interview=True),
         _job(5, applied=True),
+        _job(6, outdated=True),
     ]
 
     statuses = [db.job_status(job) for job in db.sort_jobs(jobs, "status")]
-    assert statuses == ["unapplied", "applied", "applied", "interview", "rejected"]
+    assert statuses == ["unapplied", "applied", "applied", "interview", "rejected", "outdated"]
     applied_ids = [
         job["id"] for job in db.sort_jobs(jobs, "status") if db.job_status(job) == "applied"
     ]
@@ -311,13 +318,18 @@ def test_set_job_status_is_mutually_exclusive(db_path: Path) -> None:
 
     db.set_job_status(job_id, "interview")
     job = db.get_jobs()[0]
-    assert (job["applied"], job["interview"], job["rejected"]) == (0, 1, 0)
+    assert (job["applied"], job["interview"], job["rejected"], job["outdated"]) == (0, 1, 0, 0)
     assert job["date_interview"] is not None
 
     db.set_job_status(job_id, "rejected")
     job = db.get_jobs()[0]
-    assert (job["applied"], job["interview"], job["rejected"]) == (0, 0, 1)
+    assert (job["applied"], job["interview"], job["rejected"], job["outdated"]) == (0, 0, 1, 0)
     assert job["date_rejected"] is not None
+
+    db.set_job_status(job_id, "outdated")
+    job = db.get_jobs()[0]
+    assert (job["applied"], job["interview"], job["rejected"], job["outdated"]) == (0, 0, 0, 1)
+    assert job["date_outdated"] is not None
 
 
 def test_set_job_status_round_trip(db_path: Path) -> None:
@@ -378,6 +390,46 @@ def test_job_status_derives_stage(db_path: Path) -> None:
     db.set_job_status(job_id, "rejected")
     assert db.job_status(db.get_jobs()[0]) == "rejected"
 
+    db.set_job_status(job_id, "outdated")
+    assert db.job_status(db.get_jobs()[0]) == "outdated"
+
+
+def test_set_job_status_outdated_never_fabricates_application_date(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "outdated")
+
+    job = db.get_jobs()[0]
+    assert job["outdated"] == 1
+    assert job["date_applied"] is None
+    assert TIMESTAMP_RE.match(job["date_outdated"] or "")
+
+
+def test_set_job_status_outdated_preserves_application_date(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "applied")
+    date_applied = db.get_jobs()[0]["date_applied"]
+
+    db.set_job_status(job_id, "outdated")
+    parked = db.get_jobs()[0]
+    assert parked["date_applied"] == date_applied
+    assert TIMESTAMP_RE.match(parked["date_outdated"] or "")
+
+    db.set_job_status(job_id, "applied")
+    restored = db.get_jobs()[0]
+    assert restored["outdated"] == 0
+    assert restored["date_applied"] == date_applied
+    assert restored["date_outdated"] is None
+
+    db.set_job_status(job_id, "unapplied")
+    reset = db.get_jobs()[0]
+    assert reset["date_outdated"] is None
+
 
 def test_add_job_logs_creation_event(db_path: Path) -> None:
     db.init_db()
@@ -427,6 +479,22 @@ def test_set_job_status_unknown_id_logs_nothing(db_path: Path) -> None:
     with db.get_connection() as conn:
         count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     assert count == 0
+
+
+def test_job_ids_with_status_event(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    _add("https://example.com/2")
+    jobs = db.get_jobs()
+
+    assert db.job_ids_with_status_event("outdated") == set()
+
+    db.set_job_status(jobs[0]["id"], "applied")
+    db.set_job_status(jobs[0]["id"], "outdated")
+    db.set_job_status(jobs[1]["id"], "applied")
+
+    assert db.job_ids_with_status_event("outdated") == {jobs[0]["id"]}
+    assert db.job_ids_with_status_event("applied") == {jobs[0]["id"], jobs[1]["id"]}
 
 
 def test_delete_job_cascades_events(db_path: Path) -> None:
@@ -506,21 +574,25 @@ def test_job_counts(db_path: Path) -> None:
         "applied": 0,
         "interview": 0,
         "rejected": 0,
+        "outdated": 0,
     }
 
     db.add_job("https://a.com/1", "One", "Acme", "Remote", "desc")
     db.add_job("https://a.com/2", "Two", "Acme", "Remote", "desc")
     db.add_job("https://a.com/3", "Three", "Acme", "Remote", "desc")
+    db.add_job("https://a.com/4", "Four", "Acme", "Remote", "desc")
     jobs = db.get_jobs()
     db.set_job_status(jobs[0]["id"], "applied")
     db.set_job_status(jobs[1]["id"], "rejected")
+    db.set_job_status(jobs[2]["id"], "outdated")
 
     assert db.job_counts() == {
-        "total": 3,
+        "total": 4,
         "unapplied": 1,
         "applied": 1,
         "interview": 0,
         "rejected": 1,
+        "outdated": 1,
     }
 
 
@@ -584,6 +656,24 @@ def test_pipeline_funnel_keeps_history_after_unmark(db_path: Path) -> None:
         "added": 1,
         "applied": 1,
         "response": 1,
+        "interview": 0,
+    }
+
+
+def test_pipeline_funnel_does_not_count_parking_as_applied(db_path: Path) -> None:
+    db.init_db()
+    _add("https://a.com/1")
+    _add("https://a.com/2")
+    jobs = db.get_jobs()
+
+    db.set_job_status(jobs[0]["id"], "outdated")
+    db.set_job_status(jobs[1]["id"], "applied")
+    db.set_job_status(jobs[1]["id"], "outdated")
+
+    assert db.pipeline_funnel() == {
+        "added": 2,
+        "applied": 1,
+        "response": 0,
         "interview": 0,
     }
 
@@ -671,13 +761,16 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
     )
     assert jobs[0]["interview"] == 0
     assert jobs[0]["rejected"] == 0
+    assert jobs[0]["outdated"] == 0
     with db.get_connection() as conn:
         columns = set(_fingerprint_columns(conn))
     assert {
         "interview",
         "rejected",
+        "outdated",
         "date_interview",
         "date_rejected",
+        "date_outdated",
         "applied_comment",
         "interview_comment",
         "rejected_comment",

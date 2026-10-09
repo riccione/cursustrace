@@ -47,6 +47,7 @@ async def user(
         "CURSUS_STALE_APPLIED_DAYS",
         "CURSUS_STALE_UNAPPLIED_DAYS",
         "CURSUS_DEADLINE_WARNING_DAYS",
+        "CURSUS_OUTDATED_AFTER_DAYS",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(scraper, "scrape_job", fake_scrape)

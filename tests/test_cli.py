@@ -339,6 +339,13 @@ def test_add_sets_status(runner: CliRunner) -> None:
     assert len(db.get_jobs(status="applied")) == 1
 
 
+def test_add_sets_outdated_status(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, [*ADD_ARGS, "--status", "outdated"])
+
+    assert result.exit_code == 0
+    assert len(db.get_jobs(status="outdated")) == 1
+
+
 def test_add_json_output(runner: CliRunner) -> None:
     result = runner.invoke(cli_module.cli, [*ADD_ARGS, "--json"])
 
@@ -727,6 +734,19 @@ def test_list_filters_by_status(runner: CliRunner) -> None:
     assert jobs[0]["title"] == "Two"
 
 
+def test_list_filters_by_outdated_status(runner: CliRunner) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "One", "Acme", "Remote", "Body")
+    db.add_job("https://a.com/2", "Two", "Acme", "Remote", "Body")
+    db.set_job_status(db.get_jobs()[0]["id"], "outdated")
+
+    result = runner.invoke(cli_module.cli, ["list", "--status", "outdated", "--json"])
+
+    jobs = json.loads(result.output)
+    assert len(jobs) == 1
+    assert jobs[0]["title"] == "Two"
+
+
 def test_list_search(runner: CliRunner) -> None:
     db.init_db()
     db.add_job("https://a.com/1", "QA", "Adapty", "Remote", "Body")
@@ -1014,12 +1034,22 @@ def test_stats(runner: CliRunner) -> None:
         "applied": 1,
         "interview": 0,
         "rejected": 0,
+        "outdated": 0,
     }
 
     human_result = runner.invoke(cli_module.cli, ["stats"])
     assert human_result.exit_code == 0
     assert "Total: 2" in human_result.output
     assert "Applied: 1" in human_result.output
+    assert "Outdated: 0" in human_result.output
+
+
+def test_status_breakdown_lists_outdated_last() -> None:
+    counts = {"rejected": 1, "outdated": 2, "applied": 1, "unapplied": 3, "interview": 0}
+
+    breakdown = cli_module._status_breakdown(counts)
+
+    assert breakdown == " (3 unapplied, 1 applied, 0 interview, 1 rejected, 2 outdated)"
 
 
 def test_backup_command_json(runner: CliRunner, tmp_path: Path) -> None:
