@@ -39,6 +39,14 @@ async def _scan(user: User, url: str = JOB_URL) -> None:
     await asyncio.sleep(0.05)
 
 
+NOTICE_RETRIES = 50
+
+
+async def _see_notice(user: User, text: str) -> None:
+    """Wait for a notice, allowing slow CI ample time for scan + dashboard rebuild."""
+    await user.should_see(text, retries=NOTICE_RETRIES)
+
+
 def _seed_job(title: str = "Senior Engineer", description: str = "Body text") -> int:
     db.init_db()
     db.add_job(JOB_URL, title, "Acme", "Remote", description)
@@ -92,7 +100,7 @@ async def test_scan_saves_position(user: User) -> None:
     await user.open("/")
     await _scan(user)
 
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
     jobs = db.get_jobs()
     assert len(jobs) == 1
     assert jobs[0]["title"] == "Senior Engineer"
@@ -114,18 +122,18 @@ async def test_scan_saves_deadline(user: User, monkeypatch: pytest.MonkeyPatch) 
     await user.open("/")
     await _scan(user)
 
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
     assert db.get_jobs()[0]["deadline"] == "2026-12-31"
 
 
 async def test_duplicate_url_shows_warning(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     await _scan(user)
 
-    await user.should_see("Duplicates 1")
+    await _see_notice(user, "Duplicates 1")
     assert len(db.get_jobs()) == 1
 
 
@@ -134,7 +142,7 @@ async def test_similar_position_added_with_notice(
 ) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     monkeypatch.setattr(
         scraper,
@@ -149,8 +157,8 @@ async def test_similar_position_added_with_notice(
     )
     await _scan(user, "https://other.com/jobs/999")
 
-    await user.should_see("Saved 1")
-    await user.should_see("look similar")
+    await _see_notice(user, "Saved 1")
+    await _see_notice(user, "look similar")
     assert len(db.get_jobs()) == 2
 
 
@@ -159,7 +167,7 @@ async def test_similar_notice_can_be_disabled(user: User, monkeypatch: pytest.Mo
     db.set_setting("similar_notice", "off")
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     monkeypatch.setattr(
         scraper,
@@ -174,7 +182,9 @@ async def test_similar_notice_can_be_disabled(user: User, monkeypatch: pytest.Mo
     )
     await _scan(user, "https://other.com/jobs/999")
 
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
+    await _wait_for(lambda: len(db.get_jobs()) == 2, timeout=5.0)
+    await _see_notice(user, "1-2 of 2")
     await user.should_not_see("look similar")
     assert len(db.get_jobs()) == 2
 
@@ -183,7 +193,7 @@ async def test_empty_url_shows_warning(user: User) -> None:
     await user.open("/")
     user.find("Scan & Save Positions").click()
 
-    await user.should_see("Please enter at least one job URL.")
+    await _see_notice(user, "Please enter at least one job URL.")
 
 
 async def test_scrape_error_shows_error(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,7 +204,7 @@ async def test_scrape_error_shows_error(user: User, monkeypatch: pytest.MonkeyPa
     await user.open("/")
     await _scan(user)
 
-    await user.should_see("boom")
+    await _see_notice(user, "boom")
     assert db.get_jobs() == []
 
 
@@ -218,7 +228,7 @@ async def test_scan_multiple_urls_saves_all(user: User, monkeypatch: pytest.Monk
     user.find("Scan & Save Positions").click()
 
     await _wait_for(lambda: len(db.get_jobs()) == 3)
-    await user.should_see("Saved 3")
+    await _see_notice(user, "Saved 3")
 
 
 async def test_scan_multiple_reports_mixed_outcomes(
@@ -239,7 +249,7 @@ async def test_scan_multiple_reports_mixed_outcomes(
     monkeypatch.setattr(scraper, "scrape_job", scrape)
     await user.open("/")
     await _scan(user, "https://example.com/jobs/1")
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/2\nhttps://example.com/jobs/1\nhttps://example.com/jobs/bad"
@@ -248,7 +258,7 @@ async def test_scan_multiple_reports_mixed_outcomes(
     user.find("Scan & Save Positions").click()
 
     await _wait_for(lambda: len(db.get_jobs()) == 2)
-    await user.should_see("Saved 1 · Duplicates 1 · Failed 1")
+    await _see_notice(user, "Saved 1 · Duplicates 1 · Failed 1")
     assert db.get_jobs()[0]["job_url"] == "https://example.com/jobs/2"
 
 
@@ -259,7 +269,7 @@ def _scan_input(user: User) -> ui.textarea:
 async def test_scan_clears_input_on_success(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     await _wait_for(lambda: _scan_input(user).value == "")
 
@@ -306,7 +316,7 @@ def _checkbox(user: User, label: str) -> ui.checkbox:
 async def test_checkbox_marks_job_applied(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     user.find(kind=ui.checkbox, content="Applied").click()
 
@@ -319,7 +329,7 @@ async def test_checkbox_marks_job_applied(user: User) -> None:
 async def test_checkbox_marks_job_interview(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     user.find(kind=ui.checkbox, content="Interview").click()
 
@@ -332,7 +342,7 @@ async def test_checkbox_marks_job_interview(user: User) -> None:
 async def test_checkbox_marks_job_rejected(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     user.find(kind=ui.checkbox, content="Rejected").click()
 
@@ -345,7 +355,7 @@ async def test_checkbox_marks_job_rejected(user: User) -> None:
 async def test_interview_replaces_applied(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     user.find(kind=ui.checkbox, content="Applied").click()
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
@@ -360,7 +370,7 @@ async def test_interview_replaces_applied(user: User) -> None:
 async def test_unchecking_rejected_returns_to_unapplied(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     user.find(kind=ui.checkbox, content="Rejected").click()
     await _wait_for(lambda: db.get_jobs()[0]["rejected"] == 1)
@@ -451,7 +461,7 @@ async def test_checkbox_states_rejected_from_interview(user: User) -> None:
 async def test_delete_requires_confirmation(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     job_id = db.get_jobs()[0]["id"]
     user.find("🗑️ Delete").click()
@@ -467,14 +477,14 @@ async def test_delete_requires_confirmation(user: User) -> None:
 async def test_delete_confirmed_removes_position(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     job_id = db.get_jobs()[0]["id"]
     user.find("🗑️ Delete").click()
     user.find(marker=f"delete-confirm-{job_id}").click()
 
     await _wait_for(lambda: db.get_jobs() == [])
-    await user.should_see("Position deleted.")
+    await _see_notice(user, "Position deleted.")
 
 
 async def test_delete_from_detail_returns_to_dashboard(user: User) -> None:
@@ -501,7 +511,7 @@ async def test_add_job_manually(user: User) -> None:
         user.find("Save").click()
 
     await _wait_for(lambda: len(db.get_jobs()) == 1)
-    await user.should_see("Position added.")
+    await _see_notice(user, "Position added.")
     job = db.get_jobs()[0]
     assert job["job_url"] == "https://manual.example/1"
     assert job["title"] == "Manual Engineer"
@@ -523,7 +533,7 @@ async def test_add_job_manually_shows_similar_notice(user: User) -> None:
         user.find("Save").click()
 
     await _wait_for(lambda: len(db.get_jobs()) == 2)
-    await user.should_see("Position added.")
+    await _see_notice(user, "Position added.")
     await user.should_see("Looks similar to")
 
 
@@ -843,7 +853,7 @@ async def test_edit_job_from_detail(user: User) -> None:
         user.find("Save").click()
 
     await _wait_for(lambda: db.get_jobs()[0]["title"] == "Updated Title")
-    await user.should_see("Position updated.")
+    await _see_notice(user, "Position updated.")
     assert db.get_jobs()[0]["company"] == "UpdatedCo"
 
 
@@ -1171,7 +1181,7 @@ async def test_statistics_charts_use_dark_theme(user: User) -> None:
 async def test_card_has_full_details_link(user: User) -> None:
     await user.open("/")
     await _scan(user)
-    await user.should_see("Saved 1")
+    await _see_notice(user, "Saved 1")
 
     await user.should_see("View full details")
 
@@ -1207,7 +1217,7 @@ async def test_details_view_shows_tracking_fields(user: User) -> None:
 async def test_details_view_unknown_id_warns(user: User) -> None:
     await user.open("/job/999")
 
-    await user.should_see("Position not found.")
+    await _see_notice(user, "Position not found.")
 
 
 async def test_detail_shows_history_timeline(user: User) -> None:
