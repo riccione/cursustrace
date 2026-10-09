@@ -18,7 +18,7 @@ from pypdf import PdfReader
 
 from cursustrace import app, attention, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
-from cursustrace.web import attention_ui, constants, job_card, state, statistics
+from cursustrace.web import attention_ui, constants, job_card, scan, state, statistics
 
 JOB_URL = "https://example.com/jobs/1"
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
@@ -302,12 +302,12 @@ async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatc
 def test_parse_urls_splits_and_dedupes() -> None:
     text = "https://a.com/1\n\n  https://a.com/2  \nhttps://a.com/1\n"
 
-    assert app._parse_urls(text) == ["https://a.com/1", "https://a.com/2"]
+    assert scan._parse_urls(text) == ["https://a.com/1", "https://a.com/2"]
 
 
 def test_parse_urls_handles_empty_input() -> None:
-    assert app._parse_urls(None) == []
-    assert app._parse_urls("   \n  ") == []
+    assert scan._parse_urls(None) == []
+    assert scan._parse_urls("   \n  ") == []
 
 
 def _checkbox(user: User, label: str) -> ui.checkbox:
