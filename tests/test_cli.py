@@ -13,6 +13,7 @@ from click.testing import CliRunner
 
 from cursustrace import app, config, db, logsetup, scraper
 from cursustrace import cli as cli_module
+from cursustrace.cli import discover_cmd
 from cursustrace.errors import ScrapeError
 
 ADD_ARGS = [
@@ -1047,7 +1048,7 @@ def test_stats(runner: CliRunner) -> None:
 def test_status_breakdown_lists_outdated_last() -> None:
     counts = {"rejected": 1, "outdated": 2, "applied": 1, "unapplied": 3, "interview": 0}
 
-    breakdown = cli_module._status_breakdown(counts)
+    breakdown = discover_cmd._status_breakdown(counts)
 
     assert breakdown == " (3 unapplied, 1 applied, 0 interview, 1 rejected, 2 outdated)"
 
