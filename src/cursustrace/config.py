@@ -26,6 +26,7 @@ ENV_BACKUP_ON_START = "CURSUS_BACKUP_ON_START"
 ENV_STALE_APPLIED_DAYS = "CURSUS_STALE_APPLIED_DAYS"
 ENV_STALE_UNAPPLIED_DAYS = "CURSUS_STALE_UNAPPLIED_DAYS"
 ENV_DEADLINE_WARNING_DAYS = "CURSUS_DEADLINE_WARNING_DAYS"
+ENV_OUTDATED_AFTER_DAYS = "CURSUS_OUTDATED_AFTER_DAYS"
 ENV_RENDER = "CURSUS_RENDER"
 
 DEFAULT_HOST = "0.0.0.0"
@@ -39,6 +40,7 @@ DEFAULT_BACKUP_ON_START = True
 DEFAULT_STALE_APPLIED_DAYS = 21
 DEFAULT_STALE_UNAPPLIED_DAYS = 10
 DEFAULT_DEADLINE_WARNING_DAYS = 7
+DEFAULT_OUTDATED_AFTER_DAYS = 30
 DEFAULT_RENDER = "auto"
 LOG_DIR = Path("logs")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
@@ -65,6 +67,7 @@ class Settings:
     stale_applied_days: int = DEFAULT_STALE_APPLIED_DAYS
     stale_unapplied_days: int = DEFAULT_STALE_UNAPPLIED_DAYS
     deadline_warning_days: int = DEFAULT_DEADLINE_WARNING_DAYS
+    outdated_after_days: int = DEFAULT_OUTDATED_AFTER_DAYS
     render: str = DEFAULT_RENDER
     config_file: Path | None = None
 
@@ -84,6 +87,7 @@ def load_settings(
     stale_applied_days: int | str | None = None,
     stale_unapplied_days: int | str | None = None,
     deadline_warning_days: int | str | None = None,
+    outdated_after_days: int | str | None = None,
     render: str | None = None,
     config_path: str | Path | None = None,
     env: Mapping[str, str] | None = None,
@@ -106,6 +110,7 @@ def load_settings(
         ("stale_applied_days", ENV_STALE_APPLIED_DAYS),
         ("stale_unapplied_days", ENV_STALE_UNAPPLIED_DAYS),
         ("deadline_warning_days", ENV_DEADLINE_WARNING_DAYS),
+        ("outdated_after_days", ENV_OUTDATED_AFTER_DAYS),
         ("render", ENV_RENDER),
     ):
         raw = environ.get(env_name)
@@ -138,6 +143,8 @@ def load_settings(
         values["stale_unapplied_days"] = stale_unapplied_days
     if deadline_warning_days is not None:
         values["deadline_warning_days"] = deadline_warning_days
+    if outdated_after_days is not None:
+        values["outdated_after_days"] = outdated_after_days
     if render is not None:
         values["render"] = render
 
@@ -162,6 +169,9 @@ def load_settings(
         ),
         deadline_warning_days=_as_deadline_warning_days(
             values.get("deadline_warning_days", DEFAULT_DEADLINE_WARNING_DAYS)
+        ),
+        outdated_after_days=_as_outdated_after_days(
+            values.get("outdated_after_days", DEFAULT_OUTDATED_AFTER_DAYS)
         ),
         render=_as_render(values, "render", DEFAULT_RENDER),
         config_file=config_file,
@@ -272,3 +282,4 @@ _as_backup_keep = _non_negative_int("backup_keep")
 _as_stale_applied_days = _non_negative_int("stale_applied_days")
 _as_stale_unapplied_days = _non_negative_int("stale_unapplied_days")
 _as_deadline_warning_days = _non_negative_int("deadline_warning_days")
+_as_outdated_after_days = _non_negative_int("outdated_after_days")
