@@ -53,6 +53,7 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   stale_applied_days = 21
   stale_unapplied_days = 10
   deadline_warning_days = 7
+  outdated_after_days = 30
   render = "auto"
   ```
 
@@ -60,7 +61,7 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`,
   `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`,
   `CURSUS_STALE_APPLIED_DAYS`, `CURSUS_STALE_UNAPPLIED_DAYS`,
-  `CURSUS_DEADLINE_WARNING_DAYS`, `CURSUS_RENDER`.
+  `CURSUS_DEADLINE_WARNING_DAYS`, `CURSUS_OUTDATED_AFTER_DAYS`, `CURSUS_RENDER`.
 - **`cursustrace run` flags:** `--host`, `--port`, `--reload/--no-reload`,
   `--show/--no-show`, `--css PATH`, `--config PATH`.
 - **Group flag (all commands):** `--log-level`, e.g.
@@ -131,9 +132,10 @@ delete leftover `data/cursustrace.db-wal` / `data/cursustrace.db-shm` files,
 then start the app again.
 
 Paste one or more job listing URLs (one per line), click **Scan & Save
-Positions**, then use the **Unapplied**, **Applied**, **Interview**, and
-**Rejected** tabs to manage each position through the pipeline. Toggle
-**Applied**, **Interview**, or **Rejected** on a card to move it between tabs.
+Positions**, then use the **Unapplied**, **Applied**, **Interview**,
+**Rejected**, and **Outdated** tabs to manage each position through the
+pipeline. Toggle **Applied**, **Interview**, **Rejected**, or **Outdated** on a
+card to move it between tabs.
 Select **View full details** on a card to open the complete scraped description
 and metadata. The detail view also has the same stage checkboxes, plus a
 **Your profile** section with your name, email, phone, LinkedIn, and GitHub
@@ -158,6 +160,14 @@ longest-silent stages; each links to its position with the reason, and the
 banner clears itself as soon as positions move on. Switch it off under the
 settings drawer's Notifications section (the choice persists).
 
+Stale positions do not stay in the banner forever: once one has been silent
+past `outdated_after_days` (default `30`) as well as past its own staleness
+threshold, the dashboard parks it in the **Outdated** tab on the next refresh,
+so the banner only ever shows positions you can still act on. Parking happens
+once per position — restore it with the **Applied**, **Interview**, or
+**Rejected** checkbox and it stays back in the pipeline no matter how old its
+dates look.
+
 Use the **👤 Profile & CV Editor** tab to set your contact details and edit
 your CV in Markdown as four sections — Summary, Work History, Education, and
 Skills — with a live preview combining them in export order. Your profile and CV
@@ -170,9 +180,9 @@ profile, and **Delete profile** removes the selected one after you type
 export always uses it.
 
 The **📊 Statistics** tab shows how many positions you have in total and in each
-pipeline stage (unapplied, applied, interview, rejected), with charts for the
-status distribution, applications per month, and a response funnel from added
-to applied, responded, and interview.
+pipeline stage (unapplied, applied, interview, rejected, outdated), with charts
+for the status distribution, applications per month, and a response funnel from
+added to applied, responded, and interview.
 
 ## Customizing the CV PDF style
 
@@ -214,7 +224,8 @@ uv run cursustrace list --status applied --json
 uv run cursustrace list --tag remote --tag startup --json
 
 # only positions needing attention: stale stage or deadline in the warning
-# window (composes with --status/--tag/etc.; text output appends the reasons)
+# window (composes with --status/--tag/etc.; text output appends the reasons;
+# parked Outdated positions never match — list them with --status outdated)
 uv run cursustrace list --attention
 uv run cursustrace list --attention --status applied --json
 
