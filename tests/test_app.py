@@ -18,6 +18,7 @@ from pypdf import PdfReader
 
 from cursustrace import app, attention, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
+from cursustrace.web import constants, state
 
 JOB_URL = "https://example.com/jobs/1"
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
@@ -93,7 +94,7 @@ def _profile_payload(
 
 async def test_title_renders(user: User) -> None:
     await user.open("/")
-    await user.should_see(app.APP_TITLE)
+    await user.should_see(constants.APP_TITLE)
 
 
 async def test_scan_saves_position(user: User) -> None:
@@ -1860,7 +1861,7 @@ async def test_profile_selection_persists_across_reloads(user: User) -> None:
     await user.open("/")
 
     assert _profile_select(user).value == second
-    assert db.get_setting(app.SELECTED_PROFILE_KEY) == str(second)
+    assert db.get_setting(state.SELECTED_PROFILE_KEY) == str(second)
 
 
 async def test_profile_export_uses_selected_profile(user: User) -> None:
@@ -1909,27 +1910,27 @@ async def test_main_tabs_render_inside_header(user: User) -> None:
 
 
 def test_global_css_styles_all_textareas() -> None:
-    css = app.load_webapp_css()
+    css = constants.load_webapp_css()
     assert ".q-textarea .q-field__native" in css
     assert "line-height: 1.7" in css
 
 
 def test_global_css_scrolls_header_tabs_when_narrow() -> None:
-    css = app.load_webapp_css()
+    css = constants.load_webapp_css()
     assert ".header-tabs .q-tabs__content" in css
     assert "overflow-x: auto" in css
     assert "@media (max-width: 999px)" in css
 
 
 def test_global_css_wraps_markdown_pre() -> None:
-    css = app.load_webapp_css()
+    css = constants.load_webapp_css()
     assert ".nicegui-markdown pre" in css
     assert "white-space: pre-wrap" in css
 
 
 def test_load_webapp_css_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="Webapp stylesheet not found"):
-        app.load_webapp_css(tmp_path / "missing.css")
+        constants.load_webapp_css(tmp_path / "missing.css")
 
 
 async def test_theme_toggle_persists_dark(user: User) -> None:
@@ -1962,10 +1963,10 @@ def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         assert captured["port"] == 9002
         assert captured["reload"] is True
         assert captured["show"] is True
-        assert app._settings is settings
+        assert state._settings is settings
         assert (tmp_path / "logs" / f"cursustrace-{logsetup._today().isoformat()}.log").exists()
     finally:
-        app._settings = None
+        state._settings = None
 
 
 def test_run_configures_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1985,17 +1986,17 @@ def test_run_configures_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         app.run(settings)
         assert captured == {"level": "debug", "retention": 3}
     finally:
-        app._settings = None
+        state._settings = None
 
 
 def test_cv_style_path_uses_settings() -> None:
-    app._settings = config.Settings(cv_style_path=Path("custom.css"))
+    state._settings = config.Settings(cv_style_path=Path("custom.css"))
     try:
-        assert app._cv_style_path() == Path("custom.css")
-        app._settings = None
-        assert app._cv_style_path() is None
+        assert state._cv_style_path() == Path("custom.css")
+        state._settings = None
+        assert state._cv_style_path() is None
     finally:
-        app._settings = None
+        state._settings = None
 
 
 def _prepare_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
@@ -2014,7 +2015,7 @@ def test_run_prints_config_source_defaults(
     try:
         app.run(config.Settings(backup_on_start=False))
     finally:
-        app._settings = None
+        state._settings = None
 
     out = capsys.readouterr().out
     assert "Config: no config file found, using hardcoded default values" in out
@@ -2028,7 +2029,7 @@ def test_run_prints_config_file_path(
     try:
         app.run(settings)
     finally:
-        app._settings = None
+        state._settings = None
 
     assert "Config: using config file custom.toml" in capsys.readouterr().out
 
@@ -2043,7 +2044,7 @@ def test_run_writes_startup_backup(
         app.run(settings)
         assert len(list(dest.glob("cursustrace-*.db"))) == 1
     finally:
-        app._settings = None
+        state._settings = None
 
     out = capsys.readouterr().out
     assert f"Backup completed successfully to {dest}/" in out
@@ -2059,7 +2060,7 @@ def test_run_skips_backup_when_disabled(
         app.run(settings)
         assert dest.is_dir() is False
     finally:
-        app._settings = None
+        state._settings = None
 
     assert "Backup skipped: backup_on_start is disabled" in capsys.readouterr().out
 
@@ -2078,7 +2079,7 @@ def test_run_survives_backup_failure(
         app.run(settings)
         assert "host" in captured
     finally:
-        app._settings = None
+        state._settings = None
 
     assert "Backup failed: disk full" in capsys.readouterr().out
 

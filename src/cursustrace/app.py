@@ -10,7 +10,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from pathlib import Path
 from types import FrameType
 from typing import Literal, TypedDict, TypeVar, cast
 from urllib.parse import quote
@@ -24,94 +23,32 @@ from cursustrace.errors import PdfExportError, ScrapeError
 from cursustrace.logsetup import setup_logging
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
 from cursustrace.validation import normalize_deadline, validate_required, validate_url
-
-APP_TITLE = "CursusTrace — Job Application Tracker"
+from cursustrace.web import state
+from cursustrace.web.constants import (
+    APP_TITLE,
+    FUNNEL_STAGES,
+    STAT_CARDS,
+    STATUS_CHECKBOXES,
+    STATUS_NAMES,
+    STATUS_TABS,
+    load_webapp_css,
+)
+from cursustrace.web.state import (
+    ATTENTION_NOTICE_KEY,
+    DARK_MODE_KEY,
+    DARK_MODE_OPTIONS,
+    SELECTED_PROFILE_KEY,
+    SIMILAR_NOTICE_KEY,
+    _apply_dark_mode,
+    _attention_banner_enabled,
+    _attention_thresholds,
+    _cv_style_path,
+    _dark_mode_name,
+    _dark_mode_value,
+    _similar_notice_enabled,
+)
 
 logger = logging.getLogger(__name__)
-
-_settings: config.Settings | None = None
-
-
-def _cv_style_path() -> Path | None:
-    return _settings.cv_style_path if _settings is not None else None
-
-
-STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
-    ("unapplied", "⏳ Unapplied Positions", "No unapplied positions yet."),
-    ("applied", "✅ Applied Positions", "No applied positions yet."),
-    ("interview", "🗣️ Interview Positions", "No interview positions yet."),
-    ("rejected", "❌ Rejected Positions", "No rejected positions yet."),
-    ("outdated", "🗄️ Outdated Positions", "No outdated positions yet."),
-)
-
-STATUS_CHECKBOXES: tuple[tuple[db.JobFlag | Literal["outdated"], str], ...] = (
-    ("applied", "Applied"),
-    ("interview", "Interview"),
-    ("rejected", "Rejected"),
-    ("outdated", "Outdated"),
-)
-
-STAT_CARDS: tuple[tuple[str, str], ...] = (
-    ("total", "📋 Total positions"),
-    ("unapplied", "⏳ Unapplied"),
-    ("applied", "✅ Applied"),
-    ("interview", "🗣️ Interview"),
-    ("rejected", "❌ Rejected"),
-    ("outdated", "🗄️ Outdated"),
-)
-
-STATUS_NAMES: tuple[tuple[db.JobStatus, str], ...] = (
-    ("unapplied", "Unapplied"),
-    ("applied", "Applied"),
-    ("interview", "Interview"),
-    ("rejected", "Rejected"),
-    ("outdated", "Outdated"),
-)
-
-FUNNEL_STAGES: tuple[tuple[str, str], ...] = (
-    ("added", "Added"),
-    ("applied", "Applied"),
-    ("response", "Response"),
-    ("interview", "Interview"),
-)
-
-WEBAPP_CSS_PATH: Path = Path("styles/webapp.css")
-
-
-def load_webapp_css(path: Path | None = None) -> str:
-    """Read the customizable webapp stylesheet; exit with guidance when missing."""
-    stylesheet = path if path is not None else WEBAPP_CSS_PATH
-    try:
-        return stylesheet.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        raise SystemExit(
-            f"Webapp stylesheet not found at {stylesheet} — "
-            "run cursustrace from the repository root"
-        ) from exc
-
-
-DARK_MODE_KEY = "dark_mode"
-SIMILAR_NOTICE_KEY = "similar_notice"
-ATTENTION_NOTICE_KEY = "attention_notice"
-SELECTED_PROFILE_KEY = "selected_profile_id"
-DARK_MODE_OPTIONS: dict[str, str] = {
-    "light": "☀️ Light",
-    "dark": "🌙 Dark",
-    "system": "🖥️ System",
-}
-
-
-def _similar_notice_enabled() -> bool:
-    return db.get_setting(SIMILAR_NOTICE_KEY, "on") != "off"
-
-
-def _attention_banner_enabled() -> bool:
-    return db.get_setting(ATTENTION_NOTICE_KEY, "on") != "off"
-
-
-def _attention_thresholds() -> attention.Thresholds:
-    settings = _settings if _settings is not None else config.load_settings()
-    return attention.Thresholds.from_settings(settings)
 
 
 def _job_label(job: db.Job) -> str:
@@ -185,25 +122,6 @@ def _similar_summary(matches: list[db.Job], shown: int = 2) -> str:
     if len(matches) > shown:
         text += f" (+{len(matches) - shown} more)"
     return text
-
-
-def _dark_mode_value(name: str | None) -> bool | None:
-    if name == "dark":
-        return True
-    if name == "light":
-        return False
-    return None
-
-
-def _dark_mode_name(value: bool | None) -> str:
-    if value is None:
-        return "system"
-    return "dark" if value else "light"
-
-
-def _apply_dark_mode() -> ui.dark_mode:
-    name = db.get_setting(DARK_MODE_KEY, "system")
-    return ui.dark_mode(value=_dark_mode_value(name))
 
 
 _DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobStatus]] = {
@@ -1773,17 +1691,17 @@ def _backup_on_startup(settings: config.Settings) -> None:
 
 def run(settings: config.Settings | None = None) -> None:
     """CLI entrypoint that launches the CursusTrace NiceGUI dashboard."""
-    global _settings
-    _settings = settings or config.load_settings()
-    _print_config_source(_settings)
-    setup_logging(_settings.log_level, retention_days=_settings.log_retention_days)
+    current = settings or config.load_settings()
+    state._settings = current
+    _print_config_source(current)
+    setup_logging(current.log_level, retention_days=current.log_retention_days)
     try:
         db.init_db()
     except Exception:
         logger.exception("Failed to initialize the database")
         raise
-    if _settings.backup_on_start:
-        _backup_on_startup(_settings)
+    if current.backup_on_start:
+        _backup_on_startup(current)
     else:
         print("Backup skipped: backup_on_start is disabled", flush=True)
     ui.add_css(load_webapp_css(), shared=True)
@@ -1809,10 +1727,10 @@ def run(settings: config.Settings | None = None) -> None:
         ui.run(
             title=APP_TITLE,
             favicon="📋",
-            host=_settings.host,
-            port=_settings.port,
-            show=_settings.show,
-            reload=_settings.reload,
+            host=current.host,
+            port=current.port,
+            show=current.show,
+            reload=current.reload,
         )
     except KeyboardInterrupt:
         shutdown_signal = signal.SIGINT
