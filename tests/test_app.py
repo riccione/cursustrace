@@ -16,8 +16,19 @@ from nicegui import ui
 from nicegui.testing import User
 from pypdf import PdfReader
 
-from cursustrace import app, attention, config, db, logsetup, scraper
+from cursustrace import app, attention, backup, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
+from cursustrace.web import (
+    attention_ui,
+    constants,
+    job_card,
+    scan,
+    state,
+    statistics,
+)
+from cursustrace.web import (
+    run as web_run,
+)
 
 JOB_URL = "https://example.com/jobs/1"
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
@@ -93,7 +104,7 @@ def _profile_payload(
 
 async def test_title_renders(user: User) -> None:
     await user.open("/")
-    await user.should_see(app.APP_TITLE)
+    await user.should_see(constants.APP_TITLE)
 
 
 async def test_scan_saves_position(user: User) -> None:
@@ -301,12 +312,12 @@ async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatc
 def test_parse_urls_splits_and_dedupes() -> None:
     text = "https://a.com/1\n\n  https://a.com/2  \nhttps://a.com/1\n"
 
-    assert app._parse_urls(text) == ["https://a.com/1", "https://a.com/2"]
+    assert scan._parse_urls(text) == ["https://a.com/1", "https://a.com/2"]
 
 
 def test_parse_urls_handles_empty_input() -> None:
-    assert app._parse_urls(None) == []
-    assert app._parse_urls("   \n  ") == []
+    assert scan._parse_urls(None) == []
+    assert scan._parse_urls("   \n  ") == []
 
 
 def _checkbox(user: User, label: str) -> ui.checkbox:
@@ -1164,12 +1175,12 @@ async def test_statistics_without_salary_shows_hint(user: User) -> None:
 
 
 def test_fill_months() -> None:
-    assert app._fill_months([("2026-01", 2), ("2026-04", 1)]) == (
+    assert statistics._fill_months([("2026-01", 2), ("2026-04", 1)]) == (
         ["2026-01", "2026-02", "2026-03", "2026-04"],
         [2, 0, 0, 1],
     )
-    assert app._fill_months([("2025-11", 3)]) == (["2025-11"], [3])
-    assert app._fill_months([("2025-12", 1), ("2026-01", 2)]) == (
+    assert statistics._fill_months([("2025-11", 3)]) == (["2025-11"], [3])
+    assert statistics._fill_months([("2025-12", 1), ("2026-01", 2)]) == (
         ["2025-12", "2026-01"],
         [1, 2],
     )
@@ -1416,25 +1427,25 @@ async def test_detail_profile_lists_multiple_profiles(user: User) -> None:
 
 
 def test_days_since_applied_handles_missing_and_bad_dates() -> None:
-    assert app._days_since_applied(cast(db.Job, {"date_applied": None})) is None
-    assert app._days_since_applied(cast(db.Job, {"date_applied": "not-a-date"})) is None
+    assert job_card._days_since_applied(cast(db.Job, {"date_applied": None})) is None
+    assert job_card._days_since_applied(cast(db.Job, {"date_applied": "not-a-date"})) is None
 
     now = time.localtime()
     today = date(now.tm_year, now.tm_mon, now.tm_mday)
     three_days_ago = (today - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
-    assert app._days_since_applied(cast(db.Job, {"date_applied": three_days_ago})) == 3
+    assert job_card._days_since_applied(cast(db.Job, {"date_applied": three_days_ago})) == 3
 
 
 def test_deadline_text_relative_phrases() -> None:
     today = date(2026, 10, 8)
-    assert app._deadline_text(None, today) is None
-    assert app._deadline_text("", today) is None
-    assert app._deadline_text("not-a-date", today) is None
-    assert app._deadline_text("2026-10-11", today) == "— in 3 days"
-    assert app._deadline_text("2026-10-09", today) == "— in 1 day"
-    assert app._deadline_text("2026-10-08", today) == "— is today"
-    assert app._deadline_text("2026-10-07", today) == "— passed 1 day ago"
-    assert app._deadline_text("2026-10-06", today) == "— passed 2 days ago"
+    assert job_card._deadline_text(None, today) is None
+    assert job_card._deadline_text("", today) is None
+    assert job_card._deadline_text("not-a-date", today) is None
+    assert job_card._deadline_text("2026-10-11", today) == "— in 3 days"
+    assert job_card._deadline_text("2026-10-09", today) == "— in 1 day"
+    assert job_card._deadline_text("2026-10-08", today) == "— is today"
+    assert job_card._deadline_text("2026-10-07", today) == "— passed 1 day ago"
+    assert job_card._deadline_text("2026-10-06", today) == "— passed 2 days ago"
 
 
 def test_attention_items_orders_deadlines_before_staleness() -> None:
@@ -1462,7 +1473,7 @@ def test_attention_items_orders_deadlines_before_staleness() -> None:
     dated_soon = entry(3, deadline="2026-10-10")
     dated_later = entry(4, deadline="2026-10-14")
 
-    items = app._attention_items(
+    items = attention_ui._attention_items(
         [stale_newer, dated_later, stale_older, dated_soon], thresholds, today=today
     )
 
@@ -1860,7 +1871,7 @@ async def test_profile_selection_persists_across_reloads(user: User) -> None:
     await user.open("/")
 
     assert _profile_select(user).value == second
-    assert db.get_setting(app.SELECTED_PROFILE_KEY) == str(second)
+    assert db.get_setting(state.SELECTED_PROFILE_KEY) == str(second)
 
 
 async def test_profile_export_uses_selected_profile(user: User) -> None:
@@ -1909,27 +1920,27 @@ async def test_main_tabs_render_inside_header(user: User) -> None:
 
 
 def test_global_css_styles_all_textareas() -> None:
-    css = app.load_webapp_css()
+    css = constants.load_webapp_css()
     assert ".q-textarea .q-field__native" in css
     assert "line-height: 1.7" in css
 
 
 def test_global_css_scrolls_header_tabs_when_narrow() -> None:
-    css = app.load_webapp_css()
+    css = constants.load_webapp_css()
     assert ".header-tabs .q-tabs__content" in css
     assert "overflow-x: auto" in css
     assert "@media (max-width: 999px)" in css
 
 
 def test_global_css_wraps_markdown_pre() -> None:
-    css = app.load_webapp_css()
+    css = constants.load_webapp_css()
     assert ".nicegui-markdown pre" in css
     assert "white-space: pre-wrap" in css
 
 
 def test_load_webapp_css_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="Webapp stylesheet not found"):
-        app.load_webapp_css(tmp_path / "missing.css")
+        constants.load_webapp_css(tmp_path / "missing.css")
 
 
 async def test_theme_toggle_persists_dark(user: User) -> None:
@@ -1951,7 +1962,7 @@ def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
     captured: dict[str, object] = {}
-    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(ui, "run", lambda **kwargs: captured.update(kwargs))
 
     settings = config.Settings(
         host="127.0.0.1", port=9002, reload=True, show=True, backup_on_start=False
@@ -1962,40 +1973,40 @@ def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         assert captured["port"] == 9002
         assert captured["reload"] is True
         assert captured["show"] is True
-        assert app._settings is settings
+        assert state._settings is settings
         assert (tmp_path / "logs" / f"cursustrace-{logsetup._today().isoformat()}.log").exists()
     finally:
-        app._settings = None
+        state._settings = None
 
 
 def test_run_configures_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
     monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
-    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: None)
+    monkeypatch.setattr(ui, "run", lambda **kwargs: None)
     captured: dict[str, object] = {}
 
     def fake_setup(level: str, log_dir: Path | None = None, retention_days: int = 7) -> None:
         captured["level"] = level
         captured["retention"] = retention_days
 
-    monkeypatch.setattr("cursustrace.app.setup_logging", fake_setup)
+    monkeypatch.setattr(web_run, "setup_logging", fake_setup)
 
     settings = config.Settings(log_level="debug", log_retention_days=3, backup_on_start=False)
     try:
         app.run(settings)
         assert captured == {"level": "debug", "retention": 3}
     finally:
-        app._settings = None
+        state._settings = None
 
 
 def test_cv_style_path_uses_settings() -> None:
-    app._settings = config.Settings(cv_style_path=Path("custom.css"))
+    state._settings = config.Settings(cv_style_path=Path("custom.css"))
     try:
-        assert app._cv_style_path() == Path("custom.css")
-        app._settings = None
-        assert app._cv_style_path() is None
+        assert state._cv_style_path() == Path("custom.css")
+        state._settings = None
+        assert state._cv_style_path() is None
     finally:
-        app._settings = None
+        state._settings = None
 
 
 def _prepare_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
@@ -2003,7 +2014,7 @@ def _prepare_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, o
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
     captured: dict[str, object] = {}
-    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(ui, "run", lambda **kwargs: captured.update(kwargs))
     return captured
 
 
@@ -2014,7 +2025,7 @@ def test_run_prints_config_source_defaults(
     try:
         app.run(config.Settings(backup_on_start=False))
     finally:
-        app._settings = None
+        state._settings = None
 
     out = capsys.readouterr().out
     assert "Config: no config file found, using hardcoded default values" in out
@@ -2028,7 +2039,7 @@ def test_run_prints_config_file_path(
     try:
         app.run(settings)
     finally:
-        app._settings = None
+        state._settings = None
 
     assert "Config: using config file custom.toml" in capsys.readouterr().out
 
@@ -2043,7 +2054,7 @@ def test_run_writes_startup_backup(
         app.run(settings)
         assert len(list(dest.glob("cursustrace-*.db"))) == 1
     finally:
-        app._settings = None
+        state._settings = None
 
     out = capsys.readouterr().out
     assert f"Backup completed successfully to {dest}/" in out
@@ -2059,7 +2070,7 @@ def test_run_skips_backup_when_disabled(
         app.run(settings)
         assert dest.is_dir() is False
     finally:
-        app._settings = None
+        state._settings = None
 
     assert "Backup skipped: backup_on_start is disabled" in capsys.readouterr().out
 
@@ -2072,13 +2083,13 @@ def test_run_survives_backup_failure(
     def explode(*_args: object, **_kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("cursustrace.app.backup.backup_database", explode)
+    monkeypatch.setattr(backup, "backup_database", explode)
     settings = config.Settings(backup_dir=tmp_path / "backups", backup_on_start=True)
     try:
         app.run(settings)
         assert "host" in captured
     finally:
-        app._settings = None
+        state._settings = None
 
     assert "Backup failed: disk full" in capsys.readouterr().out
 
@@ -2089,7 +2100,7 @@ def test_backup_on_startup_without_database(
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "missing.db")
     settings = config.Settings(backup_dir=tmp_path / "backups")
 
-    app._backup_on_startup(settings)
+    web_run._backup_on_startup(settings)
 
     assert "Backup skipped: no database file yet" in capsys.readouterr().out
 

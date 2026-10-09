@@ -8,7 +8,7 @@ from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from cursustrace import applicability, db, discovery, salary, scraper
-from cursustrace.cli import (
+from cursustrace.cli.common import (
     SORT_ORDERS,
     STATUSES,
     _check_fields,

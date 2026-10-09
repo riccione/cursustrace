@@ -1,4 +1,4 @@
-# CursusTrace — Job Application Tracker
+# CursusTrace
 
 [![CI](https://github.com/riccione/cursustrace/actions/workflows/ci.yml/badge.svg)](https://github.com/riccione/cursustrace/actions/workflows/ci.yml)
 
@@ -20,10 +20,9 @@ Pango, Cairo, and GDK-Pixbuf system libraries.
 
 ## Run
 
-Install and launch the app:
+Launch the dashboard:
 
 ```sh
-uv sync
 uv run cursustrace
 ```
 
@@ -31,12 +30,68 @@ The [NiceGUI](https://nicegui.io/) server starts on
 [http://localhost:8080](http://localhost:8080). Use `cursustrace run` to pass
 options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
 
+## Dashboard
+
+Paste one or more job listing URLs (one per line) and click
+`Scan & Save Positions`. Positions land in the `Unapplied` tab; move them
+through `Applied`, `Interview`, `Rejected`, and `Outdated` by ticking the
+matching stage checkbox on a card.
+
+Select `View full details` on a card to open the complete scraped description
+and metadata. The detail view has the same stage checkboxes, plus a
+`Your profile` section with your name, email, phone, LinkedIn, and GitHub
+fields. Each field has an in-field copy button for pasting into application
+forms. The `Search company` box matches fuzzy company names across all
+pipeline stages at once, and each result shows its status, e.g. `[Applied]`.
+
+When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
+to enter a position's URL, title, company, description, and an optional
+application deadline, and edit those fields from the position's detail page.
+Cards and the detail page show the deadline with a relative countdown (e.g.
+`2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
+`validThrough` date or type it as an ISO date like `2026-12-31`.
+
+The dashboard opens with a needs-attention banner whenever any position is
+stale or has an imminent deadline. A position qualifies when:
+
+- it is applied with no response for `stale_applied_days` (default `21`);
+- it is unapplied and untouched for `stale_unapplied_days` (default `10`);
+- its deadline falls within `deadline_warning_days` (default `7`), and
+  already-overdue deadlines count too.
+
+Entries with deadlines come first (soonest or most overdue first), then the
+longest-silent stages. Each entry links to its position with the reason, and
+the banner clears as soon as positions move on. Turn it off under the settings
+drawer's Notifications section; the choice persists.
+
+The banner only ever shows positions you can still act on. Once a stale
+position has also been silent past `outdated_after_days` (default `30`), the
+next refresh parks it in the `Outdated` tab. Parking happens once per
+position: tick `Applied`, `Interview`, or `Rejected` and it stays back in the
+pipeline no matter how old its dates look.
+
+Use the `👤 Profile & CV Editor` tab to set your contact details and edit
+your CV in Markdown as four sections: Summary, Work History, Education, and
+Skills. A live preview combines them in export order. Your profile and CV are
+stored only in the SQLite database, and `📄 Export to PDF` downloads a
+formatted document combining your contact header with the sections in that
+order. When you keep more than one CV (e.g. per role or seniority), a dropdown
+at the top of the tab switches between named profiles: `➕` adds a new
+profile, and `Delete profile` removes the selected one after you type
+`DELETE` to confirm. The selected profile persists across restarts, and PDF
+export always uses it.
+
+The `📊 Statistics` tab shows how many positions you have in total and in each
+pipeline stage (unapplied, applied, interview, rejected, outdated), with charts
+for the status distribution, applications per month, and a response funnel from
+added to applied, responded, and interview.
+
 ## Configuration
 
-Settings are resolved with the precedence **CLI flags > environment variables >
-`cursustrace.toml` > defaults**:
+Settings resolve in this order: command-line flags, then environment variables,
+then `cursustrace.toml`, then the built-in defaults.
 
-- **`cursustrace.toml`** in the working directory (or a path via `--config`):
+- `cursustrace.toml` in the working directory (or a path via `--config`):
 
   ```toml
   [cursustrace]
@@ -57,20 +112,20 @@ Settings are resolved with the precedence **CLI flags > environment variables >
   render = "auto"
   ```
 
-- **Environment variables:** `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
+- Environment variables: `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
   `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`,
   `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`,
   `CURSUS_STALE_APPLIED_DAYS`, `CURSUS_STALE_UNAPPLIED_DAYS`,
   `CURSUS_DEADLINE_WARNING_DAYS`, `CURSUS_OUTDATED_AFTER_DAYS`, `CURSUS_RENDER`.
-- **`cursustrace run` flags:** `--host`, `--port`, `--reload/--no-reload`,
+- `cursustrace run` flags: `--host`, `--port`, `--reload/--no-reload`,
   `--show/--no-show`, `--css PATH`, `--config PATH`.
-- **Group flag (all commands):** `--log-level`, e.g.
+- Group flag (all commands): `--log-level`, e.g.
   `cursustrace --log-level debug scan URL`.
 
-`cv_style` / `--css` points at the PDF stylesheet used by **📄 Export to PDF**
-(see below). On start the dashboard prints which source it resolved from:
-`Config: using config file cursustrace.toml` or `Config: no config file found,
-using hardcoded default values`.
+`cv_style` / `--css` points at the PDF stylesheet used by the
+`📄 Export to PDF` button in the profile tab. On start the dashboard prints
+which source it resolved from: `Config: using config file cursustrace.toml`
+or `Config: no config file found, using hardcoded default values`.
 
 ### Scraping
 
@@ -78,13 +133,13 @@ Scans extract a listing through a fallback chain; each step runs only while
 the description so far is too thin (under 600 characters, or just the page
 title repeated):
 
-1. **Static HTML** — trafilatura and page text plus the page's metadata,
+1. Static HTML: trafilatura and page text plus the page's metadata,
    including job descriptions embedded in inline scripts (Zoho Recruit and
    similar boards hide theirs inside JavaScript-escaped strings).
-2. **Known-board APIs** — when the URL, or the page's canonical link,
+2. Known-board APIs: when the URL, or the page's canonical link,
    points at a Greenhouse, Lever, or Ashby listing, its public JSON API
    supplies the real title, company, location, description, and deadline.
-3. **Browser render** — with `render = "auto"` (the default), pages that
+3. Browser render: with `render = "auto"` (the default), pages that
    are still JavaScript shells are rendered once with
    [lightpanda](https://lightpanda.io) and the final DOM is re-extracted.
    Install `lightpanda` on your `PATH` or point `CURSUS_LIGHTPANDA` at
@@ -94,7 +149,7 @@ title repeated):
 
 If every step comes up empty the scan fails with a
 `JavaScript-rendered or blocked` error and the position is left for
-manual entry — partial junk is never stored. Render problems (missing
+manual entry; partial junk is never stored. Render problems (missing
 binary, timeout) are logged at `log_level = "warning"` and simply fall
 through to that error.
 
@@ -111,14 +166,14 @@ Errors are written to a daily file under `logs/cursustrace-YYYY-MM-DD.log`
 Every dashboard start writes a consistent copy of the SQLite database into
 `backup_dir` (default `backups/`) as `cursustrace-YYYYMMDD-HHMMSS.db`, using
 SQLite's online backup API. Only the newest `backup_keep` copies are retained
-(default `14`, `0` keeps everything), and only files matching our
+(default `14`, `0` keeps everything), and only files matching the
 `cursustrace-*.db` pattern are ever pruned. Set `backup_on_start = false` (or
 `CURSUS_BACKUP_ON_START=0`) to skip the startup copy; a failed backup is logged
 and never stops the app. The outcome is printed to the shell on start, e.g.
 `Backup completed successfully to backups/cursustrace-20260930-153012.db`, or
 `Backup skipped: backup_on_start is disabled` / `Backup failed: <error>`.
 
-Use `cursustrace backup` for an on-demand copy — it honours the same settings,
+Use `cursustrace backup` for an on-demand copy; it honours the same settings,
 with `--dir` and `--keep` as overrides. Schedule it from cron if you also run
 the app as a service:
 
@@ -127,150 +182,142 @@ the app as a service:
 15 3 * * * cd /path/to/cursustrace && uv run cursustrace backup --json
 ```
 
-**Restore:** stop the app, copy the chosen backup over `data/cursustrace.db`,
-delete leftover `data/cursustrace.db-wal` / `data/cursustrace.db-shm` files,
-then start the app again.
-
-Paste one or more job listing URLs (one per line), click **Scan & Save
-Positions**, then use the **Unapplied**, **Applied**, **Interview**,
-**Rejected**, and **Outdated** tabs to manage each position through the
-pipeline. Toggle **Applied**, **Interview**, **Rejected**, or **Outdated** on a
-card to move it between tabs.
-Select **View full details** on a card to open the complete scraped description
-and metadata. The detail view also has the same stage checkboxes, plus a
-**Your profile** section with your name, email, phone, LinkedIn, and GitHub
-fields — each with an in-field copy button — ready to paste into applications. The **Search company** box matches fuzzy company names across
-**all** pipeline stages at once (each result shows its status, e.g.
-`[Applied]`).
-
-When scraping fails (or for a listing you track by hand), use **➕ Add Manually**
-to enter a position's URL, title, company, description, and an optional
-application deadline, and edit those fields from the position's detail page.
-Cards and the detail page show the deadline with a relative countdown (e.g.
-`2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
-`validThrough` date or type it as an ISO date like `2026-12-31`.
-
-The dashboard opens with a **needs-attention banner** whenever any position is
-stale or has an imminent deadline: applied with no response for
-`stale_applied_days` (default `21`), unapplied and untouched for
-`stale_unapplied_days` (default `10`), or a deadline due within
-`deadline_warning_days` (default `7`) — already-overdue deadlines count too.
-Entries with deadlines come first (soonest or most overdue first), then the
-longest-silent stages; each links to its position with the reason, and the
-banner clears itself as soon as positions move on. Switch it off under the
-settings drawer's Notifications section (the choice persists).
-
-Stale positions do not stay in the banner forever: once one has been silent
-past `outdated_after_days` (default `30`) as well as past its own staleness
-threshold, the dashboard parks it in the **Outdated** tab on the next refresh,
-so the banner only ever shows positions you can still act on. Parking happens
-once per position — restore it with the **Applied**, **Interview**, or
-**Rejected** checkbox and it stays back in the pipeline no matter how old its
-dates look.
-
-Use the **👤 Profile & CV Editor** tab to set your contact details and edit
-your CV in Markdown as four sections — Summary, Work History, Education, and
-Skills — with a live preview combining them in export order. Your profile and CV
-are stored only in the SQLite database, and **📄 Export to PDF** downloads a
-formatted document combining your contact header with the sections in that
-order. When you keep more than one CV (e.g. per role or seniority), a dropdown
-at the top of the tab switches between named profiles: **➕** adds a new
-profile, and **Delete profile** removes the selected one after you type
-`DELETE` to confirm. The selected profile persists across restarts, and PDF
-export always uses it.
-
-The **📊 Statistics** tab shows how many positions you have in total and in each
-pipeline stage (unapplied, applied, interview, rejected, outdated), with charts
-for the status distribution, applications per month, and a response funnel from
-added to applied, responded, and interview.
+To restore a backup, stop the app, copy the chosen backup over
+`data/cursustrace.db`, delete leftover `data/cursustrace.db-wal` /
+`data/cursustrace.db-shm` files, then start the app again.
 
 ## Customizing the CV PDF style
 
 The PDF stylesheet lives at [`styles/cv.css`](styles/cv.css). Edit it to change
-the fonts, margins, colours, spacing, or page footer — the file is read on every
+the fonts, margins, colours, spacing, or page footer. The file is read on every
 export, so changes apply immediately without restarting the app.
 
 ## Customizing the webapp CSS
 
-Global UI styles live at [`styles/webapp.css`](styles/webapp.css) — font sizes,
+Global UI styles live at [`styles/webapp.css`](styles/webapp.css): font sizes,
 Quasar overrides, markdown overflow, and the header tab rules. Unlike the CV
 stylesheet, it is read once at startup, so restart the app after editing.
 
-## Command-line ingestion (for AI agents)
+## Command-line usage
 
 The `cursustrace` command also offers headless subcommands for adding positions
 without the UI (duplicates are skipped, never overwritten). Pass `--json` for
 machine-readable output.
 
+Add one position from explicit fields:
+
 ```sh
-# add one position from explicit fields
 uv run cursustrace add --url https://example.com/job/1 \
   --title "Backend Engineer" --company Acme --description "Build APIs" \
   --location Remote --status applied --deadline 2026-12-31 --tag remote --json
+```
 
-# scrape and add one or more URLs (repeatable --tag labels the whole batch)
+Scrape and add one or more URLs (a repeatable `--tag` labels the whole batch):
+
+```sh
 uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --tag qa --json
+```
 
-# discover candidate listing links from a source page (URL or job-sources site name)
+Discover candidate listing links from a source page (URL or job-sources site
+name):
+
+```sh
 uv run cursustrace discover RemoteOK --json
 uv run cursustrace discover https://example.com/jobs --add --tag qa --json
+```
 
-# batch import a JSON array (structured items and/or URL-only items) from a file or stdin
+Batch import a JSON array (structured items and/or URL-only items) from a file
+or stdin:
+
+```sh
 uv run cursustrace import jobs.json --json
 echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
+```
 
-# list stored positions (repeatable --tag filters match any tag)
+List stored positions (a repeatable `--tag` filter matches any tag):
+
+```sh
 uv run cursustrace list --status applied --json
 uv run cursustrace list --tag remote --tag startup --json
+```
 
-# only positions needing attention: stale stage or deadline in the warning
-# window (composes with --status/--tag/etc.; text output appends the reasons;
-# parked Outdated positions never match — list them with --status outdated)
+List positions that need attention (a stale stage, or a deadline in the
+warning window). The filter composes with `--status`, `--tag`, and the rest,
+and text output appends the reasons. Parked `Outdated` positions never match;
+list those with `--status outdated`:
+
+```sh
 uv run cursustrace list --attention
 uv run cursustrace list --attention --status applied --json
+```
 
-# sort (newest, oldest, company, company_desc, status) and paginate
+Sort (newest, oldest, company, company_desc, status) and paginate:
+
+```sh
 uv run cursustrace list --sort company --limit 50 --json
 uv run cursustrace list --sort status --limit 50 --offset 50 --json
+```
 
-# export positions as import-compatible JSON (stdout by default) or CSV
+Export positions as import-compatible JSON (stdout by default) or CSV:
+
+```sh
 uv run cursustrace export
 uv run cursustrace export jobs.json
 uv run cursustrace export --format csv --status applied
 uv run cursustrace export --min-salary 60000 --salary-currency EUR
 uv run cursustrace export --tag remote --format csv
+```
 
-# manage tags (labels): counts, creation, rename, delete
+Manage tags (labels) for counts, creation, rename, and delete:
+
+```sh
 uv run cursustrace tags list --json
 uv run cursustrace tags add remote referral --json
 uv run cursustrace tags rename remote wfh
 uv run cursustrace tags rm wfh
+```
 
-# position counts per pipeline stage
+Position counts per pipeline stage:
+
+```sh
 uv run cursustrace stats --json
+```
 
-# write a database backup (retention settings are documented under Backups)
+Write a database backup (retention settings are documented under Backups):
+
+```sh
 uv run cursustrace backup --json
 uv run cursustrace backup --dir /mnt/backup --keep 30
+```
 
-# show the version
+Show the version:
+
+```sh
 uv run cursustrace -V
+```
 
-# delete positions by id, URL, a URL list file, or the list filters;
-# preview + confirmation prompt unless --yes (--json requires --yes)
+Delete positions by id, URL, a URL list file, or the list filters. The
+command previews matches and prompts for confirmation unless you pass
+`--yes` (`--json` requires `--yes`):
+
+```sh
 uv run cursustrace delete 42 43 --yes
 uv run cursustrace delete --url https://example.com/job/1 --yes
 uv run cursustrace delete --url-file urls.txt --yes --json
 uv run cursustrace delete --status rejected --tag spam --yes
+```
 
-# delete ALL job positions at once (or everything with --all); --yes skips the prompt
+Delete all job positions at once, or everything with `--all`. `--yes` skips
+the prompt:
+
+```sh
 uv run cursustrace clear --yes
 uv run cursustrace clear --all --yes
 ```
 
 Each JSON item may be structured (`url`, `title`, `company`, `location`,
 `description`, `status`, `salary_*`, `deadline`, `tags`) or URL-only (the URL is
-scraped to fill the missing fields; see **Scraping** under Configuration for
+scraped to fill the missing fields; see Scraping under Configuration for
 the extraction and fallback chain). Scraped positions resolve `location` from
 the page's Open Graph meta, then its JSON-LD `JobPosting` address, then a
 `📍Location:` line in the description, and `deadline` from the JSON-LD
@@ -278,13 +325,13 @@ the page's Open Graph meta, then its JSON-LD `JobPosting` address, then a
 `cursustrace export jobs.json` can be edited and fed back into `import`: status,
 stage comments, tags, and deadlines survive the round trip (unknown tags are
 created), timestamps are re-stamped on import. The CSV variant is a flat
-spreadsheet view with tags joined by `;` — `import` reads JSON only.
+spreadsheet view with tags joined by `;`. `import` reads JSON only.
 
 ### Discovering positions with an AI agent
 
 `discover` fetches one source page (a search or board page), extracts candidate
-listing links, and checks each against the database. It never talks to an LLM —
-the reasoning is done by an AI agent (or you) on top of its JSON output:
+listing links, and checks each against the database. It does no LLM calls
+itself; an AI agent (or you) does the reasoning on top of its JSON output:
 
 ```sh
 # by site name from job-sources/ or by URL; --limit caps candidates (default 100)
@@ -297,14 +344,14 @@ uv run cursustrace discover https://example.com/jobs --add --json
 
 The JSON payload reports `source` (input, resolved URL, job-sources status),
 `extracted` / `new_count` / `known_count`, `known_by_status` (so already-applied
-positions are visible), and one `candidates` entry per link — `known: false`
+positions are visible), and one `candidates` entry per link: `known: false`
 for new ones, plus `status`, `id`, `title` for known ones. With `--add` it also
 returns `added`, `skipped`, `errors` and `similar`, and exits non-zero when any
 scrape failed; a failed fetch prints an `error` key. Candidates that are already
 in the database are skipped whatever their stage, so discovery never re-adds an
 applied position.
 
-A ready-to-paste workflow for an AI agent:
+A workflow you can paste to an AI agent:
 
 > Discover positions for me from `<source>`. Run
 > `cursustrace discover <source> --json`, review the candidates with
@@ -336,7 +383,7 @@ Adds are applicability-gated for agents: `scrape_position` returns the
 scraped listing with `applicability.flags`, and `add_position`, `scan`
 and `discover(add=true)` answer `status=flagged` (or a `flagged` list)
 instead of ingesting when the location or description looks tied to a
-specific country or work authorization — read the listing, then retry
+specific country or work authorization. Read the listing, then retry
 with `force=true` if it fits a Serbia/remote-EU applicant. Deadlines
 flow through the same way: `scrape_position` returns the listing's
 `deadline` (ISO date from `validThrough`), `add_position` accepts one
@@ -361,7 +408,7 @@ This repository registers the server for [opencode](https://opencode.ai) in
 }
 ```
 
-Restart opencode after editing it — config is not hot-reloaded. Any other MCP
+Restart opencode after editing it; config is not hot-reloaded. Any other MCP
 client works the same way: point it at `uv run cursustrace mcp` over stdio.
 
 ## Development
@@ -389,28 +436,29 @@ Contributions are welcome as pull requests against `main`.
 ### Commit messages
 
 This project follows [Conventional Commits](https://www.conventionalcommits.org/):
-`<type>(<scope>): <summary>` — for example, `feat(app): add history timeline`.
-Use the imperative mood, lower case, no trailing period. The scope is optional.
+the pattern is `<type>(<scope>): <summary>`. For example,
+`feat(app): add history timeline`. Use the imperative mood, lower case, no
+trailing period. The scope is optional.
 
 Types in use:
 
-- `feat` — a new feature
-- `fix` — a bug fix
-- `refactor` — a change that neither fixes a bug nor adds a feature
-- `perf` — a performance improvement
-- `docs` — documentation only
-- `style` — formatting or whitespace, no behaviour change
-- `chore` — maintenance, tooling, dependencies
-- `ci` — CI/CD workflows
-- `build` — build system or packaging
+- `feat`: a new feature
+- `fix`: a bug fix
+- `refactor`: a change that neither fixes a bug nor adds a feature
+- `perf`: a performance improvement
+- `docs`: documentation only
+- `style`: formatting or whitespace, no behaviour change
+- `chore`: maintenance, tooling, dependencies
+- `ci`: CI/CD workflows
+- `build`: build system or packaging
 
 ### Pull requests
 
 Every pull request should explain:
 
-- **Why** — the purpose and the problem it solves.
-- **What changed** — a short summary of the changes.
-- **Technical details** — brief notes on the approach, key files, and trade-offs.
+- Why: the purpose and the problem it solves.
+- What changed: a short summary of the changes.
+- Technical details: brief notes on the approach, key files, and trade-offs.
 
 Before requesting review, confirm:
 

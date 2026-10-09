@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from pypdf import PdfReader
 
+from cursustrace import pdf_exporter
 from cursustrace.db import Profile
 from cursustrace.errors import PdfExportError
 from cursustrace.pdf_exporter import (
@@ -223,7 +224,7 @@ def test_generate_cv_pdf_wraps_render_errors(monkeypatch: pytest.MonkeyPatch) ->
     def boom(*_args: object, **_kwargs: object) -> object:
         raise ValueError("kaboom")
 
-    monkeypatch.setattr("cursustrace.pdf_exporter.HTML", boom)
+    monkeypatch.setattr(pdf_exporter, "HTML", boom)
 
     with pytest.raises(PdfExportError, match="kaboom") as excinfo:
         generate_cv_pdf(_profile())

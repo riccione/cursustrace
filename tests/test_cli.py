@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from cursustrace import app, config, db, logsetup, scraper
 from cursustrace import cli as cli_module
-from cursustrace import config, db, logsetup, scraper
+from cursustrace.cli import discover_cmd
 from cursustrace.errors import ScrapeError
 
 ADD_ARGS = [
@@ -1047,7 +1048,7 @@ def test_stats(runner: CliRunner) -> None:
 def test_status_breakdown_lists_outdated_last() -> None:
     counts = {"rejected": 1, "outdated": 2, "applied": 1, "unapplied": 3, "interview": 0}
 
-    breakdown = cli_module._status_breakdown(counts)
+    breakdown = discover_cmd._status_breakdown(counts)
 
     assert breakdown == " (3 unapplied, 1 applied, 0 interview, 1 rejected, 2 outdated)"
 
@@ -1125,7 +1126,7 @@ def test_version_flags(runner: CliRunner) -> None:
 
 def test_run_command_passes_settings(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: list[config.Settings] = []
-    monkeypatch.setattr("cursustrace.app.run", captured.append)
+    monkeypatch.setattr(app, "run", captured.append)
 
     result = runner.invoke(
         cli_module.cli,
@@ -1146,7 +1147,7 @@ def test_run_command_css_flag(
     css = tmp_path / "custom.css"
     css.write_text("body {}", encoding="utf-8")
     captured: list[config.Settings] = []
-    monkeypatch.setattr("cursustrace.app.run", captured.append)
+    monkeypatch.setattr(app, "run", captured.append)
 
     result = runner.invoke(cli_module.cli, ["run", "--css", str(css)])
 
@@ -1161,7 +1162,7 @@ def test_run_command_invalid_port_type(runner: CliRunner) -> None:
 
 
 def test_run_command_out_of_range_port(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cursustrace.app.run", lambda settings: None)
+    monkeypatch.setattr(app, "run", lambda settings: None)
 
     result = runner.invoke(cli_module.cli, ["run", "--port", "70000"])
 
@@ -1182,7 +1183,7 @@ def test_run_command_inherits_group_log_level(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: list[config.Settings] = []
-    monkeypatch.setattr("cursustrace.app.run", captured.append)
+    monkeypatch.setattr(app, "run", captured.append)
 
     result = runner.invoke(cli_module.cli, ["--log-level", "debug", "run"])
 
@@ -1194,7 +1195,7 @@ def test_bare_invocation_uses_group_log_level(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: list[config.Settings] = []
-    monkeypatch.setattr("cursustrace.app.run", captured.append)
+    monkeypatch.setattr(app, "run", captured.append)
 
     result = runner.invoke(cli_module.cli, ["--log-level", "info"])
 
