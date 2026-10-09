@@ -18,7 +18,7 @@ from pypdf import PdfReader
 
 from cursustrace import app, attention, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
-from cursustrace.web import attention_ui, constants, state
+from cursustrace.web import attention_ui, constants, job_card, state, statistics
 
 JOB_URL = "https://example.com/jobs/1"
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
@@ -1165,12 +1165,12 @@ async def test_statistics_without_salary_shows_hint(user: User) -> None:
 
 
 def test_fill_months() -> None:
-    assert app._fill_months([("2026-01", 2), ("2026-04", 1)]) == (
+    assert statistics._fill_months([("2026-01", 2), ("2026-04", 1)]) == (
         ["2026-01", "2026-02", "2026-03", "2026-04"],
         [2, 0, 0, 1],
     )
-    assert app._fill_months([("2025-11", 3)]) == (["2025-11"], [3])
-    assert app._fill_months([("2025-12", 1), ("2026-01", 2)]) == (
+    assert statistics._fill_months([("2025-11", 3)]) == (["2025-11"], [3])
+    assert statistics._fill_months([("2025-12", 1), ("2026-01", 2)]) == (
         ["2025-12", "2026-01"],
         [1, 2],
     )
@@ -1417,25 +1417,25 @@ async def test_detail_profile_lists_multiple_profiles(user: User) -> None:
 
 
 def test_days_since_applied_handles_missing_and_bad_dates() -> None:
-    assert app._days_since_applied(cast(db.Job, {"date_applied": None})) is None
-    assert app._days_since_applied(cast(db.Job, {"date_applied": "not-a-date"})) is None
+    assert job_card._days_since_applied(cast(db.Job, {"date_applied": None})) is None
+    assert job_card._days_since_applied(cast(db.Job, {"date_applied": "not-a-date"})) is None
 
     now = time.localtime()
     today = date(now.tm_year, now.tm_mon, now.tm_mday)
     three_days_ago = (today - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
-    assert app._days_since_applied(cast(db.Job, {"date_applied": three_days_ago})) == 3
+    assert job_card._days_since_applied(cast(db.Job, {"date_applied": three_days_ago})) == 3
 
 
 def test_deadline_text_relative_phrases() -> None:
     today = date(2026, 10, 8)
-    assert app._deadline_text(None, today) is None
-    assert app._deadline_text("", today) is None
-    assert app._deadline_text("not-a-date", today) is None
-    assert app._deadline_text("2026-10-11", today) == "— in 3 days"
-    assert app._deadline_text("2026-10-09", today) == "— in 1 day"
-    assert app._deadline_text("2026-10-08", today) == "— is today"
-    assert app._deadline_text("2026-10-07", today) == "— passed 1 day ago"
-    assert app._deadline_text("2026-10-06", today) == "— passed 2 days ago"
+    assert job_card._deadline_text(None, today) is None
+    assert job_card._deadline_text("", today) is None
+    assert job_card._deadline_text("not-a-date", today) is None
+    assert job_card._deadline_text("2026-10-11", today) == "— in 3 days"
+    assert job_card._deadline_text("2026-10-09", today) == "— in 1 day"
+    assert job_card._deadline_text("2026-10-08", today) == "— is today"
+    assert job_card._deadline_text("2026-10-07", today) == "— passed 1 day ago"
+    assert job_card._deadline_text("2026-10-06", today) == "— passed 2 days ago"
 
 
 def test_attention_items_orders_deadlines_before_staleness() -> None:

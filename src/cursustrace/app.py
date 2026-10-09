@@ -6,10 +6,8 @@ import logging
 import os
 import signal
 import sqlite3
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
 from types import FrameType
 from typing import Literal, TypedDict, TypeVar, cast
 from urllib.parse import quote
@@ -31,10 +29,7 @@ from cursustrace.web.attention_ui import (
 )
 from cursustrace.web.constants import (
     APP_TITLE,
-    FUNNEL_STAGES,
-    STAT_CARDS,
     STATUS_CHECKBOXES,
-    STATUS_NAMES,
     STATUS_TABS,
     load_webapp_css,
 )
@@ -44,6 +39,7 @@ from cursustrace.web.dialogs import (
     _delete_job_from_detail,
     _tag_manager_dialog,
 )
+from cursustrace.web.job_card import _deadline_text, _render_job_card
 from cursustrace.web.state import (
     ATTENTION_NOTICE_KEY,
     DARK_MODE_KEY,
@@ -57,215 +53,13 @@ from cursustrace.web.state import (
     _dark_mode_value,
     _similar_notice_enabled,
 )
+from cursustrace.web.statistics import _render_statistics
 from cursustrace.web.status_controls import (
-    _render_comment_box,
-    _render_delete_controls,
     _render_status_controls,
     _stage_comment,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _days_since_applied(job: db.Job) -> int | None:
-    """Return whole days since the job was marked applied, or None when it was not."""
-    if not job["date_applied"]:
-        return None
-    try:
-        parsed = time.strptime(job["date_applied"], "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return None
-    applied = date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday)
-    now = time.localtime()
-    return (date(now.tm_year, now.tm_mon, now.tm_mday) - applied).days
-
-
-def _deadline_text(deadline: str | None, today: date | None = None) -> str | None:
-    """Describe a deadline relative to today, or None when it is unset or invalid."""
-    if not deadline:
-        return None
-    try:
-        parsed = datetime.fromisoformat(deadline).date()
-    except ValueError:
-        return None
-    if today is None:
-        now = time.localtime()
-        today = date(now.tm_year, now.tm_mon, now.tm_mday)
-    delta = (parsed - today).days
-    if delta == 0:
-        return "— is today"
-    if delta == 1:
-        return "— in 1 day"
-    if delta == -1:
-        return "— passed 1 day ago"
-    if delta > 1:
-        return f"— in {delta} days"
-    return f"— passed {-delta} days ago"
-
-
-def _render_job_card(
-    job: db.Job,
-    refresh: Callable[[], None],
-    *,
-    show_status: bool = False,
-    tags: list[str] | None = None,
-    on_tag_click: Callable[[str], None] | None = None,
-) -> None:
-    title = job["title"] or "Untitled position"
-    company = job["company"] or "Unknown company"
-    label = f"{title} — {company}"
-    if show_status:
-        label += f" [{db.job_status(job).title()}]"
-    tag_names = db.job_tags(job["id"]) if tags is None else tags
-    if tag_names:
-        with ui.row().classes("w-full items-center gap-1").mark("job-tags"):
-            for name in tag_names:
-                if on_tag_click is None:
-                    ui.chip(name)
-                else:
-                    chip = ui.chip(name)
-                    chip.on_click(lambda tag=name: on_tag_click(tag))
-    with ui.expansion(label).classes("w-full"):
-        ui.markdown(f"**Location:** {job['location']}")
-        ui.markdown(f"**Added:** {job['date_added']}")
-        salary_text = salary.format_salary(job)
-        if salary_text:
-            ui.markdown(f"**Salary:** {salary_text}").mark("salary")
-        deadline_text = _deadline_text(job["deadline"])
-        if deadline_text is not None:
-            ui.markdown(f"**Deadline:** {job['deadline']} {deadline_text}").mark("deadline")
-        days_applied = _days_since_applied(job)
-        if days_applied is not None:
-            ui.label(f"Applied {days_applied} days ago").classes("text-caption").mark(
-                "days-since-applied"
-            )
-        ui.link("Open job posting", job["job_url"], new_tab=True)
-        ui.link("View full details", f"/job/{job['id']}")
-        current = db.job_status(job)
-        _render_status_controls(job, current, refresh)
-        if current in ("applied", "interview", "rejected"):
-            _render_comment_box(job, current)
-        _render_delete_controls(job, refresh)
-
-
-def _fill_months(months: list[tuple[str, int]]) -> tuple[list[str], list[int]]:
-    """Expand sparse monthly counts into a zero-filled, contiguous series."""
-    counts = dict(months)
-    year, month = int(months[0][0][:4]), int(months[0][0][5:7])
-    end_year, end_month = int(months[-1][0][:4]), int(months[-1][0][5:7])
-    labels: list[str] = []
-    while (year, month) <= (end_year, end_month):
-        labels.append(f"{year:04d}-{month:02d}")
-        month += 1
-        if month > 12:
-            month, year = 1, year + 1
-    return labels, [counts.get(label, 0) for label in labels]
-
-
-def _render_status_pie(counts: dict[str, int], dark: bool) -> None:
-    with ui.card().classes("w-full"):
-        ui.label("Status distribution").classes("text-subtitle1")
-        options = {
-            "tooltip": {"trigger": "item", "formatter": "{b}: {c}"},
-            "legend": {"bottom": 0},
-            "series": [
-                {
-                    "type": "pie",
-                    "radius": ["45%", "70%"],
-                    "label": {"formatter": "{b}: {c}"},
-                    "data": [{"name": name, "value": counts[key]} for key, name in STATUS_NAMES],
-                }
-            ],
-        }
-        ui.echart(options, theme="dark" if dark else None).classes("w-full").mark("status-chart")
-
-
-def _render_funnel(dark: bool) -> None:
-    funnel = db.pipeline_funnel()
-    with ui.card().classes("w-full"):
-        ui.label("Response funnel").classes("text-subtitle1")
-        options = {
-            "tooltip": {"trigger": "item", "formatter": "{b}: {c}"},
-            "series": [
-                {
-                    "type": "funnel",
-                    "left": "10%",
-                    "width": "80%",
-                    "sort": "none",
-                    "gap": 2,
-                    "label": {"formatter": "{b}: {c}"},
-                    "data": [{"name": name, "value": funnel[key]} for key, name in FUNNEL_STAGES],
-                }
-            ],
-        }
-        ui.echart(options, theme="dark" if dark else None).classes("w-full").mark("funnel-chart")
-
-
-def _render_timeline(months: list[tuple[str, int]], dark: bool) -> None:
-    labels, values = _fill_months(months)
-    with ui.card().classes("w-full"):
-        ui.label("Applications per month").classes("text-subtitle1")
-        options = {
-            "tooltip": {"trigger": "axis"},
-            "xAxis": {"type": "category", "data": labels},
-            "yAxis": {"type": "value", "name": "Applications", "minInterval": 1},
-            "series": [{"type": "bar", "name": "Applications", "data": values, "barMaxWidth": 40}],
-        }
-        ui.echart(options, theme="dark" if dark else None).classes("w-full").mark("timeline-chart")
-
-
-def _render_statistics(dark: bool) -> None:
-    counts = db.job_counts()
-    with ui.grid(columns=2).classes("w-full gap-4"):
-        for key, label in STAT_CARDS:
-            with ui.card().classes("w-full items-center"):
-                ui.label(str(counts[key])).classes("text-h4").mark(f"stat-{key}")
-                ui.label(label)
-
-    if counts["total"]:
-        with ui.grid(columns=2).classes("w-full gap-4"):
-            _render_status_pie(counts, dark)
-            _render_funnel(dark)
-        months = db.applications_by_month()
-        if months:
-            _render_timeline(months, dark)
-        else:
-            ui.label("No applications recorded yet.").classes("text-caption")
-    else:
-        ui.label("No positions yet to display charts.").classes("text-caption")
-
-    jobs = db.get_jobs()
-    summary = salary.salary_summary(jobs)
-    with_salary = sum(entry["count"] for entry in summary.values())
-    ui.label(f"{with_salary} of {counts['total']} positions have salary data").classes(
-        "text-caption"
-    )
-    if not summary:
-        ui.label("Add salary to positions to see the distribution.").classes("text-caption")
-        return
-
-    currency = ui.toggle(list(salary.CURRENCIES), value=next(iter(summary))).classes("w-full")
-    chart_container = ui.column().classes("w-full")
-
-    def render_chart() -> None:
-        chart_container.clear()
-        labels, values = salary.salary_histogram(jobs, currency.value or "EUR")
-        with chart_container:
-            if not labels:
-                ui.label("No salary data for this currency.").classes("text-caption")
-                return
-            options = {
-                "tooltip": {"trigger": "axis"},
-                "xAxis": {"type": "category", "data": labels},
-                "yAxis": {"type": "value", "name": "Positions"},
-                "series": [{"type": "bar", "name": "Positions", "data": values}],
-            }
-            ui.echart(options, theme="dark" if dark else None).classes("w-full").mark(
-                "salary-chart"
-            )
-
-    currency.on_value_change(lambda _: render_chart())
-    render_chart()
 
 
 def _parse_urls(text: str | None) -> list[str]:
