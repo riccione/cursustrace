@@ -23,7 +23,7 @@ mcp = MCPServer(
     "cursustrace",
     instructions=(
         "CursusTrace is a job-application tracker with positions, statuses "
-        "(unapplied/applied/interview/rejected), tags, salaries, and events. "
+        "(unapplied/applied/interview/rejected/outdated), tags, salaries, and events. "
         "The database path is relative to the working directory the server was "
         "started in. Adding never overwrites: known URLs are always reported as "
         "duplicates. delete_positions is preview-first: call it with confirm=false "
@@ -90,8 +90,8 @@ def list_positions(
 ) -> dict[str, object]:
     """List tracked positions with optional filters, newest first by default.
 
-    status is one of unapplied/applied/interview/rejected; tags matches any of
-    the given tags; sort is one of newest/oldest/company/company_desc/status.
+    status is one of unapplied/applied/interview/rejected/outdated; tags matches
+    any of the given tags; sort is one of newest/oldest/company/company_desc/status.
     Returns each position together with its tags.
     """
     db.init_db()
@@ -409,16 +409,19 @@ def discover(
 
 @mcp.tool()
 def update_status(job_id: int, status: str, comment: str | None = None) -> dict[str, object]:
-    """Move a position to unapplied/applied/interview/rejected.
+    """Move a position to unapplied/applied/interview/rejected/outdated.
 
     comment (optional) records a note for the status-change history and is not
-    allowed when resetting to unapplied.
+    allowed when resetting to unapplied or when parking as outdated, since
+    neither stage stores a comment.
     """
     db.init_db()
     _validate_choice(status, STATUSES, "status")
     _position_or_error(job_id)
     if comment is not None and status == "unapplied":
         raise ToolError("comment is not allowed when resetting to unapplied")
+    if comment is not None and status == "outdated":
+        raise ToolError("comment is not allowed for outdated")
     db.set_job_status(job_id, cast("db.JobStatus", status))
     if comment is not None:
         db.set_job_comment(job_id, cast("db.JobFlag", status), comment)

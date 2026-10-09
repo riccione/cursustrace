@@ -16,7 +16,7 @@ from cursustrace.errors import ConfigError, ScrapeError
 from cursustrace.logsetup import setup_logging
 from cursustrace.validation import normalize_deadline, required_error, validate_url
 
-STATUSES = ["unapplied", "applied", "interview", "rejected"]
+STATUSES = ["unapplied", "applied", "interview", "rejected", "outdated"]
 SORT_ORDERS = ["newest", "oldest", "company", "company_desc", "status"]
 SIMILAR_NOTICE_KEY = "similar_notice"
 
@@ -508,7 +508,7 @@ def discover(
 def _status_breakdown(counts: dict[str, int]) -> str:
     if not counts:
         return ""
-    order = ("unapplied", "applied", "interview", "rejected")
+    order = ("unapplied", "applied", "interview", "rejected", "outdated")
     parts = [f"{counts[status]} {status}" for status in order if status in counts]
     return f" ({', '.join(parts)})"
 
@@ -758,6 +758,7 @@ def stats(as_json: bool) -> None:
     click.echo(f"Applied: {counts['applied']}")
     click.echo(f"Interview: {counts['interview']}")
     click.echo(f"Rejected: {counts['rejected']}")
+    click.echo(f"Outdated: {counts['outdated']}")
     if not summary:
         return
     for currency, entry in summary.items():
