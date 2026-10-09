@@ -18,7 +18,7 @@ from pypdf import PdfReader
 
 from cursustrace import app, attention, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
-from cursustrace.web import constants, state
+from cursustrace.web import attention_ui, constants, state
 
 JOB_URL = "https://example.com/jobs/1"
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
@@ -1463,7 +1463,7 @@ def test_attention_items_orders_deadlines_before_staleness() -> None:
     dated_soon = entry(3, deadline="2026-10-10")
     dated_later = entry(4, deadline="2026-10-14")
 
-    items = app._attention_items(
+    items = attention_ui._attention_items(
         [stale_newer, dated_later, stale_older, dated_soon], thresholds, today=today
     )
 
