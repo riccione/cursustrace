@@ -142,6 +142,23 @@ def _attention_items(
     return sorted(flagged, key=lambda entry: _attention_sort_key(entry, today))
 
 
+def _park_stale_positions() -> None:
+    """Park stale unapplied/applied positions, at most once per job.
+
+    The graduated rule in attention.is_outdated requires both the stage's
+    staleness warning and outdated_after_days, so the banner always gets
+    to warn first. A job that ever carried an outdated event is skipped:
+    once the user pulls a position out of the parked stage it stays out.
+    """
+    thresholds = _attention_thresholds()
+    parked = db.job_ids_with_status_event("outdated")
+    for job in db.get_jobs():
+        if job["id"] in parked:
+            continue
+        if attention.is_outdated(job, thresholds):
+            db.set_job_status(job["id"], "outdated")
+
+
 def _render_attention_banner(container: ui.column) -> None:
     container.clear()
     if not _attention_banner_enabled():
@@ -1317,6 +1334,7 @@ def dashboard_page(request: Request) -> None:
         return (page_count, page, len(jobs))
 
     def refresh() -> None:
+        _park_stale_positions()
         if tag_filter_select is not None:
             names = db.list_tags()
             tag_filter_select.options = names

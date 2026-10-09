@@ -759,6 +759,53 @@ async def test_banner_toggle_hides_and_persists(user: User) -> None:
     await user.should_not_see(marker="attention-banner")
 
 
+def _seed_stale_applied_job(days: int) -> int:
+    db.init_db()
+    job_id = db.add_job(JOB_URL, "Silent Lead", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "applied")
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_applied = ? WHERE id = ?", (_days_ago_stamp(days), job_id)
+        )
+    return job_id
+
+
+async def test_banner_warns_before_parking(user: User) -> None:
+    _seed_stale_applied_job(25)
+
+    await user.open("/")
+
+    await user.should_see("1 position needs attention")
+    assert db.get_jobs()[0]["outdated"] == 0
+    assert db.job_status(db.get_jobs()[0]) == "applied"
+
+
+async def test_auto_parks_stale_applied_position(user: User) -> None:
+    _seed_stale_applied_job(35)
+
+    await user.open("/")
+
+    await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
+    assert db.job_status(db.get_jobs()[0]) == "outdated"
+    await user.should_not_see(marker="attention-banner")
+
+
+async def test_manual_restore_wins_over_parking(user: User) -> None:
+    _seed_stale_applied_job(35)
+
+    await user.open("/")
+    await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
+
+    user.find(kind=ui.checkbox, content="Applied").click()
+    await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
+
+    await user.open("/")
+    await user.should_see("Silent Lead")
+    assert db.job_status(db.get_jobs()[0]) == "applied"
+    assert db.get_jobs()[0]["outdated"] == 0
+
+
 async def test_salary_filter_narrows_status_lists(user: User) -> None:
     db.init_db()
     db.add_job("https://example.com/unknown", "Unknown Salary", "Acme", "Remote", "Body")
