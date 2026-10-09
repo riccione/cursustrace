@@ -1231,6 +1231,77 @@ async def test_detail_shows_history_timeline(user: User) -> None:
     assert titles == {"Unapplied", "Applied", "Interview"}
 
 
+async def test_detail_checkbox_changes_status(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    user.find(kind=ui.checkbox, content="Applied").click()
+    await user.should_see("**Status:** Applied")
+
+    job = db.get_job(job_id)
+    assert job is not None
+    assert db.job_status(job) == "applied"
+    assert _checkbox(user, "Applied").value is True
+    assert any(event["status"] == "applied" for event in db.get_events(job_id))
+
+
+async def test_detail_checkbox_respects_disabled_states(user: User) -> None:
+    job_id = _seed_job()
+    db.set_job_status(job_id, "applied")
+    await user.open(f"/job/{job_id}")
+
+    assert _checkbox(user, "Applied").enabled is False
+    assert _checkbox(user, "Applied").value is True
+    assert _checkbox(user, "Interview").enabled is True
+    assert _checkbox(user, "Rejected").enabled is True
+
+
+async def test_detail_profile_contact_shows_and_copies(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = _seed_job()
+    profile_id = db.create_profile("Primary")
+    assert profile_id is not None
+    db.save_profile(_profile_payload(profile_id=profile_id, name="Primary"))
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see(marker="profile-summary")
+    name_field = next(iter(user.find(kind=ui.input, marker="detail-field-name").elements))
+    assert name_field.value == "Jane Doe"
+
+    copied: list[str] = []
+    monkeypatch.setattr(ui.clipboard, "write", copied.append)
+    user.find(marker="detail-copy-email").click()
+
+    await user.should_see("Copied Email!")
+    assert copied == ["jane@example.com"]
+
+
+async def test_detail_profile_section_hidden_without_profiles(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    await user.should_not_see(marker="profile-summary")
+
+
+async def test_detail_profile_lists_multiple_profiles(user: User) -> None:
+    job_id = _seed_job()
+    work_id = db.create_profile("Work")
+    personal_id = db.create_profile("Personal")
+    assert work_id is not None
+    assert personal_id is not None
+    db.save_profile(_profile_payload(profile_id=work_id, name="Work", full_name="Alice Async"))
+    db.save_profile(
+        _profile_payload(profile_id=personal_id, name="Personal", full_name="Bob Builder")
+    )
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("Work")
+    await user.should_see("Personal")
+    name_fields = user.find(kind=ui.input, marker="detail-field-name").elements
+    assert {field.value for field in name_fields} == {"Alice Async", "Bob Builder"}
+
+
 def test_days_since_applied_handles_missing_and_bad_dates() -> None:
     assert app._days_since_applied(cast(db.Job, {"date_applied": None})) is None
     assert app._days_since_applied(cast(db.Job, {"date_applied": "not-a-date"})) is None

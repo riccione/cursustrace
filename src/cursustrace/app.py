@@ -983,6 +983,24 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
     return True
 
 
+_FieldT = TypeVar("_FieldT", bound=ui.input)
+
+
+def _attach_copy_button(field: _FieldT, label: str, marker: str) -> _FieldT:
+    """Add an in-field copy-to-clipboard button to an input or textarea."""
+
+    def copy() -> None:
+        if not field.value:
+            ui.notify(f"{label} is empty", type="warning")
+            return
+        ui.clipboard.write(field.value)
+        ui.notify(f"Copied {label}!", type="positive")
+
+    with field.add_slot("append"):
+        ui.button(icon="content_copy", on_click=copy).props("flat dense").mark(marker)
+    return field
+
+
 def _render_profile_editor() -> None:
     ui.label("👤 Profile & CV Configuration").classes("text-h5")
 
@@ -1116,22 +1134,6 @@ def _render_profile_editor() -> None:
     def rerender_all() -> None:
         render_topbar()
         render_form()
-
-    _FieldT = TypeVar("_FieldT", bound=ui.input)
-
-    def _attach_copy_button(field: _FieldT, label: str, marker: str) -> _FieldT:
-        """Add an in-field copy-to-clipboard button to an input or textarea."""
-
-        def copy() -> None:
-            if not field.value:
-                ui.notify(f"{label} is empty", type="warning")
-                return
-            ui.clipboard.write(field.value)
-            ui.notify(f"Copied {label}!", type="positive")
-
-        with field.add_slot("append"):
-            ui.button(icon="content_copy", on_click=copy).props("flat dense").mark(marker)
-        return field
 
     def _copyable_input(label: str, value: str, marker: str) -> ui.input:
         """Profile contact field with an in-field copy-to-clipboard button."""
@@ -1577,76 +1579,138 @@ def dashboard_page(request: Request) -> None:
         refresh()
 
 
+def _render_copyable_field(label: str, value: str, field_marker: str, copy_marker: str) -> None:
+    """Readonly contact field with an in-field copy-to-clipboard button."""
+    field_input = (
+        ui.input(label, value=value).props("readonly").classes("w-full").mark(field_marker)
+    )
+    _attach_copy_button(field_input, label, copy_marker)
+
+
+def _render_profile_summary() -> None:
+    """Render each profile's contact fields; render nothing when no profiles exist."""
+    profiles = db.list_profiles()
+    if not profiles:
+        return
+    ui.separator()
+    with ui.column().classes("w-full gap-2").mark("profile-summary"):
+        ui.label("Your profile").classes("text-h6")
+        for profile in profiles:
+            if len(profiles) > 1:
+                ui.label(profile["name"]).classes("text-subtitle1")
+            with ui.row().classes("w-full gap-8"):
+                with ui.column().classes("flex-1 gap-2"):
+                    _render_copyable_field(
+                        "Full Name",
+                        profile["full_name"],
+                        "detail-field-name",
+                        "detail-copy-name",
+                    )
+                    _render_copyable_field(
+                        "Email", profile["email"], "detail-field-email", "detail-copy-email"
+                    )
+                    _render_copyable_field(
+                        "Phone", profile["phone"], "detail-field-phone", "detail-copy-phone"
+                    )
+                with ui.column().classes("flex-1 gap-2"):
+                    _render_copyable_field(
+                        "LinkedIn URL",
+                        profile["linkedin_url"],
+                        "detail-field-linkedin",
+                        "detail-copy-linkedin",
+                    )
+                    _render_copyable_field(
+                        "GitHub URL",
+                        profile["github_url"],
+                        "detail-field-github",
+                        "detail-copy-github",
+                    )
+
+
 @ui.page("/job/{job_id}")
 def job_detail_page(job_id: int) -> None:
     ui.page_title(APP_TITLE)
     _apply_dark_mode()
     with ui.column().classes("w-full max-w-4xl mx-auto p-4 gap-2"):
-        job = db.get_job(job_id)
-        with ui.row().classes("items-center gap-2"):
-            ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
-            if job is not None:
-                edit_dialog = _job_form_dialog(
-                    job,
-                    lambda values: _update_job_fields(job["id"], values),
-                    with_comments=True,
+
+        @ui.refreshable
+        def render_detail() -> None:
+            job = db.get_job(job_id)
+            with ui.row().classes("items-center gap-2"):
+                ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
+                if job is not None:
+                    edit_dialog = _job_form_dialog(
+                        job,
+                        lambda values: _update_job_fields(job["id"], values),
+                        with_comments=True,
+                    )
+                    ui.button("✏️ Edit", on_click=edit_dialog.open).props("flat color=primary")
+            if job is None:
+                ui.label("Position not found.").classes("text-warning")
+                return
+
+            current = db.job_status(job)
+            ui.label(job["title"] or "Untitled position").classes("text-h5")
+            ui.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
+            ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
+            ui.markdown(f"**Added:** {job['date_added']}")
+            detail_deadline_text = _deadline_text(job["deadline"])
+            if detail_deadline_text is not None:
+                ui.markdown(f"**Deadline:** {job['deadline']} {detail_deadline_text}").mark(
+                    "deadline"
                 )
-                ui.button("✏️ Edit", on_click=edit_dialog.open).props("flat color=primary")
-        if job is None:
-            ui.label("Position not found.").classes("text-warning")
-            return
+            ui.markdown(f"**Status:** {current.title()}")
+            _render_status_controls(job, current, refresh_detail)
+            detail_tags = db.job_tags(job["id"])
+            if detail_tags:
+                with ui.row().classes("items-center gap-1").mark("job-tags"):
+                    for name in detail_tags:
+                        ui.chip(
+                            name,
+                            on_click=lambda tag=name: ui.navigate.to(f"/?tag={quote(tag)}"),
+                        )
+            salary_text = salary.format_salary(job)
+            if salary_text:
+                ui.markdown(f"**Salary:** {salary_text}")
+            if job["date_applied"]:
+                ui.markdown(f"**Applied:** {job['date_applied']}")
+            if job["date_interview"]:
+                ui.markdown(f"**Interview:** {job['date_interview']}")
+            if job["date_rejected"]:
+                ui.markdown(f"**Rejected:** {job['date_rejected']}")
+            for stage, label in STATUS_CHECKBOXES:
+                comment = _stage_comment(job, stage)
+                if comment:
+                    ui.markdown(f"**{label} comment:** {comment}")
+            ui.link("Open original posting", job["job_url"], new_tab=True)
 
-        ui.label(job["title"] or "Untitled position").classes("text-h5")
-        ui.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
-        ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
-        ui.markdown(f"**Added:** {job['date_added']}")
-        detail_deadline_text = _deadline_text(job["deadline"])
-        if detail_deadline_text is not None:
-            ui.markdown(f"**Deadline:** {job['deadline']} {detail_deadline_text}").mark("deadline")
-        ui.markdown(f"**Status:** {db.job_status(job).title()}")
-        detail_tags = db.job_tags(job["id"])
-        if detail_tags:
-            with ui.row().classes("items-center gap-1").mark("job-tags"):
-                for name in detail_tags:
-                    ui.chip(
-                        name,
-                        on_click=lambda tag=name: ui.navigate.to(f"/?tag={quote(tag)}"),
-                    )
-        salary_text = salary.format_salary(job)
-        if salary_text:
-            ui.markdown(f"**Salary:** {salary_text}")
-        if job["date_applied"]:
-            ui.markdown(f"**Applied:** {job['date_applied']}")
-        if job["date_interview"]:
-            ui.markdown(f"**Interview:** {job['date_interview']}")
-        if job["date_rejected"]:
-            ui.markdown(f"**Rejected:** {job['date_rejected']}")
-        for stage, label in STATUS_CHECKBOXES:
-            comment = _stage_comment(job, stage)
-            if comment:
-                ui.markdown(f"**{label} comment:** {comment}")
-        ui.link("Open original posting", job["job_url"], new_tab=True)
+            _render_profile_summary()
 
-        events = db.get_events(job["id"])
-        if events:
+            events = db.get_events(job["id"])
+            if events:
+                ui.separator()
+                ui.label("History").classes("text-h6")
+                with ui.timeline(side="right"):
+                    for event in events:
+                        ui.timeline_entry(
+                            title=event["status"].title(),
+                            subtitle=event["created_at"],
+                        )
+
             ui.separator()
-            ui.label("History").classes("text-h6")
-            with ui.timeline(side="right"):
-                for event in events:
-                    ui.timeline_entry(
-                        title=event["status"].title(),
-                        subtitle=event["created_at"],
-                    )
+            ui.markdown(job["description"] or "_No description captured._").classes(
+                "job-description w-full min-w-0"
+            ).mark("job-description")
 
-        ui.separator()
-        ui.markdown(job["description"] or "_No description captured._").classes(
-            "job-description w-full min-w-0"
-        ).mark("job-description")
+            delete_dialog = _confirm_delete_dialog(
+                job, lambda dialog: _delete_job_from_detail(dialog, job["id"])
+            )
+            ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
 
-        delete_dialog = _confirm_delete_dialog(
-            job, lambda dialog: _delete_job_from_detail(dialog, job["id"])
-        )
-        ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
+        def refresh_detail() -> None:
+            render_detail.refresh()
+
+        render_detail()
 
 
 def _print_config_source(settings: config.Settings) -> None:

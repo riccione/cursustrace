@@ -9,14 +9,14 @@ on:
   #     - 'docs/**'
   #     - '.gitignore'
   #     - 'LICENSE'
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
+  # pull_request:
+  #   branches: [main]
+  #   types: [opened, synchronize, reopened, ready_for_review]
+  #   paths-ignore:
+  #     - '**.md'
+  #     - 'docs/**'
+  #     - '.gitignore'
+  #     - 'LICENSE'
   workflow_dispatch:
 
 concurrency:
