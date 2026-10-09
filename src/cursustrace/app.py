@@ -41,12 +41,14 @@ STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
     ("applied", "✅ Applied Positions", "No applied positions yet."),
     ("interview", "🗣️ Interview Positions", "No interview positions yet."),
     ("rejected", "❌ Rejected Positions", "No rejected positions yet."),
+    ("outdated", "🗄️ Outdated Positions", "No outdated positions yet."),
 )
 
-STATUS_CHECKBOXES: tuple[tuple[db.JobFlag, str], ...] = (
+STATUS_CHECKBOXES: tuple[tuple[db.JobFlag | Literal["outdated"], str], ...] = (
     ("applied", "Applied"),
     ("interview", "Interview"),
     ("rejected", "Rejected"),
+    ("outdated", "Outdated"),
 )
 
 STAT_CARDS: tuple[tuple[str, str], ...] = (
@@ -55,6 +57,7 @@ STAT_CARDS: tuple[tuple[str, str], ...] = (
     ("applied", "✅ Applied"),
     ("interview", "🗣️ Interview"),
     ("rejected", "❌ Rejected"),
+    ("outdated", "🗄️ Outdated"),
 )
 
 STATUS_NAMES: tuple[tuple[db.JobStatus, str], ...] = (
@@ -62,6 +65,7 @@ STATUS_NAMES: tuple[tuple[db.JobStatus, str], ...] = (
     ("applied", "Applied"),
     ("interview", "Interview"),
     ("rejected", "Rejected"),
+    ("outdated", "Outdated"),
 )
 
 FUNNEL_STAGES: tuple[tuple[str, str], ...] = (
@@ -185,29 +189,34 @@ def _apply_dark_mode() -> ui.dark_mode:
     return ui.dark_mode(value=_dark_mode_value(name))
 
 
-_DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobFlag]] = {
+_DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobStatus]] = {
     "unapplied": frozenset(),
     "applied": frozenset({"applied"}),
     "interview": frozenset({"applied", "interview"}),
     "rejected": frozenset({"applied", "interview"}),
+    "outdated": frozenset({"outdated"}),
 }
 
 
-def _checked_flags(job: db.Job) -> frozenset[db.JobFlag]:
+def _checked_flags(job: db.Job) -> frozenset[db.JobStatus]:
     status = db.job_status(job)
     if status == "applied":
         return frozenset({"applied"})
     if status == "interview":
         return frozenset({"applied", "interview"})
     if status == "rejected":
-        flags: set[db.JobFlag] = {"applied", "rejected"}
+        flags: set[db.JobStatus] = {"applied", "rejected"}
         if job["date_interview"]:
             flags.add("interview")
         return frozenset(flags)
+    if status == "outdated":
+        return frozenset({"outdated"})
     return frozenset()
 
 
-def _stage_comment(job: db.Job, stage: db.JobFlag) -> str:
+def _stage_comment(job: db.Job, stage: db.JobStatus) -> str:
+    if stage == "outdated":
+        return ""
     if stage == "applied":
         return job["applied_comment"] or ""
     if stage == "interview":
@@ -217,7 +226,7 @@ def _stage_comment(job: db.Job, stage: db.JobFlag) -> str:
 
 def _status_handler(
     job_id: int,
-    status: db.JobFlag,
+    status: db.JobStatus,
     refresh: Callable[[], None],
 ) -> Callable[[events.ValueChangeEventArguments[bool | None]], None]:
     def handler(event: events.ValueChangeEventArguments[bool | None]) -> None:
@@ -863,6 +872,8 @@ def _job_form_dialog(
         comment_inputs: dict[db.JobFlag, ui.textarea] = {}
         if with_comments:
             for stage, label in STATUS_CHECKBOXES:
+                if stage == "outdated":
+                    continue
                 comment_inputs[stage] = (
                     ui.textarea(
                         f"{label} comment",
@@ -1678,6 +1689,8 @@ def job_detail_page(job_id: int) -> None:
                 ui.markdown(f"**Interview:** {job['date_interview']}")
             if job["date_rejected"]:
                 ui.markdown(f"**Rejected:** {job['date_rejected']}")
+            if job["date_outdated"]:
+                ui.markdown(f"**Outdated:** {job['date_outdated']}")
             for stage, label in STATUS_CHECKBOXES:
                 comment = _stage_comment(job, stage)
                 if comment:
