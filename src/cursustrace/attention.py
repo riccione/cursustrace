@@ -16,6 +16,7 @@ class Thresholds:
     stale_applied_days: int
     stale_unapplied_days: int
     deadline_warning_days: int
+    outdated_after_days: int = config.DEFAULT_OUTDATED_AFTER_DAYS
 
     @classmethod
     def from_settings(cls, settings: config.Settings) -> Thresholds:
@@ -24,6 +25,7 @@ class Thresholds:
             stale_applied_days=settings.stale_applied_days,
             stale_unapplied_days=settings.stale_unapplied_days,
             deadline_warning_days=settings.deadline_warning_days,
+            outdated_after_days=settings.outdated_after_days,
         )
 
 
@@ -97,3 +99,28 @@ def reasons_for(job: db.Job, thresholds: Thresholds, *, today: date | None = Non
             reasons.append(_deadline_reason(remaining))
 
     return reasons
+
+
+def is_outdated(job: db.Job, thresholds: Thresholds, *, today: date | None = None) -> bool:
+    """Return True when an unapplied/applied position is stale enough to park.
+
+    Parking is graduated: the position must have missed its own stage's
+    staleness threshold (so the attention banner has already warned about
+    it) *and* have aged past ``outdated_after_days``. Interview and rejected
+    positions never park because the employer already replied, and an
+    already-parked position never matches again.
+    """
+    reference = today if today is not None else _today()
+    status = db.job_status(job)
+    if status == "applied":
+        stage_days = thresholds.stale_applied_days
+        since = _parse_day(job["date_applied"])
+    elif status == "unapplied":
+        stage_days = thresholds.stale_unapplied_days
+        since = _parse_day(job["date_added"])
+    else:
+        return False
+    if since is None:
+        return False
+    days = (reference - since).days
+    return days >= stage_days and days >= thresholds.outdated_after_days
