@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cursustrace import db, discovery
+from cursustrace import db, discovery, scraper
 from cursustrace.errors import ScrapeError
 
 
@@ -89,7 +89,7 @@ def test_discover_splits_known_and_new(monkeypatch: pytest.MonkeyPatch) -> None:
     job_id = db.add_job("https://remoteok.com/jobs/123", "Engineer", "Acme", None, "Body")
     assert job_id is not None
     db.set_job_status(job_id, "applied")
-    monkeypatch.setattr("cursustrace.scraper.fetch_html", lambda url: SAMPLE_HTML)
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: SAMPLE_HTML)
 
     result = discovery.discover(discovery.resolve_source("https://remoteok.com"), limit=10)
 
@@ -117,7 +117,7 @@ def test_discover_splits_known_and_new(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_discover_honours_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     db.init_db()
-    monkeypatch.setattr("cursustrace.scraper.fetch_html", lambda url: SAMPLE_HTML)
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: SAMPLE_HTML)
 
     result = discovery.discover(discovery.resolve_source("https://remoteok.com"), limit=1)
 
@@ -130,7 +130,7 @@ def test_discover_propagates_fetch_errors(monkeypatch: pytest.MonkeyPatch) -> No
     def boom(url: str) -> str:
         raise ScrapeError(f"Unable to fetch page {url}: 403 Forbidden")
 
-    monkeypatch.setattr("cursustrace.scraper.fetch_html", boom)
+    monkeypatch.setattr(scraper, "fetch_html", boom)
 
     with pytest.raises(ScrapeError, match="403 Forbidden"):
         discovery.discover(discovery.resolve_source("https://example.com/jobs"))

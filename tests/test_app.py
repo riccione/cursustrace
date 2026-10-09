@@ -16,9 +16,19 @@ from nicegui import ui
 from nicegui.testing import User
 from pypdf import PdfReader
 
-from cursustrace import app, attention, config, db, logsetup, scraper
+from cursustrace import app, attention, backup, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
-from cursustrace.web import attention_ui, constants, job_card, scan, state, statistics
+from cursustrace.web import (
+    attention_ui,
+    constants,
+    job_card,
+    scan,
+    state,
+    statistics,
+)
+from cursustrace.web import (
+    run as web_run,
+)
 
 JOB_URL = "https://example.com/jobs/1"
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
@@ -1952,7 +1962,7 @@ def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
     captured: dict[str, object] = {}
-    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(ui, "run", lambda **kwargs: captured.update(kwargs))
 
     settings = config.Settings(
         host="127.0.0.1", port=9002, reload=True, show=True, backup_on_start=False
@@ -1972,14 +1982,14 @@ def test_run_forwards_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 def test_run_configures_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "cursustrace.db")
     monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
-    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: None)
+    monkeypatch.setattr(ui, "run", lambda **kwargs: None)
     captured: dict[str, object] = {}
 
     def fake_setup(level: str, log_dir: Path | None = None, retention_days: int = 7) -> None:
         captured["level"] = level
         captured["retention"] = retention_days
 
-    monkeypatch.setattr("cursustrace.app.setup_logging", fake_setup)
+    monkeypatch.setattr(web_run, "setup_logging", fake_setup)
 
     settings = config.Settings(log_level="debug", log_retention_days=3, backup_on_start=False)
     try:
@@ -2004,7 +2014,7 @@ def _prepare_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, o
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setenv("NICEGUI_USER_SIMULATION", "true")
     captured: dict[str, object] = {}
-    monkeypatch.setattr("cursustrace.app.ui.run", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(ui, "run", lambda **kwargs: captured.update(kwargs))
     return captured
 
 
@@ -2073,7 +2083,7 @@ def test_run_survives_backup_failure(
     def explode(*_args: object, **_kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("cursustrace.app.backup.backup_database", explode)
+    monkeypatch.setattr(backup, "backup_database", explode)
     settings = config.Settings(backup_dir=tmp_path / "backups", backup_on_start=True)
     try:
         app.run(settings)
@@ -2090,7 +2100,7 @@ def test_backup_on_startup_without_database(
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path / "missing.db")
     settings = config.Settings(backup_dir=tmp_path / "backups")
 
-    app._backup_on_startup(settings)
+    web_run._backup_on_startup(settings)
 
     assert "Backup skipped: no database file yet" in capsys.readouterr().out
 
