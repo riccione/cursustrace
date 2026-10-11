@@ -266,41 +266,68 @@ def _render_copyable_field(label: str, value: str, field_marker: str, copy_marke
     _attach_copy_button(field_input, label, copy_marker)
 
 
-def _render_profile_summary() -> None:
-    """Render each profile's contact fields; render nothing when no profiles exist."""
+def _render_profile_summary(job: db.Job) -> None:
+    """Render a CV-used selector plus the chosen profile's contact fields."""
     profiles = db.list_profiles()
     if not profiles:
         return
-    ui.separator()
+    known_ids = {profile["id"] for profile in profiles}
+    selected_id = job["profile_id"] if job["profile_id"] in known_ids else None
+    if selected_id is None:
+        stored = db.get_setting(SELECTED_PROFILE_KEY)
+        global_id = int(stored) if stored is not None and stored.isdigit() else None
+        selected_id = global_id if global_id in known_ids else min(known_ids)
+
     with ui.column().classes("w-full gap-2").mark("profile-summary"):
         ui.label("Your profile").classes("text-h6")
-        for profile in profiles:
-            if len(profiles) > 1:
-                ui.label(profile["name"]).classes("text-subtitle1")
+        selector = (
+            ui.select(
+                options={profile["id"]: profile["name"] for profile in profiles},
+                value=selected_id,
+                label="CV used for this application",
+            )
+            .classes("w-64")
+            .mark("profile-used-select")
+        )
+
+        @ui.refreshable
+        def render_fields() -> None:
+            current = db.get_profile(selector.value)
             with ui.row().classes("w-full gap-8"):
                 with ui.column().classes("flex-1 gap-2"):
                     _render_copyable_field(
                         "Full Name",
-                        profile["full_name"],
+                        current["full_name"],
                         "detail-field-name",
                         "detail-copy-name",
                     )
                     _render_copyable_field(
-                        "Email", profile["email"], "detail-field-email", "detail-copy-email"
+                        "Email", current["email"], "detail-field-email", "detail-copy-email"
                     )
                     _render_copyable_field(
-                        "Phone", profile["phone"], "detail-field-phone", "detail-copy-phone"
+                        "Phone", current["phone"], "detail-field-phone", "detail-copy-phone"
                     )
                 with ui.column().classes("flex-1 gap-2"):
                     _render_copyable_field(
                         "LinkedIn URL",
-                        profile["linkedin_url"],
+                        current["linkedin_url"],
                         "detail-field-linkedin",
                         "detail-copy-linkedin",
                     )
                     _render_copyable_field(
                         "GitHub URL",
-                        profile["github_url"],
+                        current["github_url"],
                         "detail-field-github",
                         "detail-copy-github",
                     )
+
+        def switch(event: events.ValueChangeEventArguments[int | None]) -> None:
+            if event.value is None:
+                return
+            profile = db.get_profile(event.value)
+            db.set_job_profile(job["id"], profile["id"], profile["name"])
+            ui.notify(f"CV '{profile['name']}' saved for this application.", type="positive")
+            render_fields.refresh()
+
+        selector.on_value_change(switch)
+        render_fields()

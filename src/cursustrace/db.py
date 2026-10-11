@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     salary_period TEXT,
     salary_note TEXT,
     deadline TEXT,
-    fingerprint TEXT UNIQUE
+    fingerprint TEXT UNIQUE,
+    profile_id INTEGER,
+    profile_name TEXT
 )
 """
 
@@ -138,6 +140,8 @@ class Job(TypedDict):
     salary_note: str | None
     deadline: str | None
     fingerprint: str | None
+    profile_id: int | None
+    profile_name: str | None
 
 
 JobStatus = Literal["unapplied", "applied", "interview", "rejected", "outdated"]
@@ -259,6 +263,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("salary_period", "TEXT"),
         ("salary_note", "TEXT"),
         ("deadline", "TEXT"),
+        ("profile_id", "INTEGER"),
+        ("profile_name", "TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
@@ -588,6 +594,16 @@ def update_job_comments(job_id: int, applied: str, interview: str, rejected: str
             "UPDATE jobs SET applied_comment = ?, interview_comment = ?, "
             "rejected_comment = ? WHERE id = ?",
             (applied, interview, rejected, job_id),
+        )
+        conn.commit()
+
+
+def set_job_profile(job_id: int, profile_id: int, profile_name: str) -> None:
+    """Record which profile (CV) was used for a job application."""
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "UPDATE jobs SET profile_id = ?, profile_name = ? WHERE id = ?",
+            (profile_id, profile_name, job_id),
         )
         conn.commit()
 

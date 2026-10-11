@@ -74,7 +74,7 @@ def job_detail_page(job_id: int) -> None:
                     ui.markdown(f"**{label} comment:** {comment}")
             ui.link("Open original posting", job["job_url"], new_tab=True)
 
-            _render_profile_summary()
+            _render_profile_summary(job)
 
             events = db.get_events(job["id"])
             if events:

@@ -1408,7 +1408,7 @@ async def test_detail_profile_section_hidden_without_profiles(user: User) -> Non
     await user.should_not_see(marker="profile-summary")
 
 
-async def test_detail_profile_lists_multiple_profiles(user: User) -> None:
+async def test_detail_profile_dropdown_switches_and_saves(user: User) -> None:
     job_id = _seed_job()
     work_id = db.create_profile("Work")
     personal_id = db.create_profile("Personal")
@@ -1420,10 +1420,38 @@ async def test_detail_profile_lists_multiple_profiles(user: User) -> None:
     )
     await user.open(f"/job/{job_id}")
 
-    await user.should_see("Work")
-    await user.should_see("Personal")
     name_fields = user.find(kind=ui.input, marker="detail-field-name").elements
-    assert {field.value for field in name_fields} == {"Alice Async", "Bob Builder"}
+    assert len(name_fields) == 1
+    assert next(iter(name_fields)).value == "Alice Async"
+
+    select = cast(ui.select, user.find(marker="profile-used-select").elements.pop())
+    select.set_value(personal_id)
+    await asyncio.sleep(0.1)
+
+    await user.should_see("CV 'Personal' saved for this application.")
+    name_field = next(iter(user.find(kind=ui.input, marker="detail-field-name").elements))
+    assert name_field.value == "Bob Builder"
+    job = db.get_job(job_id)
+    assert job is not None
+    assert job["profile_id"] == personal_id
+    assert job["profile_name"] == "Personal"
+
+
+async def test_detail_profile_defaults_to_saved_profile(user: User) -> None:
+    job_id = _seed_job()
+    work_id = db.create_profile("Work")
+    personal_id = db.create_profile("Personal")
+    assert work_id is not None
+    assert personal_id is not None
+    db.save_profile(_profile_payload(profile_id=work_id, name="Work", full_name="Alice Async"))
+    db.save_profile(
+        _profile_payload(profile_id=personal_id, name="Personal", full_name="Bob Builder")
+    )
+    db.set_job_profile(job_id, personal_id, "Personal")
+    await user.open(f"/job/{job_id}")
+
+    name_field = next(iter(user.find(kind=ui.input, marker="detail-field-name").elements))
+    assert name_field.value == "Bob Builder"
 
 
 def test_days_since_applied_handles_missing_and_bad_dates() -> None:
@@ -2181,6 +2209,23 @@ async def test_cards_and_detail_show_tag_chips(user: User) -> None:
     await user.open(f"/job/{job_id}")
     await user.should_see("golang")
     await user.should_see("referral")
+
+
+async def test_card_shows_cv_used_chip(user: User) -> None:
+    job_id = _seed_job()
+    profile_id = db.create_profile("Work CV")
+    assert profile_id is not None
+    db.set_job_profile(job_id, profile_id, "Work CV")
+
+    await user.open("/")
+    await user.should_see("CV: Work CV")
+
+
+async def test_card_hides_cv_chip_without_profile(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    await user.should_not_see(marker="cv-used-chip")
 
 
 async def test_tag_filter_select_narrows_list(user: User) -> None:

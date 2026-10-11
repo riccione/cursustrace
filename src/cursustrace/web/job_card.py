@@ -74,6 +74,8 @@ def _render_job_card(
                 else:
                     chip = ui.chip(name)
                     chip.on_click(lambda tag=name: on_tag_click(tag))
+    if job["profile_name"]:
+        ui.chip(f"CV: {job['profile_name']}").mark("cv-used-chip")
     with ui.expansion(label).classes("w-full"):
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")
