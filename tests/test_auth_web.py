@@ -172,3 +172,44 @@ async def test_multi_user_off_keeps_dashboard_open(user: User) -> None:
     """Regression guard: with the toggle off the dashboard still loads without login."""
     await user.open("/")
     await user.should_see(marker="scan-urls")
+
+
+async def test_logout_returns_to_login(multi_user: User) -> None:
+    await _register(multi_user, "alice@example.com")
+    await multi_user.should_see(marker="scan-urls")
+    multi_user.find(marker="logout-button").click()
+    await multi_user.should_see(marker="login-email")
+
+
+async def test_header_controls_hidden_when_multi_user_off(user: User) -> None:
+    await user.open("/")
+    await user.should_not_see(marker="logout-button")
+    await user.should_not_see(marker="change-password-button")
+
+
+async def test_change_password_rejects_wrong_current(multi_user: User) -> None:
+    await _register(multi_user, "alice@example.com")
+    await multi_user.should_see(marker="scan-urls")
+    multi_user.find(marker="change-password-button").click()
+    multi_user.find(marker="current-password").type("Wrong1")
+    multi_user.find(marker="new-password").type("NewPass1")
+    multi_user.find(marker="confirm-new-password").type("NewPass1")
+    multi_user.find(marker="change-password-submit").click()
+    await multi_user.should_see(marker="change-password-error")
+
+
+async def test_change_password_allows_login_with_new_password(multi_user: User) -> None:
+    await _register(multi_user, "alice@example.com")
+    await multi_user.should_see(marker="scan-urls")
+    multi_user.find(marker="change-password-button").click()
+    multi_user.find(marker="current-password").type("Secret1")
+    multi_user.find(marker="new-password").type("NewPass1")
+    multi_user.find(marker="confirm-new-password").type("NewPass1")
+    multi_user.find(marker="change-password-submit").click()
+    await multi_user.should_see("Password changed.")
+    multi_user.find(marker="logout-button").click()
+    await multi_user.should_see(marker="login-email")
+    multi_user.find(marker="login-email").type("alice@example.com")
+    multi_user.find(marker="login-password").type("NewPass1")
+    multi_user.find(marker="login-submit").click()
+    await multi_user.should_see(marker="scan-urls")

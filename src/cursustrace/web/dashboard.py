@@ -9,12 +9,13 @@ from starlette.requests import Request
 
 from cursustrace import db, salary
 from cursustrace.web.attention_ui import _park_stale_positions, _render_attention_banner
+from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
 from cursustrace.web.constants import APP_TITLE, STATUS_TABS
 from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
 from cursustrace.web.profile import _render_profile_editor
 from cursustrace.web.scan import _handle_scan
-from cursustrace.web.session import current_user_id
+from cursustrace.web.session import current_email, current_user_id
 from cursustrace.web.settings_drawer import _render_settings
 from cursustrace.web.state import _apply_dark_mode
 from cursustrace.web.statistics import _render_statistics
@@ -184,7 +185,18 @@ def dashboard_page(request: Request) -> None:
             dashboard_tab = ui.tab("📋 Dashboard")
             stats_tab = ui.tab("📊 Statistics")
             profile_tab = ui.tab("👤 Profile & CV Editor")
-        with ui.element("div").classes("flex-1 flex justify-end min-w-0"):
+        with ui.element("div").classes("flex-1 flex justify-end min-w-0 items-center gap-2"):
+            if _multi_user_enabled():
+                email = current_email()
+                if email:
+                    ui.label(email).classes("text-caption text-grey-4 truncate max-w-48").mark(
+                        "header-email"
+                    )
+                change_password_dialog = _change_password_dialog()
+                ui.button("Change password", on_click=change_password_dialog.open).props(
+                    "flat color=white"
+                ).mark("change-password-button")
+                ui.button("Logout", on_click=logout).props("flat color=white").mark("logout-button")
             settings_button = (
                 ui.button(icon="settings").props("flat color=white").mark("settings-button")
             )
