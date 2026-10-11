@@ -39,10 +39,13 @@ matching stage checkbox on a card.
 
 Select `View full details` on a card to open the complete scraped description
 and metadata. The detail view has the same stage checkboxes, plus a
-`Your profile` section with your name, email, phone, LinkedIn, and GitHub
-fields. Each field has an in-field copy button for pasting into application
-forms. The `Search company` box matches fuzzy company names across all
-pipeline stages at once, and each result shows its status, e.g. `[Applied]`.
+`Your profile` section: the `CV used for this application` dropdown records
+which profile you applied with (saved per position), and that profile's
+name, email, phone, LinkedIn, and GitHub fields show below, each with an
+in-field copy button for pasting into application forms. The dashboard card
+displays the saved choice as a `CV:` chip. The `Search company` box matches
+fuzzy company names across all pipeline stages at once, and each result
+shows its status, e.g. `[Applied]`.
 
 When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
 to enter a position's URL, title, company, description, and an optional
