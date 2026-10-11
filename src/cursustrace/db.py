@@ -1024,17 +1024,30 @@ def list_profiles() -> list[Profile]:
     return [_row_to_profile(row) for row in rows]
 
 
-def create_profile(name: str) -> int | None:
-    """Create an empty named profile; return its id, or None when empty or taken."""
+def create_profile(name: str, copy_from: int | None = None) -> int | None:
+    """Create a named profile, optionally copying contact fields from another.
+
+    Returns the new id, or None when the name is empty or already taken.
+    """
     cleaned = (name or "").strip()
     if not cleaned:
         return None
+    contact_columns = ("full_name", "location", "phone", "email", "linkedin_url", "github_url")
     with closing(get_connection()) as conn:
+        contact: tuple[str, ...] | None = None
+        if copy_from is not None:
+            row = conn.execute("SELECT * FROM profile WHERE id = ?", (copy_from,)).fetchone()
+            if row is not None:
+                contact = tuple((row[column] or "") for column in contact_columns)
         try:
-            cursor = conn.execute(
-                "INSERT INTO profile (name) VALUES (?)",
-                (cleaned,),
-            )
+            if contact is None:
+                cursor = conn.execute("INSERT INTO profile (name) VALUES (?)", (cleaned,))
+            else:
+                cursor = conn.execute(
+                    "INSERT INTO profile (name, full_name, location, phone, email, "
+                    "linkedin_url, github_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (cleaned, *contact),
+                )
             conn.commit()
         except sqlite3.IntegrityError:
             return None

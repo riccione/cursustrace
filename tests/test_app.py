@@ -1766,7 +1766,9 @@ async def test_profile_dropdown_switches_between_profiles(user: User) -> None:
 
 async def test_profile_add_dialog_creates_and_selects_profile(user: User) -> None:
     db.init_db()
-    db.create_profile("Default")
+    default = db.create_profile("Default")
+    assert default is not None
+    db.save_profile(_profile_payload(profile_id=default, name="Default"))
     await user.open("/")
 
     user.find(marker="add-profile").click()
@@ -1776,7 +1778,10 @@ async def test_profile_add_dialog_creates_and_selects_profile(user: User) -> Non
     await user.should_see("Profile 'Work CV' created.")
     assert [p["name"] for p in db.list_profiles()] == ["Default", "Work CV"]
     await user.should_see(marker="profile-select")
-    assert cast(ui.input, user.find("Full Name").elements.pop()).value in ("", None)
+    work = next(profile for profile in db.list_profiles() if profile["name"] == "Work CV")
+    assert work["full_name"] == "Jane Doe"
+    assert work["summary"] == ""
+    assert cast(ui.input, user.find("Full Name").elements.pop()).value == "Jane Doe"
 
 
 async def test_profile_add_rejects_duplicate_name(user: User) -> None:

@@ -1327,6 +1327,37 @@ def test_create_profile_validates_name(db_path: Path) -> None:
     assert second != first
 
 
+def test_create_profile_copies_contact_fields_from_source(db_path: Path) -> None:
+    db.init_db()
+    source = db.create_profile("Default")
+    assert source is not None
+    db.save_profile(_profile_payload())
+
+    copied = db.create_profile("Work CV", copy_from=source)
+    assert copied is not None
+    profile = db.get_profile(copied)
+    assert profile["name"] == "Work CV"
+    assert profile["full_name"] == "Jane Doe"
+    assert profile["location"] == "Remote"
+    assert profile["phone"] == "555-0100"
+    assert profile["email"] == "jane@example.com"
+    assert profile["linkedin_url"] == "https://linkedin.com/in/jane"
+    assert profile["github_url"] == "https://github.com/jane"
+    assert profile["summary"] == ""
+    assert profile["work_history"] == ""
+    assert profile["education"] == ""
+    assert profile["skills"] == ""
+
+
+def test_create_profile_unknown_copy_source_is_empty(db_path: Path) -> None:
+    db.init_db()
+    created = db.create_profile("Orphan", copy_from=999)
+    assert created is not None
+    profile = db.get_profile(created)
+    assert profile["full_name"] == ""
+    assert profile["email"] == ""
+
+
 def test_list_profiles_orders_by_name(db_path: Path) -> None:
     db.init_db()
     db.create_profile("beta")
