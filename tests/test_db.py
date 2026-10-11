@@ -232,6 +232,8 @@ def _job(
         "salary_note": None,
         "deadline": None,
         "fingerprint": None,
+        "profile_id": None,
+        "profile_name": None,
     }
 
 
@@ -707,6 +709,54 @@ def test_update_job_comments_replaces_all(db_path: Path) -> None:
     )
 
 
+def test_set_job_profile_round_trip(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+    before = db.get_job(job_id)
+    assert before is not None
+    assert before["profile_id"] is None
+    assert before["profile_name"] is None
+
+    db.set_job_profile(job_id, 7, "Work CV")
+
+    job = db.get_job(job_id)
+    assert job is not None
+    assert job["profile_id"] == 7
+    assert job["profile_name"] == "Work CV"
+
+
+def test_job_profile_survives_update_and_status_change(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+    db.set_job_profile(job_id, 7, "Work CV")
+
+    db.update_job(job_id, "https://example.com/1", "Engineer", "Acme", "Remote", "body")
+    db.set_job_status(job_id, "applied")
+
+    job = db.get_job(job_id)
+    assert job is not None
+    assert job["profile_id"] == 7
+    assert job["profile_name"] == "Work CV"
+
+
+def test_job_profile_snapshot_survives_profile_delete(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+    profile_id = db.create_profile("Work CV")
+    assert profile_id is not None
+    db.set_job_profile(job_id, profile_id, "Work CV")
+
+    db.delete_profile(profile_id)
+
+    job = db.get_job(job_id)
+    assert job is not None
+    assert job["profile_id"] == profile_id
+    assert job["profile_name"] == "Work CV"
+
+
 def test_timestamp_is_close_to_now(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")
@@ -775,6 +825,8 @@ def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
         "interview_comment",
         "rejected_comment",
         "deadline",
+        "profile_id",
+        "profile_name",
     } <= columns
 
 
