@@ -2211,6 +2211,23 @@ async def test_cards_and_detail_show_tag_chips(user: User) -> None:
     await user.should_see("referral")
 
 
+async def test_card_shows_cv_used_chip(user: User) -> None:
+    job_id = _seed_job()
+    profile_id = db.create_profile("Work CV")
+    assert profile_id is not None
+    db.set_job_profile(job_id, profile_id, "Work CV")
+
+    await user.open("/")
+    await user.should_see("CV: Work CV")
+
+
+async def test_card_hides_cv_chip_without_profile(user: User) -> None:
+    _seed_job()
+    await user.open("/")
+
+    await user.should_not_see(marker="cv-used-chip")
+
+
 async def test_tag_filter_select_narrows_list(user: User) -> None:
     _tagged_pair()
     await user.open("/")
