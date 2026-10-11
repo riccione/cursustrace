@@ -234,6 +234,7 @@ def _job(
         "fingerprint": None,
         "profile_id": None,
         "profile_name": None,
+        "user_id": None,
     }
 
 
@@ -769,14 +770,22 @@ def _fingerprint_columns(conn: sqlite3.Connection) -> list[str]:
     return [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
 
 
-def test_init_db_adds_fingerprint_column_and_index(db_path: Path) -> None:
+def test_init_db_adds_fingerprint_column_and_indexes(db_path: Path) -> None:
     db.init_db()
     with db.get_connection() as conn:
         assert "fingerprint" in _fingerprint_columns(conn)
-        indexes = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_jobs_fingerprint'"
-        ).fetchall()
-    assert len(indexes) == 1
+        names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_jobs_%'"
+            ).fetchall()
+        }
+    assert {
+        "idx_jobs_url_unowned",
+        "idx_jobs_fp_unowned",
+        "idx_jobs_url_user",
+        "idx_jobs_fp_user",
+    } <= names
 
 
 def test_init_db_migrates_legacy_schema_and_backfills(db_path: Path) -> None:
@@ -1194,6 +1203,7 @@ def _profile_payload(
         "education": "## Education\n\nBSc",
         "skills": "## Skills\n\n- Python",
         "date_updated": None,
+        "user_id": None,
     }
 
 
@@ -1624,3 +1634,329 @@ def test_clear_all_data_wipes_tags(db_path: Path) -> None:
     assert counts == {"positions": 1, "settings": 0}
     assert db.list_tags() == []
     assert db.tag_counts() == {}
+
+
+def test_create_user_and_lookup(db_path: Path) -> None:
+    db.init_db()
+    user_id = db.create_user("Jane@Example.com", "hash", is_admin=True)
+    assert user_id is not None
+
+    row = db.get_user_by_email("jane@example.com")
+    assert row is not None
+    assert row["id"] == user_id
+    assert row["password_hash"] == "hash"
+    assert row["is_admin"] == 1
+    assert db.get_user(user_id) == row
+    assert db.get_user(user_id + 1) is None
+    assert db.get_user_by_email("missing@example.com") is None
+    assert db.get_user_by_email("") is None
+
+
+def test_create_user_rejects_duplicate_email_case_insensitive(db_path: Path) -> None:
+    db.init_db()
+    assert db.create_user("jane@example.com", "hash") is not None
+    assert db.create_user("JANE@example.com", "other") is None
+    assert db.create_user("", "hash") is None
+
+
+def test_set_user_password(db_path: Path) -> None:
+    db.init_db()
+    user_id = db.create_user("jane@example.com", "old")
+    assert user_id is not None
+
+    assert db.set_user_password(user_id, "new") is True
+    row = db.get_user_by_email("jane@example.com")
+    assert row is not None
+    assert row["password_hash"] == "new"
+    assert db.set_user_password(user_id + 1, "new") is False
+
+
+def test_jobs_rebuild_preserves_rows_and_children(db_path: Path) -> None:
+    legacy = sqlite3.connect(db_path)
+    legacy.execute(
+        "CREATE TABLE jobs ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, job_url TEXT UNIQUE NOT NULL, title TEXT, "
+        "company TEXT, location TEXT, description TEXT, applied INTEGER DEFAULT 0, "
+        "date_added TEXT NOT NULL, date_applied TEXT, fingerprint TEXT UNIQUE)"
+    )
+    legacy.execute(
+        "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, "
+        "status TEXT NOT NULL, created_at TEXT NOT NULL)"
+    )
+    legacy.execute(
+        "CREATE TABLE job_tags (job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, "
+        "tag_id INTEGER NOT NULL, PRIMARY KEY (job_id, tag_id))"
+    )
+    legacy.execute(
+        "INSERT INTO jobs (job_url, title, company, location, description, date_added, "
+        "fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("https://example.com/1", "Engineer", "Acme", "Remote", "body", "2024-01-01", "fp1"),
+    )
+    legacy.execute(
+        "INSERT INTO events (job_id, status, created_at) VALUES (1, 'applied', '2024-01-02')"
+    )
+    legacy.execute("INSERT INTO job_tags (job_id, tag_id) VALUES (1, 7)")
+    legacy.commit()
+    legacy.close()
+
+    db.init_db()
+
+    jobs = db.get_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]["id"] == 1
+    assert jobs[0]["user_id"] is None
+    assert db.get_events(1) == [
+        {"id": 1, "job_id": 1, "status": "applied", "created_at": "2024-01-02"}
+    ]
+    with db.get_connection() as conn:
+        assert conn.execute("SELECT tag_id FROM job_tags").fetchone()[0] == 7
+
+
+def test_jobs_rebuild_is_idempotent(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "body")
+    db.init_db()
+    assert len(db.get_jobs()) == 1
+
+
+def test_tags_rebuild_preserves_names(db_path: Path) -> None:
+    legacy = sqlite3.connect(db_path)
+    legacy.execute(
+        "CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "job_url TEXT UNIQUE NOT NULL, title TEXT, company TEXT, location TEXT, "
+        "description TEXT, applied INTEGER DEFAULT 0, date_added TEXT NOT NULL, "
+        "date_applied TEXT)"
+    )
+    legacy.execute(
+        "CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "name TEXT UNIQUE NOT NULL COLLATE NOCASE)"
+    )
+    legacy.execute("INSERT INTO tags (name) VALUES ('Remote')")
+    legacy.commit()
+    legacy.close()
+
+    db.init_db()
+
+    assert db.list_tags() == ["Remote"]
+
+
+def test_profile_rebuild_drops_global_name_unique(db_path: Path) -> None:
+    pre = sqlite3.connect(db_path)
+    pre.execute(
+        "CREATE TABLE profile (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "name TEXT UNIQUE NOT NULL COLLATE NOCASE, full_name TEXT, location TEXT, "
+        "phone TEXT, email TEXT, linkedin_url TEXT, github_url TEXT, summary TEXT, "
+        "work_history TEXT, education TEXT, skills TEXT, "
+        "date_updated TEXT DEFAULT (datetime('now')))"
+    )
+    pre.execute("INSERT INTO profile (name) VALUES ('Default')")
+    pre.commit()
+    pre.close()
+
+    db.init_db()
+
+    assert db.create_profile("Default", user_id=1) is not None
+    assert db.create_profile("Default", user_id=2) is not None
+    assert db.list_profiles(user_id=1)[0]["name"] == "Default"
+    assert db.list_profiles(user_id=2)[0]["name"] == "Default"
+
+
+def test_two_users_may_share_url_and_fingerprint(db_path: Path) -> None:
+    db.init_db()
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=2)
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x")
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x") is None
+
+
+def test_same_user_cannot_duplicate_url(db_path: Path) -> None:
+    db.init_db()
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1) is None
+
+
+def test_unowned_duplicate_url_still_skipped(db_path: Path) -> None:
+    db.init_db()
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x")
+    assert db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x") is None
+
+
+def test_scoped_jobs_exclude_other_users_and_unowned(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+    db.add_job("https://example.com/2", "Engineer", "Acme", "Remote", "x", user_id=2)
+    db.add_job("https://example.com/3", "Engineer", "Acme", "Remote", "x")
+
+    assert [job["id"] for job in db.get_jobs(user_id=1)] == [1]
+    assert [job["id"] for job in db.get_jobs(user_id=2)] == [2]
+    assert len(db.get_jobs()) == 3
+    assert db.get_job(2, user_id=1) is None
+    assert db.get_job(2, user_id=2) is not None
+    assert db.job_counts(user_id=1)["total"] == 1
+    assert db.job_counts()["total"] == 3
+
+
+def test_scoped_set_job_status_ignores_other_users(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+
+    db.set_job_status(1, "applied", user_id=2)
+    job = db.get_job(1)
+    assert job is not None
+    assert job["applied"] == 0
+
+    db.set_job_status(1, "applied", user_id=1)
+    job = db.get_job(1)
+    assert job is not None
+    assert job["applied"] == 1
+
+
+def test_scoped_delete_job_ignores_other_users(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+
+    db.delete_job(1, user_id=2)
+    assert db.get_job(1) is not None
+    db.delete_job(1, user_id=1)
+    assert db.get_job(1) is None
+
+
+def test_two_users_may_share_tag_name(db_path: Path) -> None:
+    db.init_db()
+    assert db.create_tag("Remote", user_id=1)
+    assert db.create_tag("Remote", user_id=2)
+    assert db.list_tags(user_id=1) == ["Remote"]
+    assert db.list_tags(user_id=2) == ["Remote"]
+    assert db.list_tags() == ["Remote", "Remote"]
+    assert db.find_tag("remote", user_id=1) is not None
+    assert db.find_tag("remote", user_id=2) is not None
+
+
+def test_same_user_cannot_duplicate_tag_name(db_path: Path) -> None:
+    db.init_db()
+    assert db.create_tag("Remote", user_id=1)
+    assert db.create_tag("remote", user_id=1) is None
+
+
+def test_set_job_tags_creates_user_owned_tags(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+
+    db.set_job_tags(1, ["Remote"], user_id=1)
+
+    assert db.job_tags(1) == ["Remote"]
+    assert db.list_tags(user_id=1) == ["Remote"]
+    assert db.list_tags(user_id=2) == []
+
+
+def test_two_users_may_share_profile_name(db_path: Path) -> None:
+    db.init_db()
+    assert db.create_profile("Work", user_id=1)
+    assert db.create_profile("Work", user_id=2)
+    assert [p["name"] for p in db.list_profiles(user_id=1)] == ["Work"]
+    assert [p["name"] for p in db.list_profiles(user_id=2)] == ["Work"]
+
+
+def test_same_user_cannot_duplicate_profile_name(db_path: Path) -> None:
+    db.init_db()
+    assert db.create_profile("Work", user_id=1)
+    assert db.create_profile("Work", user_id=1) is None
+
+
+def test_create_profile_copy_from_scoped(db_path: Path) -> None:
+    db.init_db()
+    source = db.create_profile("Source", user_id=1)
+    assert source is not None
+    profile = db.get_profile(source)
+    profile["full_name"] = "Jane Doe"
+    profile["phone"] = "555-0100"
+    db.save_profile(profile)
+
+    copy_id = db.create_profile("Copy", copy_from=source, user_id=2)
+    assert copy_id is not None
+    copied = db.get_profile(copy_id)
+    assert copied["full_name"] == "Jane Doe"
+    assert copied["phone"] == "555-0100"
+
+
+def test_settings_prefix_isolation(db_path: Path) -> None:
+    db.init_db()
+    db.set_setting("tab", "jobs", user_id=1)
+    db.set_setting("tab", "statistics", user_id=2)
+    db.set_setting("global_key", "value")
+
+    assert db.get_setting("tab", user_id=1) == "jobs"
+    assert db.get_setting("tab", user_id=2) == "statistics"
+    assert db.get_setting("tab") is None
+    assert db.get_setting("global_key") == "value"
+    assert db.get_setting("global_key", user_id=1) is None
+
+
+def test_adopt_orphan_rows_assigns_null_owned_data(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x")
+    db.create_tag("Remote")
+    db.create_profile("Default")
+    db.add_job("https://example.com/2", "Engineer", "Acme", "Remote", "x", user_id=9)
+
+    counts = db.adopt_orphan_rows(1)
+
+    assert counts == {"jobs": 1, "profile": 1, "tags": 1}
+    job_one = db.get_job(1)
+    job_two = db.get_job(2)
+    assert job_one is not None
+    assert job_two is not None
+    assert job_one["user_id"] == 1
+    assert job_two["user_id"] == 9
+    assert [job["id"] for job in db.get_jobs(user_id=1)] == [1]
+    assert db.list_tags(user_id=1) == ["Remote"]
+    assert db.list_profiles(user_id=1)[0]["name"] == "Default"
+
+
+def test_pipeline_funnel_scoped(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+    db.add_job("https://example.com/2", "Engineer", "Acme", "Remote", "x", user_id=2)
+    db.set_job_status(1, "applied", user_id=1)
+    db.set_job_status(2, "interview", user_id=2)
+
+    assert db.pipeline_funnel(user_id=1) == {
+        "added": 1,
+        "applied": 1,
+        "response": 0,
+        "interview": 0,
+    }
+    assert db.pipeline_funnel(user_id=2)["interview"] == 1
+
+
+def test_applications_by_month_scoped(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+    db.add_job("https://example.com/2", "Engineer", "Acme", "Remote", "x", user_id=2)
+    db.set_job_status(1, "applied", user_id=1)
+    db.set_job_status(2, "applied", user_id=2)
+
+    assert len(db.applications_by_month(user_id=1)) == 1
+    assert len(db.applications_by_month()) == 1
+
+
+def test_job_ids_with_status_event_scoped(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "x", user_id=1)
+    db.add_job("https://example.com/2", "Engineer", "Acme", "Remote", "x", user_id=2)
+    db.set_job_status(1, "applied", user_id=1)
+    db.set_job_status(2, "applied", user_id=2)
+
+    assert db.job_ids_with_status_event("applied", user_id=1) == {1}
+    assert db.job_ids_with_status_event("applied") == {1, 2}
+
+
+def test_check_duplicate_and_find_similar_scoped(db_path: Path) -> None:
+    db.init_db()
+    db.add_job("https://example.com/1", "Engineer", "Acme", "Remote", "desc", user_id=1)
+
+    assert db.check_duplicate("https://example.com/1", user_id=1) is True
+    assert db.check_duplicate("https://example.com/1", user_id=2) is False
+    assert db.find_similar("Acme", "Engineer", "desc", user_id=1)
+    assert db.find_similar("Acme", "Engineer", "desc", user_id=2) == []

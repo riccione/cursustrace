@@ -232,6 +232,7 @@ def _render_profile_editor() -> None:
                     "education": education.value or "",
                     "skills": skills.value or "",
                     "date_updated": None,
+                    "user_id": profile["user_id"],
                 }
             )
             ui.notify("Profile and CV saved successfully!", type="positive")
