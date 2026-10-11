@@ -116,7 +116,7 @@ def _render_profile_editor() -> None:
         if not name:
             ui.notify("Enter a profile name.", type="warning")
             return
-        profile_id = db.create_profile(name)
+        profile_id = db.create_profile(name, copy_from=selected["id"])
         if profile_id is None:
             ui.notify(f"Profile '{name}' already exists.", type="warning")
             return
