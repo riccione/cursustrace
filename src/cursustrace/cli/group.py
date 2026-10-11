@@ -55,6 +55,12 @@ def cli(ctx: click.Context, log_level: str | None) -> None:
     default=None,
     help="Path to the CV stylesheet.",
 )
+@click.option(
+    "--multi-user/--no-multi-user",
+    "multi_user",
+    default=None,
+    help="Enable login-gated multi-user mode (default from config/env).",
+)
 @click.option("--config", "config_path", type=click.Path(dir_okay=False), default=None)
 @click.pass_context
 def run_command(
@@ -64,6 +70,7 @@ def run_command(
     reload: bool | None,
     show: bool | None,
     cv_style: str | None,
+    multi_user: bool | None,
     config_path: str | None,
 ) -> None:
     """Launch the dashboard (host/port/config overrides)."""
@@ -74,6 +81,7 @@ def run_command(
             reload=reload,
             show=show,
             cv_style_path=cv_style,
+            multi_user=multi_user,
             log_level=ctx.obj,
             config_path=config_path,
         )

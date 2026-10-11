@@ -28,6 +28,7 @@ ENV_STALE_UNAPPLIED_DAYS = "CURSUS_STALE_UNAPPLIED_DAYS"
 ENV_DEADLINE_WARNING_DAYS = "CURSUS_DEADLINE_WARNING_DAYS"
 ENV_OUTDATED_AFTER_DAYS = "CURSUS_OUTDATED_AFTER_DAYS"
 ENV_RENDER = "CURSUS_RENDER"
+ENV_MULTI_USER = "CURSUS_MULTI_USER"
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
@@ -42,6 +43,7 @@ DEFAULT_STALE_UNAPPLIED_DAYS = 10
 DEFAULT_DEADLINE_WARNING_DAYS = 7
 DEFAULT_OUTDATED_AFTER_DAYS = 30
 DEFAULT_RENDER = "auto"
+DEFAULT_MULTI_USER = False
 LOG_DIR = Path("logs")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 RENDER_MODES = ("auto", "never")
@@ -69,6 +71,7 @@ class Settings:
     deadline_warning_days: int = DEFAULT_DEADLINE_WARNING_DAYS
     outdated_after_days: int = DEFAULT_OUTDATED_AFTER_DAYS
     render: str = DEFAULT_RENDER
+    multi_user: bool = DEFAULT_MULTI_USER
     config_file: Path | None = None
 
 
@@ -89,6 +92,7 @@ def load_settings(
     deadline_warning_days: int | str | None = None,
     outdated_after_days: int | str | None = None,
     render: str | None = None,
+    multi_user: bool | None = None,
     config_path: str | Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Settings:
@@ -112,6 +116,7 @@ def load_settings(
         ("deadline_warning_days", ENV_DEADLINE_WARNING_DAYS),
         ("outdated_after_days", ENV_OUTDATED_AFTER_DAYS),
         ("render", ENV_RENDER),
+        ("multi_user", ENV_MULTI_USER),
     ):
         raw = environ.get(env_name)
         if raw is not None:
@@ -147,6 +152,8 @@ def load_settings(
         values["outdated_after_days"] = outdated_after_days
     if render is not None:
         values["render"] = render
+    if multi_user is not None:
+        values["multi_user"] = multi_user
 
     return Settings(
         host=_as_str(values, "host", DEFAULT_HOST),
@@ -174,6 +181,7 @@ def load_settings(
             values.get("outdated_after_days", DEFAULT_OUTDATED_AFTER_DAYS)
         ),
         render=_as_render(values, "render", DEFAULT_RENDER),
+        multi_user=_as_bool(values, "multi_user", DEFAULT_MULTI_USER),
         config_file=config_file,
     )
 
