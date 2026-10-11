@@ -7,6 +7,7 @@ from pathlib import Path
 from nicegui import ui
 
 from cursustrace import attention, config, db
+from cursustrace.web.session import current_user_id
 
 _settings: config.Settings | None = None
 
@@ -26,11 +27,11 @@ def _cv_style_path() -> Path | None:
 
 
 def _similar_notice_enabled() -> bool:
-    return db.get_setting(SIMILAR_NOTICE_KEY, "on") != "off"
+    return db.get_setting(SIMILAR_NOTICE_KEY, "on", user_id=current_user_id()) != "off"
 
 
 def _attention_banner_enabled() -> bool:
-    return db.get_setting(ATTENTION_NOTICE_KEY, "on") != "off"
+    return db.get_setting(ATTENTION_NOTICE_KEY, "on", user_id=current_user_id()) != "off"
 
 
 def _attention_thresholds() -> attention.Thresholds:
@@ -53,5 +54,5 @@ def _dark_mode_name(value: bool | None) -> str:
 
 
 def _apply_dark_mode() -> ui.dark_mode:
-    name = db.get_setting(DARK_MODE_KEY, "system")
+    name = db.get_setting(DARK_MODE_KEY, "system", user_id=current_user_id())
     return ui.dark_mode(value=_dark_mode_value(name))

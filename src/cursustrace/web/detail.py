@@ -12,6 +12,7 @@ from cursustrace.web.dialogs import _confirm_delete_dialog, _delete_job_from_det
 from cursustrace.web.job_card import _deadline_text
 from cursustrace.web.job_form import _job_form_dialog, _update_job_fields
 from cursustrace.web.profile import _render_profile_summary
+from cursustrace.web.session import current_user_id
 from cursustrace.web.state import _apply_dark_mode
 from cursustrace.web.status_controls import _render_status_controls, _stage_comment
 
@@ -23,7 +24,7 @@ def job_detail_page(job_id: int) -> None:
 
         @ui.refreshable
         def render_detail() -> None:
-            job = db.get_job(job_id)
+            job = db.get_job(job_id, user_id=current_user_id())
             with ui.row().classes("items-center gap-2"):
                 ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
                 if job is not None:

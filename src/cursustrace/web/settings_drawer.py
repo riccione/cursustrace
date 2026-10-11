@@ -8,6 +8,7 @@ from nicegui import events, ui
 
 from cursustrace import db
 from cursustrace.web.dialogs import _clear_database, _tag_manager_dialog
+from cursustrace.web.session import current_user_id
 from cursustrace.web.state import (
     ATTENTION_NOTICE_KEY,
     DARK_MODE_KEY,
@@ -27,7 +28,7 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     def update_theme(event: events.ValueChangeEventArguments[str | None]) -> None:
         name = event.value or "system"
         dark.value = _dark_mode_value(name)
-        db.set_setting(DARK_MODE_KEY, name)
+        db.set_setting(DARK_MODE_KEY, name, user_id=current_user_id())
         refresh()
 
     theme.on_value_change(update_theme)
@@ -39,7 +40,9 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     ).classes("w-full")
 
     def update_similar(event: events.ValueChangeEventArguments[bool | None]) -> None:
-        db.set_setting(SIMILAR_NOTICE_KEY, "on" if event.value else "off")
+        db.set_setting(
+            SIMILAR_NOTICE_KEY, "on" if event.value else "off", user_id=current_user_id()
+        )
 
     similar_toggle.on_value_change(update_similar)
 
@@ -50,7 +53,9 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     )
 
     def update_attention(event: events.ValueChangeEventArguments[bool | None]) -> None:
-        db.set_setting(ATTENTION_NOTICE_KEY, "on" if event.value else "off")
+        db.set_setting(
+            ATTENTION_NOTICE_KEY, "on" if event.value else "off", user_id=current_user_id()
+        )
         refresh()
 
     attention_toggle.on_value_change(update_attention)

@@ -7,6 +7,7 @@ from collections.abc import Callable
 from nicegui import ui
 
 from cursustrace import db
+from cursustrace.web.session import current_user_id
 
 
 def _clear_database(refresh: Callable[[], None]) -> None:
@@ -16,7 +17,7 @@ def _clear_database(refresh: Callable[[], None]) -> None:
 
 
 def _delete_job(dialog: ui.dialog, job_id: int, refresh: Callable[[], None] | None = None) -> None:
-    db.delete_job(job_id)
+    db.delete_job(job_id, user_id=current_user_id())
     dialog.close()
     ui.notify("Position deleted.", type="positive")
     if refresh is not None:
@@ -71,7 +72,7 @@ def _tag_manager_dialog(refresh: Callable[[], None]) -> ui.dialog:
         if not name:
             ui.notify("Enter a tag name.", type="warning")
             return
-        if db.create_tag(name) is None:
+        if db.create_tag(name, user_id=current_user_id()) is None:
             ui.notify(f"Tag '{name}' already exists.", type="warning")
             return
         name_input.value = ""
@@ -104,13 +105,13 @@ def _tag_manager_dialog(refresh: Callable[[], None]) -> ui.dialog:
 
     def render_list() -> None:
         list_column.clear()
-        counts = db.tag_counts()
+        counts = db.tag_counts(user_id=current_user_id())
         with list_column:
             if not counts:
                 ui.label("No tags yet.")
                 return
             for name, count in counts.items():
-                tag_id = db.find_tag(name)
+                tag_id = db.find_tag(name, user_id=current_user_id())
                 if tag_id is None:
                     continue
                 with ui.row().classes("w-full items-center gap-2"):

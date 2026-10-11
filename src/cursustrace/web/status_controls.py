@@ -9,6 +9,7 @@ from nicegui import events, ui
 from cursustrace import db
 from cursustrace.web.constants import STATUS_CHECKBOXES
 from cursustrace.web.dialogs import _confirm_delete_dialog, _delete_job
+from cursustrace.web.session import current_user_id
 
 _DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobStatus]] = {
     "unapplied": frozenset(),
@@ -51,7 +52,7 @@ def _status_handler(
     refresh: Callable[[], None],
 ) -> Callable[[events.ValueChangeEventArguments[bool | None]], None]:
     def handler(event: events.ValueChangeEventArguments[bool | None]) -> None:
-        db.set_job_status(job_id, status if event.value else "unapplied")
+        db.set_job_status(job_id, status if event.value else "unapplied", user_id=current_user_id())
         refresh()
 
     return handler
@@ -78,7 +79,7 @@ def _render_comment_box(job: db.Job, current: db.JobFlag) -> None:
     )
 
     def save_comment() -> None:
-        db.set_job_comment(job["id"], current, comment_input.value or "")
+        db.set_job_comment(job["id"], current, comment_input.value or "", user_id=current_user_id())
         ui.notify("Comment saved.", type="positive")
 
     ui.button("💾 Save comment", on_click=save_comment).props("flat color=primary")

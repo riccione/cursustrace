@@ -12,6 +12,7 @@ from nicegui.run import io_bound
 from cursustrace import db, scraper
 from cursustrace.errors import ScrapeError
 from cursustrace.web.attention_ui import _similar_summary
+from cursustrace.web.session import current_user_id
 from cursustrace.web.state import _similar_notice_enabled
 
 logger = logging.getLogger(__name__)
@@ -22,14 +23,14 @@ def _parse_urls(text: str | None) -> list[str]:
     return list(dict.fromkeys(line for line in lines if line))
 
 
-def _scan_url(url: str) -> tuple[str, str, list[db.Job]]:
+def _scan_url(url: str, user_id: int | None) -> tuple[str, str, list[db.Job]]:
     try:
         job = scraper.scrape_job(url)
     except ScrapeError as exc:
         logger.error("Scrape failed for %s: %s", url, exc)
         return ("error", f"{url}: {exc}", [])
 
-    if db.check_duplicate(url):
+    if db.check_duplicate(url, user_id=user_id):
         return ("duplicate", url, [])
     job_id = db.add_job(
         url,
@@ -38,10 +39,13 @@ def _scan_url(url: str) -> tuple[str, str, list[db.Job]]:
         job["location"],
         job["description"],
         deadline=job["deadline"],
+        user_id=user_id,
     )
     if job_id is None:
         return ("duplicate", url, [])
-    matches = db.find_similar(job["company"], job["title"], job["description"], exclude_id=job_id)
+    matches = db.find_similar(
+        job["company"], job["title"], job["description"], exclude_id=job_id, user_id=user_id
+    )
     return ("saved", url, matches)
 
 
@@ -73,11 +77,12 @@ async def _handle_scan(
     failures: list[str] = []
     failed_urls: list[str] = []
     similar: list[list[db.Job]] = []
+    user_id = current_user_id()
     try:
         for index, url in enumerate(urls, start=1):
             status_label.set_text(f"Scanning {index}/{len(urls)}: {url}")
             matches: list[db.Job]
-            outcome = await io_bound(_scan_url, url)
+            outcome = await io_bound(_scan_url, url, user_id)
             if outcome is None:
                 cancelled = True
                 kind, message, matches = "error", f"{url}: cancelled", []
