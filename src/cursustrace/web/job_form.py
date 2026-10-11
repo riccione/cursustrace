@@ -13,6 +13,7 @@ from cursustrace import db, salary
 from cursustrace.validation import normalize_deadline, validate_required, validate_url
 from cursustrace.web.attention_ui import _similar_summary
 from cursustrace.web.constants import STATUS_CHECKBOXES
+from cursustrace.web.session import current_user_id
 from cursustrace.web.state import _similar_notice_enabled
 from cursustrace.web.status_controls import _stage_comment
 
@@ -112,7 +113,7 @@ def _job_form_dialog(
         )
         tags_input = (
             ui.select(
-                db.list_tags(),
+                db.list_tags(user_id=current_user_id()),
                 value=current_tags,
                 label="Tags",
                 multiple=True,
@@ -205,7 +206,8 @@ def _job_form_dialog(
 
 
 def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> bool:
-    if db.check_duplicate(values.url):
+    user_id = current_user_id()
+    if db.check_duplicate(values.url, user_id=user_id):
         logger.warning("Rejected duplicate manual add: %s", values.url)
         ui.notify("A position with the same URL already exists.", type="warning")
         return False
@@ -216,15 +218,18 @@ def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> boo
         values.location or None,
         values.description,
         deadline=values.deadline or None,
+        user_id=user_id,
         **_salary_kwargs(values),
     )
     if job_id is None:
         logger.warning("Rejected duplicate manual add: %s", values.url)
         ui.notify("A position with the same URL already exists.", type="warning")
         return False
-    db.set_job_tags(job_id, values.tags)
+    db.set_job_tags(job_id, values.tags, user_id=user_id)
     ui.notify("Position added.", type="positive")
-    matches = db.find_similar(values.company, values.title, values.description, exclude_id=job_id)
+    matches = db.find_similar(
+        values.company, values.title, values.description, exclude_id=job_id, user_id=user_id
+    )
     if matches and _similar_notice_enabled():
         ui.notify(f"Looks similar to {_similar_summary(matches)}", type="info")
     refresh()
@@ -232,7 +237,8 @@ def _add_job_manually(values: JobFormValues, refresh: Callable[[], None]) -> boo
 
 
 def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
-    if db.check_duplicate(values.url, exclude_id=job_id) or not db.update_job(
+    user_id = current_user_id()
+    if db.check_duplicate(values.url, exclude_id=job_id, user_id=user_id) or not db.update_job(
         job_id,
         values.url,
         values.title,
@@ -240,6 +246,7 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.location or None,
         values.description,
         deadline=values.deadline or None,
+        user_id=user_id,
         **_salary_kwargs(values),
     ):
         logger.warning("Rejected duplicate update: %s", values.url)
@@ -250,8 +257,9 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.applied_comment,
         values.interview_comment,
         values.rejected_comment,
+        user_id=user_id,
     )
-    db.set_job_tags(job_id, values.tags)
+    db.set_job_tags(job_id, values.tags, user_id=user_id)
     ui.notify("Position updated.", type="positive")
     ui.navigate.to(f"/job/{job_id}")
     return True

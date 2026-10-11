@@ -9,6 +9,7 @@ from nicegui import events, ui
 from cursustrace import db
 from cursustrace.errors import PdfExportError
 from cursustrace.pdf_exporter import generate_cv_pdf, get_pdf_filename, load_cv_styles
+from cursustrace.web.session import current_user_id
 from cursustrace.web.state import SELECTED_PROFILE_KEY, _cv_style_path
 
 _FieldT = TypeVar("_FieldT", bound=ui.input)
@@ -32,9 +33,9 @@ def _attach_copy_button(field: _FieldT, label: str, marker: str) -> _FieldT:
 def _render_profile_editor() -> None:
     ui.label("👤 Profile & CV Configuration").classes("text-h5")
 
-    profiles = db.list_profiles()
+    profiles = db.list_profiles(user_id=current_user_id())
     known_ids = {profile["id"] for profile in profiles}
-    stored = db.get_setting(SELECTED_PROFILE_KEY)
+    stored = db.get_setting(SELECTED_PROFILE_KEY, user_id=current_user_id())
     stored_id = int(stored) if stored is not None and stored.isdigit() else None
     selected: dict[str, int | None] = {
         "id": stored_id if stored_id in known_ids else (min(known_ids) if known_ids else None)
@@ -77,10 +78,10 @@ def _render_profile_editor() -> None:
 
     def persist_selection() -> None:
         if selected["id"] is not None:
-            db.set_setting(SELECTED_PROFILE_KEY, str(selected["id"]))
+            db.set_setting(SELECTED_PROFILE_KEY, str(selected["id"]), user_id=current_user_id())
 
     def render_topbar() -> None:
-        current_profiles = db.list_profiles()
+        current_profiles = db.list_profiles(user_id=current_user_id())
         ids = {profile["id"] for profile in current_profiles}
         if selected["id"] not in ids:
             selected["id"] = min(ids) if ids else None
@@ -116,7 +117,7 @@ def _render_profile_editor() -> None:
         if not name:
             ui.notify("Enter a profile name.", type="warning")
             return
-        profile_id = db.create_profile(name, copy_from=selected["id"])
+        profile_id = db.create_profile(name, copy_from=selected["id"], user_id=current_user_id())
         if profile_id is None:
             ui.notify(f"Profile '{name}' already exists.", type="warning")
             return
@@ -140,7 +141,7 @@ def _render_profile_editor() -> None:
             return
         db.delete_profile(selected["id"])
         delete_dialog.close()
-        remaining = db.list_profiles()
+        remaining = db.list_profiles(user_id=current_user_id())
         selected["id"] = min((profile["id"] for profile in remaining), default=None)
         if selected["id"] is not None:
             persist_selection()
@@ -150,7 +151,7 @@ def _render_profile_editor() -> None:
     def render_form() -> None:
         body.clear()
         with body:
-            profiles_now = db.list_profiles()
+            profiles_now = db.list_profiles(user_id=current_user_id())
             ids = {profile["id"] for profile in profiles_now}
             if selected["id"] not in ids:
                 selected["id"] = min(ids) if ids else None
@@ -232,6 +233,7 @@ def _render_profile_editor() -> None:
                     "education": education.value or "",
                     "skills": skills.value or "",
                     "date_updated": None,
+                    "user_id": profile["user_id"],
                 }
             )
             ui.notify("Profile and CV saved successfully!", type="positive")
@@ -268,13 +270,13 @@ def _render_copyable_field(label: str, value: str, field_marker: str, copy_marke
 
 def _render_profile_summary(job: db.Job) -> None:
     """Render a CV-used selector plus the chosen profile's contact fields."""
-    profiles = db.list_profiles()
+    profiles = db.list_profiles(user_id=current_user_id())
     if not profiles:
         return
     known_ids = {profile["id"] for profile in profiles}
     selected_id = job["profile_id"] if job["profile_id"] in known_ids else None
     if selected_id is None:
-        stored = db.get_setting(SELECTED_PROFILE_KEY)
+        stored = db.get_setting(SELECTED_PROFILE_KEY, user_id=current_user_id())
         global_id = int(stored) if stored is not None and stored.isdigit() else None
         selected_id = global_id if global_id in known_ids else min(known_ids)
 
@@ -325,7 +327,7 @@ def _render_profile_summary(job: db.Job) -> None:
             if event.value is None:
                 return
             profile = db.get_profile(event.value)
-            db.set_job_profile(job["id"], profile["id"], profile["name"])
+            db.set_job_profile(job["id"], profile["id"], profile["name"], user_id=current_user_id())
             ui.notify(f"CV '{profile['name']}' saved for this application.", type="positive")
             render_fields.refresh()
 

@@ -21,10 +21,11 @@ SIMILAR_LIMIT = 3
 
 FINGERPRINT_SCHEME_VERSION = 1
 
-CREATE_JOBS_TABLE = """
-CREATE TABLE IF NOT EXISTS jobs (
+# Column definitions shared by CREATE_JOBS_TABLE and the jobs table rebuild.
+# Uniqueness moved to per-user partial indexes in init_db.
+_JOBS_TABLE_BODY = """
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_url TEXT UNIQUE NOT NULL,
+    job_url TEXT NOT NULL,
     title TEXT,
     company TEXT,
     location TEXT,
@@ -47,16 +48,34 @@ CREATE TABLE IF NOT EXISTS jobs (
     salary_period TEXT,
     salary_note TEXT,
     deadline TEXT,
-    fingerprint TEXT UNIQUE,
+    fingerprint TEXT,
     profile_id INTEGER,
-    profile_name TEXT
-)
+    profile_name TEXT,
+    user_id INTEGER
 """
 
+CREATE_JOBS_TABLE = f"CREATE TABLE IF NOT EXISTS jobs ({_JOBS_TABLE_BODY})"
+
 # Column definitions shared by CREATE_PROFILE_TABLE and the profile table rebuild.
+_PROFILE_COLUMNS = (
+    "id",
+    "name",
+    "full_name",
+    "location",
+    "phone",
+    "email",
+    "linkedin_url",
+    "github_url",
+    "summary",
+    "work_history",
+    "education",
+    "skills",
+    "date_updated",
+    "user_id",
+)
 _PROFILE_TABLE_BODY = """
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    name TEXT NOT NULL COLLATE NOCASE,
     full_name TEXT,
     location TEXT,
     phone TEXT,
@@ -67,7 +86,8 @@ _PROFILE_TABLE_BODY = """
     work_history TEXT,
     education TEXT,
     skills TEXT,
-    date_updated TEXT DEFAULT (datetime('now'))
+    date_updated TEXT DEFAULT (datetime('now')),
+    user_id INTEGER
 """
 
 CREATE_PROFILE_TABLE = f"CREATE TABLE IF NOT EXISTS profile ({_PROFILE_TABLE_BODY})"
@@ -79,9 +99,52 @@ CREATE TABLE IF NOT EXISTS settings (
 )
 """
 
-CREATE_FINGERPRINT_INDEX = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_fingerprint ON jobs(fingerprint)"
+# Per-user uniqueness: rows with no owner share one global partition; each
+# user gets their own partition so two users may track the same URL/tag.
+# `COLLATE NOCASE` mirrors the old column-level UNIQUE on tags/profile names.
+OWNERSHIP_INDEXES = (
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_url_unowned "
+        "ON jobs(job_url) WHERE user_id IS NULL"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_fp_unowned "
+        "ON jobs(fingerprint) WHERE user_id IS NULL AND fingerprint IS NOT NULL"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_url_user "
+        "ON jobs(user_id, job_url) WHERE user_id IS NOT NULL"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_fp_user "
+        "ON jobs(user_id, fingerprint) WHERE user_id IS NOT NULL AND fingerprint IS NOT NULL"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_unowned "
+        "ON tags(name COLLATE NOCASE) WHERE user_id IS NULL"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_user "
+        "ON tags(user_id, name COLLATE NOCASE) WHERE user_id IS NOT NULL"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_name_unowned "
+        "ON profile(name COLLATE NOCASE) WHERE user_id IS NULL"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_name_user "
+        "ON profile(user_id, name COLLATE NOCASE) WHERE user_id IS NOT NULL"
+    ),
 )
+
+CREATE_USERS_TABLE = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0
+)
+"""
 
 CREATE_EVENTS_TABLE = """
 CREATE TABLE IF NOT EXISTS events (
@@ -94,12 +157,14 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE_EVENTS_INDEX = "CREATE INDEX IF NOT EXISTS idx_events_job_id ON events(job_id)"
 
-CREATE_TAGS_TABLE = """
-CREATE TABLE IF NOT EXISTS tags (
+# Column definitions shared by CREATE_TAGS_TABLE and the tags table rebuild.
+_TAGS_TABLE_BODY = """
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL COLLATE NOCASE
-)
+    name TEXT NOT NULL COLLATE NOCASE,
+    user_id INTEGER
 """
+
+CREATE_TAGS_TABLE = f"CREATE TABLE IF NOT EXISTS tags ({_TAGS_TABLE_BODY})"
 
 CREATE_JOB_TAGS_TABLE = """
 CREATE TABLE IF NOT EXISTS job_tags (
@@ -142,6 +207,7 @@ class Job(TypedDict):
     fingerprint: str | None
     profile_id: int | None
     profile_name: str | None
+    user_id: int | None
 
 
 JobStatus = Literal["unapplied", "applied", "interview", "rejected", "outdated"]
@@ -220,6 +286,16 @@ class Profile(TypedDict):
     education: str
     skills: str
     date_updated: str | None
+    user_id: int | None
+
+
+class UserRow(TypedDict):
+    """A registered account row."""
+
+    id: int
+    email: str
+    password_hash: str
+    is_admin: int
 
 
 def _now() -> str:
@@ -265,35 +341,101 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("deadline", "TEXT"),
         ("profile_id", "INTEGER"),
         ("profile_name", "TEXT"),
+        ("user_id", "INTEGER"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {definition}")
-    conn.execute(CREATE_FINGERPRINT_INDEX)
     _recompute_fingerprints(conn)
+
+
+def _table_sql(conn: sqlite3.Connection, table: str) -> str:
+    # Table names are fixed internal constants (sqlite_master cannot be parameterized).
+    row = conn.execute(
+        f"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '{table}'"
+    ).fetchone()
+    return str(row[0]) if row is not None else ""
+
+
+def _rebuild_table(conn: sqlite3.Connection, table: str, body: str, columns: list[str]) -> None:
+    """Swap ``table`` for a rebuilt copy under ``body``; FKs disabled for the swap.
+
+    ``PRAGMA foreign_keys`` is a no-op inside a transaction, so any open
+    transaction is committed first; with FKs off, DROP TABLE leaves child rows
+    intact and the copied primary keys keep their references valid after the
+    rename.
+    """
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("BEGIN")
+    try:
+        # `table` is a fixed internal constant, never user input.
+        conn.execute(f"CREATE TABLE {table}_migrated ({body})")
+        conn.execute(
+            f"INSERT INTO {table}_migrated ({', '.join(columns)}) "
+            f"SELECT {', '.join(columns)} FROM {table}"
+        )
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {table}_migrated RENAME TO {table}")
+        conn.execute("COMMIT")
+        conn.execute("PRAGMA foreign_keys=ON")
+    except Exception:
+        conn.execute("ROLLBACK")
+        conn.execute("PRAGMA foreign_keys=ON")
+        raise
+
+
+def _migrate_jobs_uniqueness(conn: sqlite3.Connection) -> None:
+    """Rebuild jobs once, replacing column-level UNIQUE with partial indexes."""
+    if "job_url TEXT UNIQUE" not in _table_sql(conn, "jobs"):
+        return
+    stale_index = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_jobs_fingerprint'"
+    ).fetchone()
+    if stale_index is None and "fingerprint TEXT UNIQUE" not in _table_sql(conn, "jobs"):
+        return
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()]
+    _rebuild_table(conn, "jobs", _JOBS_TABLE_BODY, columns)
+
+
+def _migrate_tags_uniqueness(conn: sqlite3.Connection) -> None:
+    """Rebuild tags once, replacing the column-level UNIQUE name with partial indexes."""
+    if "name TEXT UNIQUE" not in _table_sql(conn, "tags"):
+        return
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(tags)").fetchall()]
+    _rebuild_table(conn, "tags", _TAGS_TABLE_BODY, columns)
 
 
 def _migrate_profile(conn: sqlite3.Connection) -> None:
     _recover_profile_rebuild(conn)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(profile)").fetchall()}
-    if "name" in columns:
+    legacy = "name" not in columns
+    name_unique = "name TEXT UNIQUE" in _table_sql(conn, "profile")
+    if not legacy and not name_unique:
         return
     # Legacy tables are single-row (CHECK (id = 1)); rebuild to the multi-profile
     # schema, backfilling a name and carrying over any legacy CV content.
-    select_columns = ["id", "'Default' AS name"]
-    for column in ("full_name", "location", "phone", "email", "linkedin_url", "github_url"):
-        select_columns.append(column if column in columns else "NULL")
-    for column in ("summary", "work_history", "education", "skills"):
-        if column == "summary" and "cv_markdown" in columns:
-            if "summary" in columns:
-                select_columns.append(
-                    "CASE WHEN TRIM(COALESCE(summary, '')) = '' "
-                    "THEN COALESCE(cv_markdown, '') ELSE summary END"
-                )
+    # Non-legacy rebuilds only drop the global UNIQUE name (moved to partial
+    # per-user indexes) and add user_id.
+    if legacy:
+        select_columns = ["id", "'Default' AS name"]
+        for column in ("full_name", "location", "phone", "email", "linkedin_url", "github_url"):
+            select_columns.append(column if column in columns else "NULL")
+        for column in ("summary", "work_history", "education", "skills"):
+            if column == "summary" and "cv_markdown" in columns:
+                if "summary" in columns:
+                    select_columns.append(
+                        "CASE WHEN TRIM(COALESCE(summary, '')) = '' "
+                        "THEN COALESCE(cv_markdown, '') ELSE summary END"
+                    )
+                else:
+                    select_columns.append("COALESCE(cv_markdown, '')")
             else:
-                select_columns.append("COALESCE(cv_markdown, '')")
-        else:
-            select_columns.append(f"COALESCE({column}, '')" if column in columns else "''")
-    select_columns.append("date_updated" if "date_updated" in columns else "NULL")
+                select_columns.append(f"COALESCE({column}, '')" if column in columns else "''")
+        select_columns.append("date_updated" if "date_updated" in columns else "NULL")
+        select_columns.append("NULL")
+    else:
+        select_columns = [column if column in columns else "NULL" for column in _PROFILE_COLUMNS]
 
     started_here = not conn.in_transaction
     if started_here:
@@ -301,8 +443,7 @@ def _migrate_profile(conn: sqlite3.Connection) -> None:
     try:
         conn.execute(f"CREATE TABLE profile_migrated ({_PROFILE_TABLE_BODY})")
         conn.execute(
-            f"INSERT INTO profile_migrated (id, name, full_name, location, phone, email, "
-            f"linkedin_url, github_url, summary, work_history, education, skills, date_updated) "
+            f"INSERT INTO profile_migrated ({', '.join(_PROFILE_COLUMNS)}) "
             f"SELECT {', '.join(select_columns)} FROM profile"
         )
         conn.execute("DROP TABLE profile")
@@ -323,7 +464,8 @@ def _recover_profile_rebuild(conn: sqlite3.Connection) -> None:
     if leftover is None:
         return
     # CREATE_PROFILE_TABLE may have recreated an empty `profile` first; the
-    # rebuilt table always matches the current schema, so its rows win.
+    # rebuilt table always matches the current schema, so its rows win. The
+    # explicit INSERT keeps missing columns (e.g. user_id) at their defaults.
     conn.execute(
         "INSERT OR IGNORE INTO profile (id, name, full_name, location, phone, email, "
         "linkedin_url, github_url, summary, work_history, education, skills, date_updated) "
@@ -363,7 +505,7 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create the jobs and profile tables if needed and apply schema migrations."""
+    """Create the tables if needed and apply schema migrations."""
     with closing(get_connection()) as conn:
         events_existed = (
             conn.execute(
@@ -377,8 +519,13 @@ def init_db() -> None:
         conn.execute(CREATE_EVENTS_TABLE)
         conn.execute(CREATE_TAGS_TABLE)
         conn.execute(CREATE_JOB_TAGS_TABLE)
+        conn.execute(CREATE_USERS_TABLE)
         _migrate(conn)
+        _migrate_jobs_uniqueness(conn)
+        _migrate_tags_uniqueness(conn)
         _migrate_profile(conn)
+        for index in OWNERSHIP_INDEXES:
+            conn.execute(index)
         conn.execute(CREATE_EVENTS_INDEX)
         conn.execute(CREATE_JOB_TAGS_INDEX)
         conn.commit()
@@ -388,19 +535,27 @@ def init_db() -> None:
         conn.commit()
 
 
-def _canonical_url_exists(conn: sqlite3.Connection, url: str, exclude_id: int) -> bool:
+def _canonical_url_exists(
+    conn: sqlite3.Connection, url: str, exclude_id: int, user_id: int | None
+) -> bool:
     cleaned = clean_url(url)
-    for row in conn.execute("SELECT job_url FROM jobs WHERE id != ?", (exclude_id,)).fetchall():
+    if user_id is None:
+        rows = conn.execute("SELECT job_url FROM jobs WHERE id != ?", (exclude_id,)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT job_url FROM jobs WHERE id != ? AND user_id = ?", (exclude_id, user_id)
+        ).fetchall()
+    for row in rows:
         if clean_url(row["job_url"]) == cleaned:
             return True
     return False
 
 
-def check_duplicate(url: str, *, exclude_id: int | None = None) -> bool:
+def check_duplicate(url: str, *, exclude_id: int | None = None, user_id: int | None = None) -> bool:
     """Return True when another job already uses the same canonical URL."""
     exclude = exclude_id if exclude_id is not None else -1
     with closing(get_connection()) as conn:
-        return _canonical_url_exists(conn, url, exclude)
+        return _canonical_url_exists(conn, url, exclude, user_id)
 
 
 def find_similar(
@@ -410,6 +565,7 @@ def find_similar(
     *,
     exclude_id: int | None = None,
     limit: int = SIMILAR_LIMIT,
+    user_id: int | None = None,
 ) -> list[Job]:
     """Return jobs that look like the same role on another link (advisory only)."""
     if not company and not description:
@@ -418,9 +574,15 @@ def find_similar(
     target_role = role_key(company, title) if company and title else None
     matches: list[Job] = []
     with closing(get_connection()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM jobs WHERE id != ? ORDER BY id DESC", (exclude,)
-        ).fetchall()
+        if user_id is None:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE id != ? ORDER BY id DESC", (exclude,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE id != ? AND user_id = ? ORDER BY id DESC",
+                (exclude, user_id),
+            ).fetchall()
         for row in rows:
             job = cast(Job, dict(row))
             same_role = (
@@ -456,6 +618,7 @@ def add_job(
     salary_period: str | None = None,
     salary_note: str | None = None,
     deadline: str | None = None,
+    user_id: int | None = None,
 ) -> int | None:
     """Insert a job listing; return the new id, or None when the URL/fingerprint exists."""
     fingerprint = generate_fingerprint(url, company, title)
@@ -465,8 +628,9 @@ def add_job(
             cursor = conn.execute(
                 "INSERT INTO jobs "
                 "(job_url, title, company, location, description, date_added, fingerprint, "
-                "salary_min, salary_max, salary_currency, salary_period, salary_note, deadline) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "salary_min, salary_max, salary_currency, salary_period, salary_note, deadline, "
+                "user_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     url,
                     title,
@@ -481,6 +645,7 @@ def add_job(
                     salary_period,
                     salary_note,
                     deadline,
+                    user_id,
                 ),
             )
             rowid = cursor.lastrowid
@@ -494,10 +659,15 @@ def add_job(
     return cast("int", rowid)
 
 
-def get_job(job_id: int) -> Job | None:
-    """Return a single job row by id, or None when it does not exist."""
+def get_job(job_id: int, *, user_id: int | None = None) -> Job | None:
+    """Return a single job row by id, or None when it does not exist or is not visible."""
     with closing(get_connection()) as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if user_id is None:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE id = ? AND user_id = ?", (job_id, user_id)
+            ).fetchone()
     return cast(Job, dict(row)) if row is not None else None
 
 
@@ -510,19 +680,32 @@ def get_events(job_id: int) -> list[Event]:
     return [cast(Event, dict(row)) for row in rows]
 
 
-def job_ids_with_status_event(status: JobStatus) -> set[int]:
+def job_ids_with_status_event(status: JobStatus, *, user_id: int | None = None) -> set[int]:
     """Return the ids of every job whose event log contains this status."""
     with closing(get_connection()) as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT job_id FROM events WHERE status = ?", (status,)
-        ).fetchall()
+        if user_id is None:
+            rows = conn.execute(
+                "SELECT DISTINCT job_id FROM events WHERE status = ?", (status,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT e.job_id FROM events e "
+                "JOIN jobs j ON j.id = e.job_id "
+                "WHERE e.status = ? AND j.user_id = ?",
+                (status, user_id),
+            ).fetchall()
     return {int(row[0]) for row in rows}
 
 
-def set_job_status(job_id: int, status: JobStatus) -> None:
+def set_job_status(job_id: int, status: JobStatus, *, user_id: int | None = None) -> None:
     """Move a job to a pipeline stage, stamping its date and preserving earlier ones."""
     with closing(get_connection()) as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if user_id is None:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE id = ? AND user_id = ?", (job_id, user_id)
+            ).fetchone()
         if row is None:
             return
 
@@ -578,50 +761,86 @@ _COMMENT_COLUMNS: dict[JobFlag, str] = {
 }
 
 
-def set_job_comment(job_id: int, stage: JobFlag, comment: str) -> None:
+def set_job_comment(
+    job_id: int, stage: JobFlag, comment: str, *, user_id: int | None = None
+) -> None:
     """Store the free-text comment for a pipeline stage."""
     column = _COMMENT_COLUMNS[stage]
     with closing(get_connection()) as conn:
         # `column` is a fixed internal name from _COMMENT_COLUMNS, never user input.
-        conn.execute(f"UPDATE jobs SET {column} = ? WHERE id = ?", (comment, job_id))
+        if user_id is None:
+            conn.execute(f"UPDATE jobs SET {column} = ? WHERE id = ?", (comment, job_id))
+        else:
+            conn.execute(
+                f"UPDATE jobs SET {column} = ? WHERE id = ? AND user_id = ?",
+                (comment, job_id, user_id),
+            )
         conn.commit()
 
 
-def update_job_comments(job_id: int, applied: str, interview: str, rejected: str) -> None:
+def update_job_comments(
+    job_id: int,
+    applied: str,
+    interview: str,
+    rejected: str,
+    *,
+    user_id: int | None = None,
+) -> None:
     """Replace all three stage comments at once."""
     with closing(get_connection()) as conn:
-        conn.execute(
-            "UPDATE jobs SET applied_comment = ?, interview_comment = ?, "
-            "rejected_comment = ? WHERE id = ?",
-            (applied, interview, rejected, job_id),
-        )
+        if user_id is None:
+            conn.execute(
+                "UPDATE jobs SET applied_comment = ?, interview_comment = ?, "
+                "rejected_comment = ? WHERE id = ?",
+                (applied, interview, rejected, job_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs SET applied_comment = ?, interview_comment = ?, "
+                "rejected_comment = ? WHERE id = ? AND user_id = ?",
+                (applied, interview, rejected, job_id, user_id),
+            )
         conn.commit()
 
 
-def set_job_profile(job_id: int, profile_id: int, profile_name: str) -> None:
+def set_job_profile(
+    job_id: int, profile_id: int, profile_name: str, *, user_id: int | None = None
+) -> None:
     """Record which profile (CV) was used for a job application."""
     with closing(get_connection()) as conn:
-        conn.execute(
-            "UPDATE jobs SET profile_id = ?, profile_name = ? WHERE id = ?",
-            (profile_id, profile_name, job_id),
-        )
+        if user_id is None:
+            conn.execute(
+                "UPDATE jobs SET profile_id = ?, profile_name = ? WHERE id = ?",
+                (profile_id, profile_name, job_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE jobs SET profile_id = ?, profile_name = ? WHERE id = ? AND user_id = ?",
+                (profile_id, profile_name, job_id, user_id),
+            )
         conn.commit()
 
 
-def get_jobs(status: JobStatus | None = None) -> list[Job]:
+def get_jobs(status: JobStatus | None = None, *, user_id: int | None = None) -> list[Job]:
     """Return jobs ordered by id descending, optionally filtered by pipeline status."""
-    query = "SELECT * FROM jobs"
-    params: tuple[int, ...] = ()
+    conditions: list[str] = []
+    params: list[object] = []
     if status == "unapplied":
-        query += " WHERE applied = 0 AND interview = 0 AND rejected = 0 AND outdated = 0"
+        conditions.append("applied = 0 AND interview = 0 AND rejected = 0 AND outdated = 0")
     elif status == "applied":
-        query += " WHERE applied = 1"
+        conditions.append("applied = 1")
     elif status == "interview":
-        query += " WHERE interview = 1"
+        conditions.append("interview = 1")
     elif status == "rejected":
-        query += " WHERE rejected = 1"
+        conditions.append("rejected = 1")
     elif status == "outdated":
-        query += " WHERE outdated = 1"
+        conditions.append("outdated = 1")
+    if user_id is not None:
+        conditions.append("user_id = ?")
+        params.append(user_id)
+    query = "SELECT * FROM jobs"
+    if conditions:
+        query += " WHERE " + " AND ".join(f"({c})" for c in conditions)
     query += " ORDER BY id DESC"
 
     with closing(get_connection()) as conn:
@@ -629,16 +848,26 @@ def get_jobs(status: JobStatus | None = None) -> list[Job]:
     return [cast(Job, dict(row)) for row in rows]
 
 
-def job_counts() -> dict[str, int]:
+def job_counts(*, user_id: int | None = None) -> dict[str, int]:
     """Return position totals per pipeline stage (plus 'total')."""
     with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS total, "
-            "COALESCE(SUM(applied), 0) AS applied, "
-            "COALESCE(SUM(interview), 0) AS interview, "
-            "COALESCE(SUM(rejected), 0) AS rejected, "
-            "COALESCE(SUM(outdated), 0) AS outdated FROM jobs"
-        ).fetchone()
+        if user_id is None:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "COALESCE(SUM(applied), 0) AS applied, "
+                "COALESCE(SUM(interview), 0) AS interview, "
+                "COALESCE(SUM(rejected), 0) AS rejected, "
+                "COALESCE(SUM(outdated), 0) AS outdated FROM jobs"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "COALESCE(SUM(applied), 0) AS applied, "
+                "COALESCE(SUM(interview), 0) AS interview, "
+                "COALESCE(SUM(rejected), 0) AS rejected, "
+                "COALESCE(SUM(outdated), 0) AS outdated FROM jobs WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
     total = int(row["total"])
     applied = int(row["applied"])
     interview = int(row["interview"])
@@ -654,17 +883,25 @@ def job_counts() -> dict[str, int]:
     }
 
 
-def applications_by_month() -> list[tuple[str, int]]:
+def applications_by_month(*, user_id: int | None = None) -> list[tuple[str, int]]:
     """Return application counts per calendar month (YYYY-MM), ascending."""
     with closing(get_connection()) as conn:
-        rows = conn.execute(
-            "SELECT substr(date_applied, 1, 7) AS month, COUNT(*) AS count "
-            "FROM jobs WHERE date_applied IS NOT NULL GROUP BY month ORDER BY month"
-        ).fetchall()
+        if user_id is None:
+            rows = conn.execute(
+                "SELECT substr(date_applied, 1, 7) AS month, COUNT(*) AS count "
+                "FROM jobs WHERE date_applied IS NOT NULL GROUP BY month ORDER BY month"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT substr(date_applied, 1, 7) AS month, COUNT(*) AS count "
+                "FROM jobs WHERE date_applied IS NOT NULL AND user_id = ? "
+                "GROUP BY month ORDER BY month",
+                (user_id,),
+            ).fetchall()
     return [(str(row["month"]), int(row["count"])) for row in rows]
 
 
-def pipeline_funnel() -> dict[str, int]:
+def pipeline_funnel(*, user_id: int | None = None) -> dict[str, int]:
     """Return monotonic pipeline counts for the response funnel.
 
     Stages are counted from the event log so they survive unmarking a
@@ -675,20 +912,33 @@ def pipeline_funnel() -> dict[str, int]:
     interview. The subset relation guarantees a non-increasing funnel.
     """
     with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT "
-            "COUNT(DISTINCT CASE WHEN status IN ('applied', 'interview', 'rejected') "
-            "THEN job_id END) AS applied, "
-            "COUNT(DISTINCT CASE WHEN status IN ('interview', 'rejected') "
-            "THEN job_id END) AS response, "
-            "COUNT(DISTINCT CASE WHEN status = 'interview' THEN job_id END) AS interview "
-            "FROM events"
-        ).fetchone()
+        if user_id is None:
+            row = conn.execute(
+                "SELECT "
+                "COUNT(DISTINCT CASE WHEN status IN ('applied', 'interview', 'rejected') "
+                "THEN job_id END) AS applied, "
+                "COUNT(DISTINCT CASE WHEN status IN ('interview', 'rejected') "
+                "THEN job_id END) AS response, "
+                "COUNT(DISTINCT CASE WHEN status = 'interview' THEN job_id END) AS interview "
+                "FROM events"
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT "
+                "COUNT(DISTINCT CASE WHEN e.status IN ('applied', 'interview', 'rejected') "
+                "THEN e.job_id END) AS applied, "
+                "COUNT(DISTINCT CASE WHEN e.status IN ('interview', 'rejected') "
+                "THEN e.job_id END) AS response, "
+                "COUNT(DISTINCT CASE WHEN e.status = 'interview' THEN e.job_id END) "
+                "AS interview "
+                "FROM events e JOIN jobs j ON j.id = e.job_id WHERE j.user_id = ?",
+                (user_id,),
+            ).fetchone()
     applied = int(row["applied"])
     response = int(row["response"])
     interview = int(row["interview"])
     return {
-        "added": job_counts()["total"],
+        "added": job_counts(user_id=user_id)["total"],
         "applied": applied,
         "response": response,
         "interview": interview,
@@ -700,10 +950,11 @@ def search_jobs(
     status: JobStatus | None = None,
     *,
     threshold: int = COMPANY_SEARCH_THRESHOLD,
+    user_id: int | None = None,
 ) -> list[Job]:
     """Return jobs whose company fuzzy-matches the query, best match first."""
     text = (query or "").strip()
-    jobs = get_jobs(status=status)
+    jobs = get_jobs(status=status, user_id=user_id)
     if not text:
         return jobs
 
@@ -731,10 +982,13 @@ def clear_all_jobs() -> int:
     return count
 
 
-def delete_job(job_id: int) -> None:
+def delete_job(job_id: int, *, user_id: int | None = None) -> None:
     """Delete a single job listing by id."""
     with closing(get_connection()) as conn:
-        conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        if user_id is None:
+            conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+        else:
+            conn.execute("DELETE FROM jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
         conn.commit()
 
 
@@ -753,44 +1007,66 @@ def clear_all_data() -> dict[str, int]:
     return {"positions": positions, "settings": settings}
 
 
-def list_tags() -> list[str]:
+def list_tags(*, user_id: int | None = None) -> list[str]:
     """Return every tag name, alphabetically, case-insensitively."""
     with closing(get_connection()) as conn:
-        rows = conn.execute("SELECT name FROM tags ORDER BY name COLLATE NOCASE").fetchall()
+        if user_id is None:
+            rows = conn.execute("SELECT name FROM tags ORDER BY name COLLATE NOCASE").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT name FROM tags WHERE user_id = ? ORDER BY name COLLATE NOCASE",
+                (user_id,),
+            ).fetchall()
     return [row["name"] for row in rows]
 
 
-def tag_counts() -> dict[str, int]:
+def tag_counts(*, user_id: int | None = None) -> dict[str, int]:
     """Return tag name -> number of assigned positions, alphabetically."""
     with closing(get_connection()) as conn:
-        rows = conn.execute(
-            "SELECT t.name, COUNT(jt.job_id) AS uses FROM tags t "
-            "LEFT JOIN job_tags jt ON jt.tag_id = t.id GROUP BY t.id "
-            "ORDER BY t.name COLLATE NOCASE"
-        ).fetchall()
+        if user_id is None:
+            rows = conn.execute(
+                "SELECT t.name, COUNT(jt.job_id) AS uses FROM tags t "
+                "LEFT JOIN job_tags jt ON jt.tag_id = t.id GROUP BY t.id "
+                "ORDER BY t.name COLLATE NOCASE"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT t.name, COUNT(jt.job_id) AS uses FROM tags t "
+                "LEFT JOIN job_tags jt ON jt.tag_id = t.id WHERE t.user_id = ? "
+                "GROUP BY t.id ORDER BY t.name COLLATE NOCASE",
+                (user_id,),
+            ).fetchall()
     return {row["name"]: int(row["uses"]) for row in rows}
 
 
-def find_tag(name: str) -> int | None:
+def find_tag(name: str, *, user_id: int | None = None) -> int | None:
     """Return the id of a tag by name (case-insensitive), or None when unknown."""
     cleaned = (name or "").strip()
     if not cleaned:
         return None
     with closing(get_connection()) as conn:
-        row = conn.execute(
-            "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (cleaned,)
-        ).fetchone()
+        if user_id is None:
+            row = conn.execute(
+                "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (cleaned,)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id FROM tags WHERE name = ? COLLATE NOCASE AND user_id = ?",
+                (cleaned, user_id),
+            ).fetchone()
     return int(row["id"]) if row is not None else None
 
 
-def create_tag(name: str) -> int | None:
+def create_tag(name: str, *, user_id: int | None = None) -> int | None:
     """Create a tag; return its id, or None when empty or already present."""
     cleaned = (name or "").strip()
     if not cleaned:
         return None
     with closing(get_connection()) as conn:
         try:
-            cursor = conn.execute("INSERT INTO tags (name) VALUES (?)", (cleaned,))
+            cursor = conn.execute(
+                "INSERT INTO tags (name, user_id) VALUES (?, ?)", (cleaned, user_id)
+            )
             conn.commit()
         except sqlite3.IntegrityError:
             return None
@@ -818,24 +1094,37 @@ def delete_tag(tag_id: int) -> None:
         conn.commit()
 
 
-def _ensure_tag(conn: sqlite3.Connection, name: str) -> int | None:
+def _ensure_tag(conn: sqlite3.Connection, name: str, *, user_id: int | None = None) -> int | None:
     """Return the tag id for ``name``, creating it when missing (case-insensitive)."""
     cleaned = name.strip()
     if not cleaned:
         return None
-    row = conn.execute("SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (cleaned,)).fetchone()
+    if user_id is None:
+        row = conn.execute(
+            "SELECT id FROM tags WHERE name = ? COLLATE NOCASE", (cleaned,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM tags WHERE name = ? COLLATE NOCASE AND user_id = ?",
+            (cleaned, user_id),
+        ).fetchone()
     if row is not None:
         return int(row["id"])
-    cursor = conn.execute("INSERT INTO tags (name) VALUES (?)", (cleaned,))
+    cursor = conn.execute("INSERT INTO tags (name, user_id) VALUES (?, ?)", (cleaned, user_id))
     return cast("int", cursor.lastrowid)
 
 
-def set_job_tags(job_id: int, names: list[str] | tuple[str, ...]) -> None:
+def set_job_tags(
+    job_id: int,
+    names: list[str] | tuple[str, ...],
+    *,
+    user_id: int | None = None,
+) -> None:
     """Replace a job's tags, creating any unknown names."""
     with closing(get_connection()) as conn:
         wanted: set[int] = set()
         for name in names:
-            tag_id = _ensure_tag(conn, name)
+            tag_id = _ensure_tag(conn, name, user_id=user_id)
             if tag_id is not None:
                 wanted.add(tag_id)
         current = {
@@ -912,51 +1201,83 @@ def update_job(
     salary_period: str | None = None,
     salary_note: str | None = None,
     deadline: str | None = None,
+    user_id: int | None = None,
 ) -> bool:
     """Update a job's editable fields; return False when the URL or fingerprint collides."""
     fingerprint = generate_fingerprint(url, company, title)
     try:
         with closing(get_connection()) as conn:
-            conn.execute(
-                "UPDATE jobs SET job_url = ?, title = ?, company = ?, location = ?, "
-                "description = ?, fingerprint = ?, salary_min = ?, salary_max = ?, "
-                "salary_currency = ?, salary_period = ?, salary_note = ?, deadline = ? "
-                "WHERE id = ?",
-                (
-                    url,
-                    title,
-                    company,
-                    location,
-                    description,
-                    fingerprint,
-                    salary_min,
-                    salary_max,
-                    salary_currency,
-                    salary_period,
-                    salary_note,
-                    deadline,
-                    job_id,
-                ),
-            )
+            if user_id is None:
+                conn.execute(
+                    "UPDATE jobs SET job_url = ?, title = ?, company = ?, location = ?, "
+                    "description = ?, fingerprint = ?, salary_min = ?, salary_max = ?, "
+                    "salary_currency = ?, salary_period = ?, salary_note = ?, deadline = ? "
+                    "WHERE id = ?",
+                    (
+                        url,
+                        title,
+                        company,
+                        location,
+                        description,
+                        fingerprint,
+                        salary_min,
+                        salary_max,
+                        salary_currency,
+                        salary_period,
+                        salary_note,
+                        deadline,
+                        job_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "UPDATE jobs SET job_url = ?, title = ?, company = ?, location = ?, "
+                    "description = ?, fingerprint = ?, salary_min = ?, salary_max = ?, "
+                    "salary_currency = ?, salary_period = ?, salary_note = ?, deadline = ? "
+                    "WHERE id = ? AND user_id = ?",
+                    (
+                        url,
+                        title,
+                        company,
+                        location,
+                        description,
+                        fingerprint,
+                        salary_min,
+                        salary_max,
+                        salary_currency,
+                        salary_period,
+                        salary_note,
+                        deadline,
+                        job_id,
+                        user_id,
+                    ),
+                )
             conn.commit()
     except sqlite3.IntegrityError:
         return False
     return True
 
 
-def get_setting(key: str, default: str | None = None) -> str | None:
+def _setting_key(key: str, user_id: int | None) -> str:
+    """Prefix ``key`` with the owner when scoped, leaving operator keys global."""
+    return f"user:{user_id}:{key}" if user_id is not None else key
+
+
+def get_setting(key: str, default: str | None = None, *, user_id: int | None = None) -> str | None:
     """Return a stored preference value, or the default when unset."""
+    effective = _setting_key(key, user_id)
     with closing(get_connection()) as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (effective,)).fetchone()
     return row["value"] if row is not None else default
 
 
-def set_setting(key: str, value: str) -> None:
+def set_setting(key: str, value: str, *, user_id: int | None = None) -> None:
     """Store a preference value, replacing any existing value for the key."""
+    effective = _setting_key(key, user_id)
     with closing(get_connection()) as conn:
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-            (key, value),
+            (effective, value),
         )
         conn.commit()
 
@@ -976,6 +1297,7 @@ def _row_to_profile(row: sqlite3.Row) -> Profile:
         "education": row["education"] or "",
         "skills": row["skills"] or "",
         "date_updated": row["date_updated"],
+        "user_id": row["user_id"],
     }
 
 
@@ -994,6 +1316,7 @@ def _empty_profile() -> Profile:
         "education": "",
         "skills": "",
         "date_updated": None,
+        "user_id": None,
     }
 
 
@@ -1003,8 +1326,8 @@ def save_profile(data: Profile) -> None:
         conn.execute(
             "INSERT OR REPLACE INTO profile "
             "(id, name, full_name, location, phone, email, linkedin_url, github_url, "
-            "summary, work_history, education, skills, date_updated) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            "summary, work_history, education, skills, date_updated, user_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
             (
                 data["id"],
                 data["name"],
@@ -1018,29 +1341,43 @@ def save_profile(data: Profile) -> None:
                 data["work_history"],
                 data["education"],
                 data["skills"],
+                data["user_id"],
             ),
         )
         conn.commit()
 
 
-def get_profile(profile_id: int | None = None) -> Profile:
-    """Return one profile by id (or the first profile when omitted), else an empty profile."""
+def get_profile(profile_id: int | None = None, *, user_id: int | None = None) -> Profile:
+    """Return one profile by id (or the first visible profile when omitted), else empty."""
     with closing(get_connection()) as conn:
         if profile_id is None:
-            row = conn.execute("SELECT * FROM profile ORDER BY id LIMIT 1").fetchone()
+            if user_id is None:
+                row = conn.execute("SELECT * FROM profile ORDER BY id LIMIT 1").fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM profile WHERE user_id = ? ORDER BY id LIMIT 1", (user_id,)
+                ).fetchone()
         else:
             row = conn.execute("SELECT * FROM profile WHERE id = ?", (profile_id,)).fetchone()
     return _row_to_profile(row) if row is not None else _empty_profile()
 
 
-def list_profiles() -> list[Profile]:
+def list_profiles(*, user_id: int | None = None) -> list[Profile]:
     """Return all profiles ordered by name for the selection dropdown."""
     with closing(get_connection()) as conn:
-        rows = conn.execute("SELECT * FROM profile ORDER BY name COLLATE NOCASE, id").fetchall()
+        if user_id is None:
+            rows = conn.execute("SELECT * FROM profile ORDER BY name COLLATE NOCASE, id").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM profile WHERE user_id = ? ORDER BY name COLLATE NOCASE, id",
+                (user_id,),
+            ).fetchall()
     return [_row_to_profile(row) for row in rows]
 
 
-def create_profile(name: str, copy_from: int | None = None) -> int | None:
+def create_profile(
+    name: str, copy_from: int | None = None, *, user_id: int | None = None
+) -> int | None:
     """Create a named profile, optionally copying contact fields from another.
 
     Returns the new id, or None when the name is empty or already taken.
@@ -1057,12 +1394,14 @@ def create_profile(name: str, copy_from: int | None = None) -> int | None:
                 contact = tuple((row[column] or "") for column in contact_columns)
         try:
             if contact is None:
-                cursor = conn.execute("INSERT INTO profile (name) VALUES (?)", (cleaned,))
+                cursor = conn.execute(
+                    "INSERT INTO profile (name, user_id) VALUES (?, ?)", (cleaned, user_id)
+                )
             else:
                 cursor = conn.execute(
                     "INSERT INTO profile (name, full_name, location, phone, email, "
-                    "linkedin_url, github_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (cleaned, *contact),
+                    "linkedin_url, github_url, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (cleaned, *contact, user_id),
                 )
             conn.commit()
         except sqlite3.IntegrityError:
@@ -1070,8 +1409,68 @@ def create_profile(name: str, copy_from: int | None = None) -> int | None:
     return cast("int", cursor.lastrowid)
 
 
-def delete_profile(profile_id: int) -> None:
+def delete_profile(profile_id: int, *, user_id: int | None = None) -> None:
     """Delete one profile row; unknown ids are ignored."""
     with closing(get_connection()) as conn:
-        conn.execute("DELETE FROM profile WHERE id = ?", (profile_id,))
+        if user_id is None:
+            conn.execute("DELETE FROM profile WHERE id = ?", (profile_id,))
+        else:
+            conn.execute("DELETE FROM profile WHERE id = ? AND user_id = ?", (profile_id, user_id))
         conn.commit()
+
+
+def create_user(email: str, password_hash: str, *, is_admin: bool = False) -> int | None:
+    """Create an account; return the new id, or None when the email is already taken."""
+    cleaned = (email or "").strip()
+    if not cleaned:
+        return None
+    try:
+        with closing(get_connection()) as conn:
+            cursor = conn.execute(
+                "INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, ?)",
+                (cleaned, password_hash, 1 if is_admin else 0),
+            )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return None
+    return cast("int", cursor.lastrowid)
+
+
+def get_user_by_email(email: str) -> UserRow | None:
+    """Return the account row for an email (case-insensitive), or None."""
+    cleaned = (email or "").strip()
+    if not cleaned:
+        return None
+    with closing(get_connection()) as conn:
+        row = conn.execute("SELECT * FROM users WHERE email = ?", (cleaned,)).fetchone()
+    return cast(UserRow, dict(row)) if row is not None else None
+
+
+def get_user(user_id: int) -> UserRow | None:
+    """Return an account row by id, or None."""
+    with closing(get_connection()) as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return cast(UserRow, dict(row)) if row is not None else None
+
+
+def set_user_password(user_id: int, password_hash: str) -> bool:
+    """Replace an account's password hash; False when the id is unknown."""
+    with closing(get_connection()) as conn:
+        cursor = conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id)
+        )
+        conn.commit()
+    return cursor.rowcount > 0
+
+
+def adopt_orphan_rows(user_id: int) -> dict[str, int]:
+    """Assign every pre-auth row (user_id IS NULL) to ``user_id``; return counts."""
+    counts: dict[str, int] = {}
+    with closing(get_connection()) as conn:
+        for table in ("jobs", "profile", "tags"):
+            cursor = conn.execute(
+                f"UPDATE {table} SET user_id = ? WHERE user_id IS NULL", (user_id,)
+            )
+            counts[table] = cursor.rowcount
+        conn.commit()
+    return counts

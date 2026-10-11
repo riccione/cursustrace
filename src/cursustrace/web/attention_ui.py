@@ -7,6 +7,7 @@ from datetime import date
 from nicegui import ui
 
 from cursustrace import attention, db
+from cursustrace.web.session import current_user_id
 from cursustrace.web.state import _attention_banner_enabled, _attention_thresholds
 
 
@@ -47,19 +48,20 @@ def _park_stale_positions() -> None:
     once the user pulls a position out of the parked stage it stays out.
     """
     thresholds = _attention_thresholds()
-    parked = db.job_ids_with_status_event("outdated")
-    for job in db.get_jobs():
+    user_id = current_user_id()
+    parked = db.job_ids_with_status_event("outdated", user_id=user_id)
+    for job in db.get_jobs(user_id=user_id):
         if job["id"] in parked:
             continue
         if attention.is_outdated(job, thresholds):
-            db.set_job_status(job["id"], "outdated")
+            db.set_job_status(job["id"], "outdated", user_id=user_id)
 
 
 def _render_attention_banner(container: ui.column) -> None:
     container.clear()
     if not _attention_banner_enabled():
         return
-    items = _attention_items(db.get_jobs(), _attention_thresholds())
+    items = _attention_items(db.get_jobs(user_id=current_user_id()), _attention_thresholds())
     if not items:
         return
     count = len(items)

@@ -114,15 +114,17 @@ then `cursustrace.toml`, then the built-in defaults.
   deadline_warning_days = 7
   outdated_after_days = 30
   render = "auto"
+  multi_user = false
   ```
 
 - Environment variables: `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
   `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`,
   `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`,
   `CURSUS_STALE_APPLIED_DAYS`, `CURSUS_STALE_UNAPPLIED_DAYS`,
-  `CURSUS_DEADLINE_WARNING_DAYS`, `CURSUS_OUTDATED_AFTER_DAYS`, `CURSUS_RENDER`.
+  `CURSUS_DEADLINE_WARNING_DAYS`, `CURSUS_OUTDATED_AFTER_DAYS`, `CURSUS_RENDER`,
+  `CURSUS_MULTI_USER`.
 - `cursustrace run` flags: `--host`, `--port`, `--reload/--no-reload`,
-  `--show/--no-show`, `--css PATH`, `--config PATH`.
+  `--show/--no-show`, `--css PATH`, `--config PATH`, `--multi-user/--no-multi-user`.
 - Group flag (all commands): `--log-level`, e.g.
   `cursustrace --log-level debug scan URL`.
 
@@ -189,6 +191,44 @@ the app as a service:
 To restore a backup, stop the app, copy the chosen backup over
 `data/cursustrace.db`, delete leftover `data/cursustrace.db-wal` /
 `data/cursustrace.db-shm` files, then start the app again.
+
+## Multi-user mode
+
+Off by default. Enable it with `multi_user = true` in `cursustrace.toml`,
+`CURSUS_MULTI_USER=1`, or `cursustrace run --multi-user`. The dashboard then
+requires a login on every page except `/login` and `/register`, and each
+account sees only its own positions, tags, CV profiles, and preferences.
+
+On the first multi-user start a default admin account is seeded:
+`admin@admin.dev` / `admin`. Sign in and change the password immediately from
+the header's **Change password** button — the seeded password is public.
+
+Registration is open: anyone who can reach `/register` can create an account.
+The app binds to `127.0.0.1` by default, which is fine for a personal machine;
+if you expose it beyond localhost, put your own authentication (VPN, reverse
+proxy with basic auth, …) in front of it or keep registration in mind.
+
+What is isolated per account:
+
+- Positions (jobs), tags, CV profiles, and dashboard settings
+  (dark mode, banner toggles, selected profile).
+- History events follow their position, so they inherit the isolation.
+
+What is shared or global:
+
+- The danger-zone **Clear Database** button deletes *every* account's
+  positions — treat it as an operator tool.
+- The CLI (`cursustrace scan`, `stats`, `discover`, `add`, …) and the MCP
+  server operate on the whole database without a user context.
+
+On the first multi-user start, any pre-existing rows (positions, profiles,
+tags created before authentication existed) are assigned to the seeded admin
+account, so upgrading a single-user database loses nothing.
+
+Login sessions live in server-side files under `.nicegui/` and are keyed by a
+secret stored in `data/.storage-secret` (created automatically, permissions
+`0600`). Deleting that file signs everyone out; session cookies themselves are
+destroyed whenever the app restarts.
 
 ## Customizing the CV PDF style
 

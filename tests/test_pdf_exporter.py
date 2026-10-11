@@ -58,6 +58,7 @@ def _profile(
         "education": education,
         "skills": skills,
         "date_updated": None,
+        "user_id": None,
     }
 
 

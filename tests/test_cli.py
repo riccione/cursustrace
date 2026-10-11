@@ -82,6 +82,7 @@ def _profile() -> db.Profile:
         "education": "",
         "skills": "",
         "date_updated": None,
+        "user_id": None,
     }
 
 

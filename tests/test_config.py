@@ -316,3 +316,21 @@ def test_zero_attention_threshold_is_allowed(config_file: Path) -> None:
     settings = config.load_settings(env={"CURSUS_DEADLINE_WARNING_DAYS": "0"})
 
     assert settings.deadline_warning_days == 0
+
+
+def test_multi_user_defaults_off(config_file: Path) -> None:
+    settings = config.load_settings(env={})
+
+    assert settings.multi_user is False
+
+
+def test_multi_user_env_and_flag_override(config_file: Path) -> None:
+    config_file.write_text("[cursustrace]\nmulti_user = true\n", encoding="utf-8")
+    assert config.load_settings(env={}).multi_user is True
+    assert config.load_settings(env={"CURSUS_MULTI_USER": "0"}).multi_user is False
+    assert config.load_settings(multi_user=True, env={}).multi_user is True
+
+
+def test_invalid_multi_user_raises(config_file: Path) -> None:
+    with pytest.raises(ConfigError, match="multi_user"):
+        config.load_settings(env={"CURSUS_MULTI_USER": "maybe"})

@@ -99,6 +99,7 @@ def _profile_payload(
         "education": "## Education",
         "skills": "## Skills",
         "date_updated": None,
+        "user_id": None,
     }
 
 

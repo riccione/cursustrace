@@ -6,6 +6,7 @@ from nicegui import ui
 
 from cursustrace import db, salary
 from cursustrace.web.constants import FUNNEL_STAGES, STAT_CARDS, STATUS_NAMES
+from cursustrace.web.session import current_user_id
 
 
 def _fill_months(months: list[tuple[str, int]]) -> tuple[list[str], list[int]]:
@@ -41,7 +42,7 @@ def _render_status_pie(counts: dict[str, int], dark: bool) -> None:
 
 
 def _render_funnel(dark: bool) -> None:
-    funnel = db.pipeline_funnel()
+    funnel = db.pipeline_funnel(user_id=current_user_id())
     with ui.card().classes("w-full"):
         ui.label("Response funnel").classes("text-subtitle1")
         options = {
@@ -75,7 +76,8 @@ def _render_timeline(months: list[tuple[str, int]], dark: bool) -> None:
 
 
 def _render_statistics(dark: bool) -> None:
-    counts = db.job_counts()
+    user_id = current_user_id()
+    counts = db.job_counts(user_id=user_id)
     with ui.grid(columns=2).classes("w-full gap-4"):
         for key, label in STAT_CARDS:
             with ui.card().classes("w-full items-center"):
@@ -86,7 +88,7 @@ def _render_statistics(dark: bool) -> None:
         with ui.grid(columns=2).classes("w-full gap-4"):
             _render_status_pie(counts, dark)
             _render_funnel(dark)
-        months = db.applications_by_month()
+        months = db.applications_by_month(user_id=user_id)
         if months:
             _render_timeline(months, dark)
         else:
@@ -94,7 +96,7 @@ def _render_statistics(dark: bool) -> None:
     else:
         ui.label("No positions yet to display charts.").classes("text-caption")
 
-    jobs = db.get_jobs()
+    jobs = db.get_jobs(user_id=user_id)
     summary = salary.salary_summary(jobs)
     with_salary = sum(entry["count"] for entry in summary.values())
     ui.label(f"{with_salary} of {counts['total']} positions have salary data").classes(
