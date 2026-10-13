@@ -248,6 +248,12 @@ The `cursustrace` command also offers headless subcommands for adding positions
 without the UI (duplicates are skipped, never overwritten). Pass `--json` for
 machine-readable output.
 
+URLs are deduplicated by a canonical form: tracking parameters (`utm_*`, `ref`,
+`gh_src`, board-specific noise) are ignored, while parameters that carry the
+posting id on some boards (`id`, `gh_jid`, `ashby_jid`, ...) are preserved and
+sorted. Two roles on the same board path therefore stay distinct even when only
+their query id differs.
+
 Add one position from explicit fields:
 
 ```sh
