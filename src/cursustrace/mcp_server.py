@@ -29,7 +29,9 @@ mcp = MCPServer(
         "duplicates. delete_positions is preview-first: call it with confirm=false "
         "(the default) to see what would be removed, then repeat with confirm=true "
         "to execute. discover lists candidate links only; scan or "
-        "discover(add=true) ingest them. Tags are case-insensitive and unknown "
+        "discover(add=true) ingest them. discover accepts a query keyword to "
+        "search a source (job-sources search template or link filtering) and "
+        "only_live to skip sources not currently live. Tags are case-insensitive and unknown "
         "tags are created on write. When adding, call scrape_position first and "
         "read the listing: the owner applies only to Serbia-based or remote-EU "
         "roles, never listings restricted to working in another country, and "
@@ -331,6 +333,8 @@ def discover(
     add: bool = False,
     tags: list[str] | None = None,
     force: bool = False,
+    query: str | None = None,
+    only_live: bool = False,
 ) -> dict[str, object]:
     """Extract candidate listing links from a job source (URL or job-sources name).
 
@@ -338,6 +342,10 @@ def discover(
     add=true, scrapes and ingests every new candidate like scan does;
     candidates whose fields look tied to a specific country are held back
     under flagged (with the reasons and fields for review) unless force=true.
+
+    query searches the source for a keyword: sources with a search template in
+    job-sources/ are fetched through it (server-side filtering), others filter
+    the extracted links. only_live skips named sources not currently live.
     """
     db.init_db()
     if not 1 <= limit <= discovery.MAX_LIMIT:
@@ -347,7 +355,7 @@ def discover(
     except ValueError as exc:
         raise ToolError(str(exc)) from exc
     try:
-        result = discovery.discover(src, limit=limit)
+        result = discovery.discover(src, limit=limit, query=query, only_live=only_live)
     except ScrapeError as exc:
         raise ToolError(str(exc)) from exc
     src_ref = result.source
@@ -364,6 +372,13 @@ def discover(
         "known_by_status": result.status_counts,
         "candidates": list(result.candidates),
     }
+    if result.query is not None:
+        payload["query"] = result.query
+    if result.fetched_url is not None and result.fetched_url != src_ref.url:
+        payload["fetched_url"] = result.fetched_url
+    warning = discovery.source_warning(src_ref)
+    if warning is not None:
+        payload["warning"] = warning
     if add:
         added = 0
         skipped = 0
