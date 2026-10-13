@@ -33,8 +33,20 @@ logger = logging.getLogger(__name__)
     show_default=True,
     help="Maximum candidate links to examine.",
 )
+@click.option("--query", "-q", "query", default=None, help="Keyword to search the source for.")
+@click.option(
+    "--only-live",
+    is_flag=True,
+    help="Skip named sources that are not currently live in job-sources/.",
+)
 def discover(
-    source_arg: str, as_json: bool, add_new: bool, tags: tuple[str, ...], limit: int
+    source_arg: str,
+    as_json: bool,
+    add_new: bool,
+    tags: tuple[str, ...],
+    limit: int,
+    query: str | None,
+    only_live: bool,
 ) -> None:
     """Discover position links from a job source (URL or job-sources site name)."""
     db.init_db()
@@ -43,7 +55,7 @@ def discover(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     try:
-        result = discovery.discover(source, limit=limit)
+        result = discovery.discover(source, limit=limit, query=query, only_live=only_live)
     except ScrapeError as exc:
         if as_json:
             click.echo(json_module.dumps({"source": {"input": source_arg}, "error": str(exc)}))
@@ -113,6 +125,13 @@ def _report_discovery(
             "known_by_status": result.status_counts,
             "candidates": list(result.candidates),
         }
+        if result.query is not None:
+            payload["query"] = result.query
+        if result.fetched_url is not None and result.fetched_url != source.url:
+            payload["fetched_url"] = result.fetched_url
+        warning = discovery.source_warning(source)
+        if warning is not None:
+            payload["warning"] = warning
         if add_new:
             payload["added"] = added
             payload["skipped"] = skipped
@@ -126,6 +145,11 @@ def _report_discovery(
     label = source.site or source.input
     status = f" ({source.site_status})" if source.site_status else ""
     click.echo(f"Source: {label} → {source.url}{status}")
+    if result.query is not None:
+        click.echo(f"Query: {result.query} → {result.fetched_url}")
+    warning = discovery.source_warning(source)
+    if warning is not None:
+        click.echo(f"Warning: {warning}")
     breakdown = _status_breakdown(result.status_counts)
     click.echo(
         f"Extracted {len(result.candidates)} links · {result.new_count} new"

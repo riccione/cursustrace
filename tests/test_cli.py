@@ -242,6 +242,44 @@ def test_discover_resolves_job_source_name(
     assert payload["source"]["url"] == "https://remoteok.com"
 
 
+def test_discover_query_uses_search_template(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, str] = {}
+
+    def fake_fetch(url: str) -> str:
+        seen["url"] = url
+        return _DISCOVER_HTML
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+
+    result = runner.invoke(cli_module.cli, ["discover", "RemoteOK", "--query", "qa", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert seen["url"] == "https://remoteok.com/remote-qa-jobs"
+    assert payload["query"] == "qa"
+    assert payload["fetched_url"] == "https://remoteok.com/remote-qa-jobs"
+
+
+def test_discover_only_live_skips_blocked_source(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "Indeed RS", "--only-live", "--json"])
+
+    assert result.exit_code == 1
+    assert "only_live" in json.loads(result.output)["error"]
+
+
+def test_discover_warns_for_non_live_source(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: _DISCOVER_HTML)
+
+    result = runner.invoke(cli_module.cli, ["discover", "Indeed RS", "--json"])
+
+    assert result.exit_code == 0
+    assert "blocked" in json.loads(result.output)["warning"]
+
+
 def test_discover_add_ingests_new_positions(
     runner: CliRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
