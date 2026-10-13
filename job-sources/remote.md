@@ -34,8 +34,8 @@ Sources for fully remote roles. Remote filters on the global sites often surface
 | Pangian | https://www.pangian.com | remote | Remote jobs with country-contracting guidance | live |
 | PowerToFly | https://www.powertofly.com | remote | Remote roles focused on women and underrepresented talent | live |
 | Remote.co | https://remote.co | remote | Curated remote roles plus remote-work guides | blocked |
-| RemoteOK | https://remoteok.com | remote | Board-wide JSON feed; tag-filtered remote roles | live |
-| Remotive | https://remotive.com | remote | Curated remote tech and non-tech roles | live |
+| RemoteOK | https://remoteok.com | remote | Board-wide JSON feed; tag-filtered remote roles | live | https://remoteok.com/remote-{query}-jobs |
+| Remotive | https://remotive.com | remote | Curated remote tech and non-tech roles | live | https://remotive.com/remote-jobs/{query} |
 | Remotli | https://remotli.ch | remote | Remote roles at Swiss companies, paid in CHF | live |
 | Skip | https://www.skip.com | remote | Curated remote tech roles | live |
 | Tech Ladies | https://www.hiretechladies.com | remote | Curated roles for women in tech | live |

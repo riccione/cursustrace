@@ -12,7 +12,7 @@ Cross-border aggregators plus the country boards where most local postings actua
 
 | Site | URL | Type | Notes | Status |
 |------|-----|------|-------|--------|
-| Arbeitnow | https://www.arbeitnow.com | aggregator | EU/DACH-heavy aggregator with a public API feed | live |
+| Arbeitnow | https://www.arbeitnow.com | aggregator | EU/DACH-heavy aggregator with a public API feed | live | https://www.arbeitnow.com/jobs/{query} |
 | CareerJet | https://www.careerjet.com | aggregator | Meta-crawler present in most European markets | live |
 | EURES | https://europa.eu/eures/portal/jv-se/search | government | EU public employment service, cross-border roles | live |
 | Glassdoor | https://www.glassdoor.com | aggregator | Reviews and salaries across European employers | blocked |

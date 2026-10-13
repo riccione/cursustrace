@@ -72,12 +72,15 @@ def test_region_file_schema(name: str) -> None:
         sites = [row[0] for row in rows]
         assert sites == sorted(sites), f"{name}: {section} rows not sorted by Site"
         for row in rows:
-            assert len(row) == len(HEADER), f"{name}: bad row {row}"
-            site, url, typ, notes, status = row
+            assert len(row) in (5, 6), f"{name}: bad row {row}"
+            site, url, typ, notes, status = row[:5]
             assert site and notes, f"{name}: empty Site/Notes in {row}"
             assert url.startswith("https://"), f"{name}: non-https URL {url}"
             assert typ in TYPES, f"{name}: unknown type {typ!r}"
             assert status in STATUSES, f"{name}: unknown status {status!r}"
+            if len(row) == 6 and row[5]:
+                assert row[5].startswith("https://"), f"{name}: non-https search template {row[5]}"
+                assert "{query}" in row[5], f"{name}: search template missing {{query}}: {row[5]}"
         total += len(rows)
 
     assert total >= 5, f"{name}: expected a curated list, got {total} rows"
