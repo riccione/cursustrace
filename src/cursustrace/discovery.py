@@ -145,6 +145,21 @@ def resolve_source(text: str) -> SourceRef:
     return SourceRef(input=text, url=url, site=site, site_status=status, search_url=search)
 
 
+def list_sources() -> list[SourceRef]:
+    """Return every known site from job-sources/, deduplicated and sorted by name."""
+    seen: set[str] = set()
+    sources: list[SourceRef] = []
+    for site, url, status, search in _job_source_rows():
+        key = site.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append(
+            SourceRef(input=site, url=url, site=site, site_status=status, search_url=search)
+        )
+    return sorted(sources, key=lambda source: (source.site or "").casefold())
+
+
 def source_warning(source: SourceRef) -> str | None:
     """Return a human note when a named source is not currently live."""
     if source.site is not None and source.site_status in NON_LIVE_STATUSES:
@@ -226,13 +241,15 @@ def discover(
     limit: int = DEFAULT_LIMIT,
     query: str | None = None,
     only_live: bool = False,
+    user_id: int | None = None,
 ) -> DiscoveryResult:
     """Fetch the source page and classify its candidate links against the DB.
 
     When ``query`` is set and the source declares a search template, the term is
     substituted into that URL so the board filters server-side; otherwise the
     term filters the extracted links client-side. ``only_live`` refuses to fetch
-    named sources whose job-sources status is blocked/login/dead.
+    named sources whose job-sources status is blocked/login/dead. ``user_id``
+    scopes the "known" set to one account's positions.
     """
     if only_live and source.site is not None and source.site_status != "live":
         raise ScrapeError(f"Source '{source.site}' is {source.site_status}; skipped (only_live).")
@@ -245,7 +262,7 @@ def discover(
         else:
             client_term = term
     html = scraper.fetch_html(fetched_url)
-    index = {clean_url(job["job_url"]): job for job in db.get_jobs()}
+    index = {clean_url(job["job_url"]): job for job in db.get_jobs(user_id=user_id)}
     urls = extract_links(html, fetched_url, MAX_LIMIT if client_term else limit)
     if client_term:
         needle = client_term.casefold()
