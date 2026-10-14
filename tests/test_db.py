@@ -1458,6 +1458,31 @@ def test_create_profile_unknown_copy_source_is_empty(db_path: Path) -> None:
     assert profile["email"] == ""
 
 
+def test_create_profile_copies_cv_sections_when_requested(db_path: Path) -> None:
+    db.init_db()
+    source = db.create_profile("Default")
+    assert source is not None
+    db.save_profile(_profile_payload())
+
+    copied = db.create_profile("Work CV", copy_from=source, copy_cv=True)
+    assert copied is not None
+    profile = db.get_profile(copied)
+    assert profile["full_name"] == "Jane Doe"
+    assert profile["summary"] == "# Jane Doe\n\nEngineer"
+    assert profile["work_history"] == "## Work History\n\n- Acme Corp"
+    assert profile["education"] == "## Education\n\nBSc"
+    assert profile["skills"] == "## Skills\n\n- Python"
+
+
+def test_create_profile_copies_cv_sections_from_unknown_source_is_empty(db_path: Path) -> None:
+    db.init_db()
+    created = db.create_profile("Orphan", copy_from=999, copy_cv=True)
+    assert created is not None
+    profile = db.get_profile(created)
+    assert profile["summary"] == ""
+    assert profile["skills"] == ""
+
+
 def test_list_profiles_orders_by_name(db_path: Path) -> None:
     db.init_db()
     db.create_profile("beta")

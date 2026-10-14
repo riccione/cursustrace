@@ -1378,32 +1378,41 @@ def list_profiles(*, user_id: int | None = None) -> list[Profile]:
 
 
 def create_profile(
-    name: str, copy_from: int | None = None, *, user_id: int | None = None
+    name: str,
+    copy_from: int | None = None,
+    *,
+    copy_cv: bool = False,
+    user_id: int | None = None,
 ) -> int | None:
     """Create a named profile, optionally copying contact fields from another.
 
-    Returns the new id, or None when the name is empty or already taken.
+    ``copy_cv`` additionally copies the Summary, Work History, Education and
+    Skills sections. Returns the new id, or None when the name is empty or
+    already taken.
     """
     cleaned = (name or "").strip()
     if not cleaned:
         return None
     contact_columns = ("full_name", "location", "phone", "email", "linkedin_url", "github_url")
+    cv_columns = ("summary", "work_history", "education", "skills")
+    columns = contact_columns + (cv_columns if copy_cv else ())
     with closing(get_connection()) as conn:
-        contact: tuple[str, ...] | None = None
+        copied: tuple[str, ...] | None = None
         if copy_from is not None:
             row = conn.execute("SELECT * FROM profile WHERE id = ?", (copy_from,)).fetchone()
             if row is not None:
-                contact = tuple((row[column] or "") for column in contact_columns)
+                copied = tuple((row[column] or "") for column in columns)
         try:
-            if contact is None:
+            if copied is None:
                 cursor = conn.execute(
                     "INSERT INTO profile (name, user_id) VALUES (?, ?)", (cleaned, user_id)
                 )
             else:
+                placeholders = ", ".join("?" for _ in columns)
                 cursor = conn.execute(
-                    "INSERT INTO profile (name, full_name, location, phone, email, "
-                    "linkedin_url, github_url, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (cleaned, *contact, user_id),
+                    f"INSERT INTO profile (name, {', '.join(columns)}, user_id) "
+                    f"VALUES (?, {placeholders}, ?)",
+                    (cleaned, *copied, user_id),
                 )
             conn.commit()
         except sqlite3.IntegrityError:

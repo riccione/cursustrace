@@ -44,6 +44,11 @@ def _render_profile_editor() -> None:
     with ui.dialog() as add_dialog, ui.card().classes("w-full max-w-md"):
         ui.label("Add profile").classes("text-h6")
         new_name_input = ui.input("Profile name").classes("w-full").mark("new-profile-name")
+        copy_cv_checkbox = (
+            ui.checkbox("Copy summary, work history, education, skills", value=True)
+            .classes("w-full")
+            .mark("copy-cv-sections")
+        )
         with ui.row():
             ui.button("Cancel", on_click=add_dialog.close).props("flat")
             ui.button("Add", on_click=lambda: confirm_add()).props("color=primary").mark(
@@ -98,7 +103,7 @@ def _render_profile_editor() -> None:
                     .mark("profile-select")
                 )
                 selector.on_value_change(switch_profile)
-            ui.button("➕ Add Profile", on_click=add_dialog.open).mark("add-profile")
+            ui.button("➕ Add Profile", on_click=open_add).mark("add-profile")
             if selected["id"] is not None:
                 ui.button(
                     "🗑 Delete Profile",
@@ -112,12 +117,22 @@ def _render_profile_editor() -> None:
         persist_selection()
         render_form()
 
+    def open_add() -> None:
+        copy_cv_checkbox.value = True
+        copy_cv_checkbox.enabled = selected["id"] is not None
+        add_dialog.open()
+
     def confirm_add() -> None:
         name = (new_name_input.value or "").strip()
         if not name:
             ui.notify("Enter a profile name.", type="warning")
             return
-        profile_id = db.create_profile(name, copy_from=selected["id"], user_id=current_user_id())
+        profile_id = db.create_profile(
+            name,
+            copy_from=selected["id"],
+            copy_cv=bool(copy_cv_checkbox.value),
+            user_id=current_user_id(),
+        )
         if profile_id is None:
             ui.notify(f"Profile '{name}' already exists.", type="warning")
             return
