@@ -54,6 +54,9 @@ Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
 `validThrough` date or type it as an ISO date like `2026-12-31`.
 
+Each dashboard and detail page ends with a `↑ Go up` button that scrolls back
+to the top.
+
 The dashboard opens with a needs-attention banner whenever any position is
 stale or has an imminent deadline. A position qualifies when:
 
