@@ -13,6 +13,7 @@ from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enab
 from cursustrace.web.constants import APP_TITLE, STATUS_TABS
 from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
+from cursustrace.web.nav import app_footer, scroll_to_top_button
 from cursustrace.web.profile import _render_profile_editor
 from cursustrace.web.scan import _handle_scan
 from cursustrace.web.session import current_email, current_user_id
@@ -378,4 +379,8 @@ def dashboard_page(request: Request) -> None:
             with ui.tab_panel(profile_tab):
                 _render_profile_editor()
 
-        refresh()
+        scroll_to_top_button()
+
+    app_footer()
+
+    refresh()

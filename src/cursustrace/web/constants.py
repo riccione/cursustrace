@@ -7,6 +7,7 @@ from typing import Literal
 
 from cursustrace import db
 
+APP_NAME = "CursusTrace"
 APP_TITLE = "CursusTrace — Job Application Tracker"
 
 STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
