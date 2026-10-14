@@ -1809,8 +1809,45 @@ async def test_profile_add_dialog_creates_and_selects_profile(user: User) -> Non
     await user.should_see(marker="profile-select")
     work = next(profile for profile in db.list_profiles() if profile["name"] == "Work CV")
     assert work["full_name"] == "Jane Doe"
-    assert work["summary"] == ""
+    assert work["summary"] == "# Jane"
+    assert work["work_history"] == "## Work History"
+    assert work["education"] == "## Education"
+    assert work["skills"] == "## Skills"
     assert cast(ui.input, user.find("Full Name").elements.pop()).value == "Jane Doe"
+
+
+async def test_profile_add_dialog_skips_cv_when_unchecked(user: User) -> None:
+    db.init_db()
+    default = db.create_profile("Default")
+    assert default is not None
+    db.save_profile(_profile_payload(profile_id=default, name="Default"))
+    await user.open("/")
+
+    user.find(marker="add-profile").click()
+    copy_cv = cast(ui.checkbox, user.find(marker="copy-cv-sections").elements.pop())
+    assert copy_cv.enabled is True
+    assert copy_cv.value is True
+    user.find(marker="new-profile-name").type("Blank CV")
+    user.find(marker="copy-cv-sections").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="confirm-add-profile").click()
+
+    await user.should_see("Profile 'Blank CV' created.")
+    work = next(profile for profile in db.list_profiles() if profile["name"] == "Blank CV")
+    assert work["full_name"] == "Jane Doe"
+    assert work["summary"] == ""
+    assert work["work_history"] == ""
+    assert work["education"] == ""
+    assert work["skills"] == ""
+
+
+async def test_profile_add_checkbox_disabled_without_source(user: User) -> None:
+    db.init_db()
+    await user.open("/")
+
+    user.find(marker="add-profile").click()
+    copy_cv = cast(ui.checkbox, user.find(marker="copy-cv-sections").elements.pop())
+    assert copy_cv.enabled is False
 
 
 async def test_profile_add_rejects_duplicate_name(user: User) -> None:
