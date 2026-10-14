@@ -60,20 +60,18 @@ def _scan_summary(saved: int, duplicates: int, errors: int, failures: list[str])
     return " · ".join(parts) if parts else "Nothing saved."
 
 
-async def _handle_scan(
-    urls_input: ui.textarea,
+async def run_scan(
+    urls: list[str],
     refresh: Callable[[], None],
     status_label: ui.label,
     button: ui.button,
-) -> None:
-    urls = _parse_urls(urls_input.value)
+) -> list[str]:
+    """Scrape and save each URL; return the URLs that failed."""
     if not urls:
-        ui.notify("Please enter at least one job URL.", type="warning")
-        return
+        return []
 
     button.enabled = False
     saved = duplicates = errors = 0
-    cancelled = False
     failures: list[str] = []
     failed_urls: list[str] = []
     similar: list[list[db.Job]] = []
@@ -84,7 +82,6 @@ async def _handle_scan(
             matches: list[db.Job]
             outcome = await io_bound(_scan_url, url, user_id)
             if outcome is None:
-                cancelled = True
                 kind, message, matches = "error", f"{url}: cancelled", []
             else:
                 kind, message, matches = outcome
@@ -116,6 +113,19 @@ async def _handle_scan(
             f"Added {saved} — {len(similar)} look similar: {_similar_summary(flat)}",
             type="info",
         )
-    if cancelled:
+    return failed_urls
+
+
+async def _handle_scan(
+    urls_input: ui.textarea,
+    refresh: Callable[[], None],
+    status_label: ui.label,
+    button: ui.button,
+) -> None:
+    urls = _parse_urls(urls_input.value)
+    if not urls:
+        ui.notify("Please enter at least one job URL.", type="warning")
         return
-    urls_input.value = "\n".join(failed_urls) if errors else ""
+
+    failed_urls = await run_scan(urls, refresh, status_label, button)
+    urls_input.value = "\n".join(failed_urls) if failed_urls else ""
