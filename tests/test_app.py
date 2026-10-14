@@ -18,6 +18,7 @@ from pypdf import PdfReader
 
 from cursustrace import app, attention, backup, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
+from cursustrace.version import app_version
 from cursustrace.web import (
     attention_ui,
     constants,
@@ -1326,6 +1327,25 @@ async def test_scroll_to_top_button_on_detail(user: User) -> None:
     await user.open(f"/job/{job_id}")
 
     await user.should_see(marker="scroll-to-top")
+
+
+def test_app_version_is_available() -> None:
+    assert app_version()
+
+
+async def test_footer_shows_app_name_and_version_on_dashboard(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see(marker="app-footer")
+    await user.should_see(f"CursusTrace v{app_version()}")
+
+
+async def test_footer_shows_app_name_and_version_on_detail(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see(marker="app-footer")
+    await user.should_see(f"CursusTrace v{app_version()}")
 
 
 async def test_details_view_shows_tracking_fields(user: User) -> None:

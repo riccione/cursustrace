@@ -8,6 +8,7 @@ from starlette.requests import Request
 from cursustrace import auth, db
 from cursustrace.web import state
 from cursustrace.web.constants import APP_TITLE
+from cursustrace.web.nav import app_footer
 from cursustrace.web.session import current_user_id
 
 
@@ -71,6 +72,8 @@ def login_page(request: Request) -> None:
         )
         ui.link("Create an account", "/register").classes("w-full text-center").mark("go-register")
 
+    app_footer()
+
 
 def register_page() -> None:
     if not _multi_user_enabled():
@@ -120,6 +123,8 @@ def register_page() -> None:
             "register-submit"
         )
         ui.link("Back to sign in", "/login").classes("w-full text-center").mark("go-login")
+
+    app_footer()
 
 
 def _change_password_dialog() -> ui.dialog:
