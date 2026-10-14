@@ -31,6 +31,22 @@ followed by `##` sections, each holding one table:
 |------|-----|------|-------|--------|
 ```
 
+### Search templates
+
+Sites whose board honors a keyword query may carry an optional trailing
+`Search` cell holding a URL template with a `{query}` placeholder:
+
+```markdown
+| Site | URL | Type | Notes | Status | Search |
+|------|-----|------|-------|--------|--------|
+| RemoteOK | https://remoteok.com | remote | Board-wide JSON feed | live | https://remoteok.com/remote-{query}-jobs |
+```
+
+`discover <site> --query <term>` substitutes the URL-encoded term into the
+template and fetches that page (the board filters server-side). Rows without a
+template keep the five-column form; only add a template after checking the site
+actually honors the query.
+
 ### Type vocabulary
 
 | Type | Meaning |

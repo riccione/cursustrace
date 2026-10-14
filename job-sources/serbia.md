@@ -21,7 +21,7 @@ Serbian boards, from IT-specialist sites to general classifieds, plus the public
 
 | Site | URL | Type | Notes | Status |
 |------|-----|------|-------|--------|
-| HelloWorld.rs | https://helloworld.rs/oglasi-za-posao | board | Largest Serbian IT job base, EN/SR | live |
+| HelloWorld.rs | https://helloworld.rs/oglasi-za-posao | board | Largest Serbian IT job base, EN/SR | live | https://www.helloworld.rs/oglasi-za-posao/{query} |
 | IT-Poslovi | https://www.it-poslovi.com | board | Serbian IT aggregator | live |
 | Jobster | https://jobster.rs | board | Serbian platform with company reviews | live |
 | Oglasi.rs | https://www.oglasi.rs | board | Serbian classifieds with a Posao section | live |

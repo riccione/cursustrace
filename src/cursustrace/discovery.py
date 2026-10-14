@@ -9,19 +9,91 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote_plus, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 from cursustrace import db, scraper
+from cursustrace.errors import ScrapeError
 from cursustrace.utils import clean_url
 from cursustrace.validation import validate_url
 
 JOB_SOURCES_DIR = Path(__file__).resolve().parents[2] / "job-sources"
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 1000
+NON_LIVE_STATUSES = frozenset({"blocked", "login", "dead"})
 _HEADER = ("Site", "URL", "Type", "Notes", "Status")
+_HEADER_SEARCH = _HEADER + ("Search",)
+_SEARCH_PLACEHOLDER = "{query}"
 _NON_PAGE_SCHEMES = ("mailto:", "javascript:", "tel:", "data:")
+
+_NON_LISTING_SEGMENTS = frozenset(
+    {
+        "about",
+        "about-us",
+        "o-nama",
+        "blog",
+        "news",
+        "novosti",
+        "vesti",
+        "saveti",
+        "login",
+        "log-in",
+        "signin",
+        "sign-in",
+        "signup",
+        "sign-up",
+        "register",
+        "registration",
+        "terms",
+        "terms-of-use",
+        "uslovi",
+        "uslovi-koriscenja",
+        "privacy",
+        "privacy-policy",
+        "privatnost",
+        "politika-privatnosti",
+        "faq",
+        "help",
+        "contact",
+        "contact-us",
+        "kontakt",
+        "pricing",
+        "plans",
+        "legal",
+        "imprint",
+        "cookies",
+        "company",
+        "companies",
+        "category",
+        "categories",
+        "tags",
+        "topics",
+        "kompanija",
+        "kompanije",
+        "prakse",
+        "iskustva",
+        "kategorija",
+        "kategorije",
+    }
+)
+_SOCIAL_HOSTS = frozenset(
+    {
+        "facebook.com",
+        "instagram.com",
+        "twitter.com",
+        "x.com",
+        "youtube.com",
+        "youtu.be",
+        "tiktok.com",
+        "discord.gg",
+        "discord.com",
+        "t.me",
+        "telegram.me",
+        "pinterest.com",
+        "reddit.com",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +104,7 @@ class SourceRef:
     url: str
     site: str | None
     site_status: str | None
+    search_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +115,8 @@ class DiscoveryResult:
     candidates: tuple[dict[str, object], ...]
     new_urls: tuple[str, ...]
     status_counts: dict[str, int] = field(default_factory=dict)
+    query: str | None = None
+    fetched_url: str | None = None
 
     @property
     def new_count(self) -> int:
@@ -66,8 +141,43 @@ def resolve_source(text: str) -> SourceRef:
             f"Unknown source '{text}': pass a full http(s) URL "
             "or a site name from job-sources/ (e.g. 'RemoteOK')."
         )
-    site, url, status = match
-    return SourceRef(input=text, url=url, site=site, site_status=status)
+    site, url, status, search = match
+    return SourceRef(input=text, url=url, site=site, site_status=status, search_url=search)
+
+
+def source_warning(source: SourceRef) -> str | None:
+    """Return a human note when a named source is not currently live."""
+    if source.site is not None and source.site_status in NON_LIVE_STATUSES:
+        return f"Source '{source.site}' is {source.site_status}; results may be empty."
+    return None
+
+
+def _strip_ext(segment: str) -> str:
+    return segment.split(".", 1)[0].casefold()
+
+
+def _is_social(host: str, path: str) -> bool:
+    bare = host.removeprefix("www.")
+    if bare in _SOCIAL_HOSTS:
+        return True
+    return bare.endswith("linkedin.com") and path.startswith("/company")
+
+
+def _is_probable_listing(url: str) -> bool:
+    """Drop obvious page chrome (nav, legal, social) so the limit counts listings."""
+    parsed = urlparse(url)
+    path = parsed.path
+    if _is_social(parsed.netloc.lower(), path):
+        return False
+    segments = [segment for segment in path.split("/") if segment]
+    if not segments:
+        return False
+    last = segments[-1].casefold()
+    if last.endswith((".rss", ".xml")):
+        return False
+    if len(segments) == 1 and _strip_ext(last) in _NON_LISTING_SEGMENTS:
+        return False
+    return _strip_ext(segments[0]) not in _NON_LISTING_SEGMENTS
 
 
 def extract_links(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> list[str]:
@@ -88,6 +198,8 @@ def extract_links(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> list[
         resolved = urljoin(base_url, href).split("#", 1)[0]
         if urlparse(resolved).scheme not in ("http", "https"):
             continue
+        if not _is_probable_listing(resolved):
+            continue
         canonical = clean_url(resolved)
         if canonical in seen or canonical == base_canonical:
             continue
@@ -100,14 +212,48 @@ def extract_links(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> list[
     return links
 
 
-def discover(source: SourceRef, *, limit: int = DEFAULT_LIMIT) -> DiscoveryResult:
-    """Fetch the source page and classify its candidate links against the DB."""
-    html = scraper.fetch_html(source.url)
+def _substitute_query(source: SourceRef, query: str) -> str:
+    """Return the source's search URL with the query term substituted in."""
+    template = source.search_url
+    if template is None or _SEARCH_PLACEHOLDER not in template:
+        raise ScrapeError(f"Source '{source.site}' has no usable search template")
+    return template.replace(_SEARCH_PLACEHOLDER, quote_plus(query.strip()))
+
+
+def discover(
+    source: SourceRef,
+    *,
+    limit: int = DEFAULT_LIMIT,
+    query: str | None = None,
+    only_live: bool = False,
+) -> DiscoveryResult:
+    """Fetch the source page and classify its candidate links against the DB.
+
+    When ``query`` is set and the source declares a search template, the term is
+    substituted into that URL so the board filters server-side; otherwise the
+    term filters the extracted links client-side. ``only_live`` refuses to fetch
+    named sources whose job-sources status is blocked/login/dead.
+    """
+    if only_live and source.site is not None and source.site_status != "live":
+        raise ScrapeError(f"Source '{source.site}' is {source.site_status}; skipped (only_live).")
+    term = query.strip() if query else None
+    fetched_url = source.url
+    client_term: str | None = None
+    if term:
+        if source.search_url is not None:
+            fetched_url = _substitute_query(source, term)
+        else:
+            client_term = term
+    html = scraper.fetch_html(fetched_url)
     index = {clean_url(job["job_url"]): job for job in db.get_jobs()}
+    urls = extract_links(html, fetched_url, MAX_LIMIT if client_term else limit)
+    if client_term:
+        needle = client_term.casefold()
+        urls = [url for url in urls if needle in url.casefold()][:limit]
     candidates: list[dict[str, object]] = []
     new_urls: list[str] = []
     status_counts: dict[str, int] = {}
-    for url in extract_links(html, source.url, limit):
+    for url in urls:
         job = index.get(clean_url(url))
         if job is None:
             candidates.append({"url": url, "known": False})
@@ -129,14 +275,16 @@ def discover(source: SourceRef, *, limit: int = DEFAULT_LIMIT) -> DiscoveryResul
         candidates=tuple(candidates),
         new_urls=tuple(new_urls),
         status_counts=status_counts,
+        query=term,
+        fetched_url=fetched_url,
     )
 
 
-def _job_source_rows() -> list[tuple[str, str, str]]:
-    """Return (site, url, status) rows from the job-sources region files."""
+def _job_source_rows() -> list[tuple[str, str, str, str | None]]:
+    """Return (site, url, status, search) rows from the job-sources region files."""
     if not JOB_SOURCES_DIR.is_dir():
         return []
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str | None]] = []
     for path in sorted(JOB_SOURCES_DIR.glob("*.md")):
         if path.name == "README.md":
             continue
@@ -144,8 +292,8 @@ def _job_source_rows() -> list[tuple[str, str, str]]:
     return rows
 
 
-def _parse_region_file(path: Path) -> list[tuple[str, str, str]]:
-    rows: list[tuple[str, str, str]] = []
+def _parse_region_file(path: Path) -> list[tuple[str, str, str, str | None]]:
+    rows: list[tuple[str, str, str, str | None]] = []
     in_frontmatter = True
     for line in path.read_text(encoding="utf-8").splitlines():
         if in_frontmatter:
@@ -155,14 +303,17 @@ def _parse_region_file(path: Path) -> list[tuple[str, str, str]]:
         if not line.startswith("| ") or line.startswith("|--"):
             continue
         cells = tuple(cell.strip() for cell in line.strip("|").split("|"))
-        if cells != _HEADER and len(cells) == len(_HEADER):
-            rows.append((cells[0], cells[1], cells[4]))
+        if cells in (_HEADER, _HEADER_SEARCH) or len(cells) not in (5, 6):
+            continue
+        site, url, _typ, _notes, status = cells[:5]
+        search = cells[5] if len(cells) == 6 and cells[5] else None
+        rows.append((site, url, status, search))
     return rows
 
 
-def _lookup_site(name: str) -> tuple[str, str, str] | None:
+def _lookup_site(name: str) -> tuple[str, str, str, str | None] | None:
     wanted = name.casefold()
-    for site, url, status in _job_source_rows():
+    for site, url, status, search in _job_source_rows():
         if site.casefold() == wanted:
-            return site, url, status
+            return site, url, status, search
     return None

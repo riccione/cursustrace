@@ -923,6 +923,44 @@ def test_check_duplicate_ignores_same_role_on_different_url(db_path: Path) -> No
     assert db.check_duplicate("https://example.com/1-variant") is False
 
 
+def test_check_duplicate_distinguishes_identity_query_params(db_path: Path) -> None:
+    db.init_db()
+    _add("https://plata.careers/vacancy/details?id=5406442008")
+    assert db.check_duplicate("https://plata.careers/vacancy/details?id=5413665008") is False
+    assert db.check_duplicate("https://plata.careers/vacancy/details?id=5406442008") is True
+
+
+def test_add_job_allows_same_role_with_different_identity_ids(db_path: Path) -> None:
+    db.init_db()
+    first = db.add_job(
+        "https://plata.careers/vacancy/details?id=1", "QA Engineer", "Plata", "Remote", "desc"
+    )
+    second = db.add_job(
+        "https://plata.careers/vacancy/details?id=2", "QA Engineer", "Plata", "Remote", "desc"
+    )
+    assert first is not None and second is not None
+    assert len(db.get_jobs()) == 2
+
+
+def test_init_db_sets_fingerprint_scheme_version(db_path: Path) -> None:
+    db.init_db()
+    with sqlite3.connect(db_path) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert version == db.FINGERPRINT_SCHEME_VERSION
+
+
+def test_init_db_drops_legacy_global_fingerprint_index(db_path: Path) -> None:
+    db.init_db()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE UNIQUE INDEX idx_jobs_fingerprint ON jobs(fingerprint)")
+    db.init_db()
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_jobs_fingerprint'"
+        ).fetchone()
+    assert row is None
+
+
 def test_find_similar_matches_same_company_and_title(db_path: Path) -> None:
     db.init_db()
     _add("https://example.com/1")

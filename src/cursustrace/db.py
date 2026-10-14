@@ -19,7 +19,7 @@ FUZZY_CANDIDATE_LIMIT = 50
 COMPANY_SEARCH_THRESHOLD = 70
 SIMILAR_LIMIT = 3
 
-FINGERPRINT_SCHEME_VERSION = 1
+FINGERPRINT_SCHEME_VERSION = 2
 
 # Column definitions shared by CREATE_JOBS_TABLE and the jobs table rebuild.
 # Uniqueness moved to per-user partial indexes in init_db.
@@ -524,6 +524,8 @@ def init_db() -> None:
         _migrate_jobs_uniqueness(conn)
         _migrate_tags_uniqueness(conn)
         _migrate_profile(conn)
+        # Drop the legacy global fingerprint index; uniqueness is per-user now.
+        conn.execute("DROP INDEX IF EXISTS idx_jobs_fingerprint")
         for index in OWNERSHIP_INDEXES:
             conn.execute(index)
         conn.execute(CREATE_EVENTS_INDEX)

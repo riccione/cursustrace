@@ -343,7 +343,7 @@ async def test_discover_add_ingests_new_candidates(monkeypatch: pytest.MonkeyPat
         new_urls=("https://example.com/jobs/7",),
         status_counts={},
     )
-    monkeypatch.setattr(discovery, "discover", lambda src, limit=100: result)
+    monkeypatch.setattr(discovery, "discover", lambda src, limit=100, **kwargs: result)
     monkeypatch.setattr(
         scraper,
         "scrape_job",
@@ -385,7 +385,7 @@ async def test_discover_add_flags_restricted_candidates(
         new_urls=("https://example.com/jobs/13",),
         status_counts={},
     )
-    monkeypatch.setattr(discovery, "discover", lambda src, limit=100: result)
+    monkeypatch.setattr(discovery, "discover", lambda src, limit=100, **kwargs: result)
     monkeypatch.setattr(
         scraper,
         "scrape_job",
@@ -408,6 +408,49 @@ async def test_discover_add_flags_restricted_candidates(
         assert forced["added"] == 1
         assert "flagged" not in forced
         assert (await ok(client, "list_positions"))["count"] == 1
+
+
+async def test_discover_passes_query_and_only_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    source = discovery.SourceRef(
+        input="RemoteOK",
+        url="https://remoteok.com",
+        site="RemoteOK",
+        site_status="live",
+        search_url="https://remoteok.com/remote-{query}-jobs",
+    )
+    result = discovery.DiscoveryResult(
+        source=source,
+        candidates=(),
+        new_urls=(),
+        status_counts={},
+        query="qa",
+        fetched_url="https://remoteok.com/remote-qa-jobs",
+    )
+
+    def fake_discover(
+        src: discovery.SourceRef,
+        *,
+        limit: int = 100,
+        query: str | None = None,
+        only_live: bool = False,
+    ) -> discovery.DiscoveryResult:
+        captured["query"] = query
+        captured["only_live"] = only_live
+        return result
+
+    monkeypatch.setattr(discovery, "discover", fake_discover)
+
+    async with Client(mcp) as client:
+        payload = await ok(
+            client, "discover", {"source": "RemoteOK", "query": "qa", "only_live": True}
+        )
+
+    assert captured == {"query": "qa", "only_live": True}
+    assert payload["query"] == "qa"
+    assert payload["fetched_url"] == "https://remoteok.com/remote-qa-jobs"
 
 
 async def test_update_status_with_and_without_comment() -> None:

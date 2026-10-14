@@ -248,6 +248,12 @@ The `cursustrace` command also offers headless subcommands for adding positions
 without the UI (duplicates are skipped, never overwritten). Pass `--json` for
 machine-readable output.
 
+URLs are deduplicated by a canonical form: tracking parameters (`utm_*`, `ref`,
+`gh_src`, board-specific noise) are ignored, while parameters that carry the
+posting id on some boards (`id`, `gh_jid`, `ashby_jid`, ...) are preserved and
+sorted. Two roles on the same board path therefore stay distinct even when only
+their query id differs.
+
 Add one position from explicit fields:
 
 ```sh
@@ -382,6 +388,13 @@ itself; an AI agent (or you) does the reasoning on top of its JSON output:
 uv run cursustrace discover RemoteOK --json
 uv run cursustrace discover https://example.com/jobs --limit 50 --json
 
+# search a source for a keyword; sites with a Search template filter server-side
+uv run cursustrace discover RemoteOK --query qa --json
+uv run cursustrace discover https://example.com/jobs --query qa --json
+
+# skip named sources that are blocked/login/dead in job-sources/
+uv run cursustrace discover "Indeed RS" --only-live --json
+
 # or scrape and add every new link in one step (no agent needed)
 uv run cursustrace discover https://example.com/jobs --add --json
 ```
@@ -389,11 +402,18 @@ uv run cursustrace discover https://example.com/jobs --add --json
 The JSON payload reports `source` (input, resolved URL, job-sources status),
 `extracted` / `new_count` / `known_count`, `known_by_status` (so already-applied
 positions are visible), and one `candidates` entry per link: `known: false`
-for new ones, plus `status`, `id`, `title` for known ones. With `--add` it also
-returns `added`, `skipped`, `errors` and `similar`, and exits non-zero when any
-scrape failed; a failed fetch prints an `error` key. Candidates that are already
-in the database are skipped whatever their stage, so discovery never re-adds an
-applied position.
+for new ones, plus `status`, `id`, `title` for known ones. With `--query` it
+adds `query` and `fetched_url`; a non-live source adds a `warning`. With `--add`
+it also returns `added`, `skipped`, `errors` and `similar`, and exits non-zero
+when any scrape failed; a failed fetch prints an `error` key. Candidates that
+are already in the database are skipped whatever their stage, so discovery never
+re-adds an applied position.
+
+Link extraction drops obvious page chrome (navigation, legal, blog, social
+links) before applying `--limit`, so the budget goes to real listings. `--query`
+substitutes the term into the site's `Search` template from `job-sources/`
+(server-side filtering) when one exists, and otherwise filters the extracted
+links client-side.
 
 A workflow you can paste to an AI agent:
 

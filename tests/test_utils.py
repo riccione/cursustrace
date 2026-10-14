@@ -10,6 +10,28 @@ def test_clean_url_strips_query_and_fragment() -> None:
     assert cleaned == "https://example.com/jobs/1"
 
 
+def test_clean_url_keeps_identity_query_params() -> None:
+    assert (
+        clean_url("https://plata.careers/vacancy/details?id=5406442008")
+        == "https://plata.careers/vacancy/details?id=5406442008"
+    )
+    assert clean_url("https://example.com/job?gh_jid=42") == "https://example.com/job?gh_jid=42"
+
+
+def test_clean_url_keeps_identity_and_drops_trackers() -> None:
+    cleaned = clean_url("https://example.com/jobs/1?utm_source=x&id=5&ref=y")
+    assert cleaned == "https://example.com/jobs/1?id=5"
+
+
+def test_clean_url_sorts_identity_params() -> None:
+    cleaned = clean_url("https://example.com/job?id=3&gh_jid=5")
+    assert cleaned == "https://example.com/job?gh_jid=5&id=3"
+
+
+def test_clean_url_identity_params_case_insensitive_keys() -> None:
+    assert clean_url("https://example.com/job?ID=7") == "https://example.com/job?ID=7"
+
+
 def test_clean_url_lowercases_scheme_and_host() -> None:
     assert clean_url("HTTPS://EXAMPLE.COM/Path") == "https://example.com/Path"
 
@@ -34,6 +56,12 @@ def test_generate_fingerprint_ignores_url_trackers() -> None:
     plain = generate_fingerprint("https://example.com/1", "Acme", "Engineer")
     tracked = generate_fingerprint("https://example.com/1?utm_source=x", "Acme", "Engineer")
     assert plain == tracked
+
+
+def test_generate_fingerprint_distinguishes_identity_params() -> None:
+    first = generate_fingerprint("https://plata.careers/vacancy/details?id=1", "Plata", "QA")
+    second = generate_fingerprint("https://plata.careers/vacancy/details?id=2", "Plata", "QA")
+    assert first != second
 
 
 def test_generate_fingerprint_ignores_non_alphanumeric() -> None:
