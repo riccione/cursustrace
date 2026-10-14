@@ -1315,6 +1315,19 @@ async def test_detail_description_is_constrained(user: User) -> None:
     assert "job-description" in element.classes
 
 
+async def test_scroll_to_top_button_on_dashboard(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see(marker="scroll-to-top")
+
+
+async def test_scroll_to_top_button_on_detail(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see(marker="scroll-to-top")
+
+
 async def test_details_view_shows_tracking_fields(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "interview")

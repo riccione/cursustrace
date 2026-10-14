@@ -11,6 +11,7 @@ from cursustrace.web.constants import APP_TITLE, STATUS_CHECKBOXES
 from cursustrace.web.dialogs import _confirm_delete_dialog, _delete_job_from_detail
 from cursustrace.web.job_card import _deadline_text
 from cursustrace.web.job_form import _job_form_dialog, _update_job_fields
+from cursustrace.web.nav import scroll_to_top_button
 from cursustrace.web.profile import _render_profile_summary
 from cursustrace.web.session import current_user_id
 from cursustrace.web.state import _apply_dark_mode
@@ -102,3 +103,4 @@ def job_detail_page(job_id: int) -> None:
             render_detail.refresh()
 
         render_detail()
+        scroll_to_top_button()
