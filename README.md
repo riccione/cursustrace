@@ -37,6 +37,13 @@ Paste one or more job listing URLs (one per line) and click
 through `Applied`, `Interview`, `Rejected`, and `Outdated` by ticking the
 matching stage checkbox on a card.
 
+Prefer to start from a board rather than a specific URL? The `🔍 Discover` tab
+searches a job source for listing links and lets you pick which to add: enter a
+full URL or a board name from `job-sources/` (with an optional keyword query and
+an `Only live` filter), click `Discover`, then tick the candidates you want and
+press `Add selected`. Listings you already track appear with their status and
+cannot be re-added.
+
 Select `View full details` on a card to open the complete scraped description
 and metadata. The detail view has the same stage checkboxes, plus a
 `Your profile` section: the `CV used for this application` dropdown records
