@@ -20,6 +20,8 @@ def scroll_to_top_button() -> None:
 
 
 def app_footer() -> None:
-    """Fixed page footer showing the app name and its version."""
-    with ui.footer().classes("items-center justify-center").mark("app-footer"):
-        ui.label(f"{APP_NAME} v{app_version()}").classes("text-caption")
+    """Inline footer at the bottom of the page content (seen when scrolled to)."""
+    with ui.column().classes("w-full gap-0 q-mt-lg").mark("app-footer"):
+        ui.separator()
+        with ui.row().classes("w-full justify-center q-py-sm"):
+            ui.label(f"{APP_NAME} v{app_version()}").classes("text-caption text-grey")
