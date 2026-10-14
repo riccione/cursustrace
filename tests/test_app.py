@@ -1348,6 +1348,81 @@ async def test_footer_shows_app_name_and_version_on_detail(user: User) -> None:
     await user.should_see(f"CursusTrace v{app_version()}")
 
 
+DISCOVER_HTML = (
+    '<a href="/jobs/known">known</a>'
+    '<a href="/jobs/new-1">new one</a>'
+    '<a href="/jobs/new-2">new two</a>'
+)
+
+
+async def test_discover_tab_lists_new_and_known(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    db.add_job("https://board.example/jobs/known", "Known Job", "Acme", "Remote", "Body")
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: DISCOVER_HTML)
+    await user.open("/")
+
+    user.find(marker="discover-source").type("https://board.example")
+    user.find(marker="discover-run").click()
+
+    await user.should_see(marker="discover-summary")
+    await user.should_see("2 new · 1 known")
+    assert len(user.find(marker="discover-candidate").elements) == 2
+
+
+async def test_discover_add_selected_saves_positions(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.init_db()
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: DISCOVER_HTML)
+
+    def scrape(url: str) -> scraper.ScrapedJob:
+        slug = url.rstrip("/").rsplit("/", 1)[-1]
+        return {
+            "title": f"Engineer {slug}",
+            "company": "Acme",
+            "location": "Remote",
+            "description": f"Body {slug}",
+            "deadline": None,
+        }
+
+    monkeypatch.setattr(scraper, "scrape_job", scrape)
+    await user.open("/")
+
+    user.find(marker="discover-source").type("https://board.example")
+    user.find(marker="discover-run").click()
+    await user.should_see(marker="discover-summary")
+
+    user.find(marker="discover-add-selected").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 3)
+    await _see_notice(user, "Saved 3")
+
+
+async def test_discover_unknown_source_warns(user: User) -> None:
+    db.init_db()
+    await user.open("/")
+
+    user.find(marker="discover-source").type("NotASite")
+    user.find(marker="discover-run").click()
+
+    await _see_notice(user, "Unknown source")
+
+
+async def test_discover_only_live_skips_blocked_source(user: User) -> None:
+    db.init_db()
+    await user.open("/")
+
+    board = cast(ui.select, user.find(marker="discover-board").elements.pop())
+    board.set_value("Indeed RS")
+    await asyncio.sleep(0.05)
+    user.find(marker="discover-only-live").click()
+    user.find(marker="discover-run").click()
+
+    await _see_notice(user, "only_live")
+
+
 async def test_details_view_shows_tracking_fields(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "interview")

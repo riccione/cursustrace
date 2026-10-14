@@ -11,6 +11,7 @@ from cursustrace import db, salary
 from cursustrace.web.attention_ui import _park_stale_positions, _render_attention_banner
 from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
 from cursustrace.web.constants import APP_TITLE, STATUS_TABS
+from cursustrace.web.discover import _render_discover
 from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
 from cursustrace.web.nav import app_footer, scroll_to_top_button
@@ -186,6 +187,7 @@ def dashboard_page(request: Request) -> None:
             dashboard_tab = ui.tab("📋 Dashboard")
             stats_tab = ui.tab("📊 Statistics")
             profile_tab = ui.tab("👤 Profile & CV Editor")
+            discover_tab = ui.tab("🔍 Discover")
         with ui.element("div").classes("flex-1 flex justify-end min-w-0 items-center gap-2"):
             if _multi_user_enabled():
                 email = current_email()
@@ -378,6 +380,8 @@ def dashboard_page(request: Request) -> None:
                 stats_container = ui.column().classes("w-full")
             with ui.tab_panel(profile_tab):
                 _render_profile_editor()
+            with ui.tab_panel(discover_tab):
+                _render_discover(refresh)
 
         scroll_to_top_button()
 

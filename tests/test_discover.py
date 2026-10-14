@@ -214,3 +214,29 @@ def test_source_warning_only_for_non_live_named_sources() -> None:
     blocked = discovery.source_warning(discovery.SourceRef("x", "https://x", "X", "blocked"))
     assert blocked is not None and "blocked" in blocked
     assert discovery.source_warning(discovery.SourceRef("u", "https://x", None, None)) is None
+
+
+def test_list_sources_is_deduplicated_and_sorted() -> None:
+    sources = discovery.list_sources()
+
+    assert sources
+    names = [str(source.site) for source in sources]
+    assert names == sorted(names, key=str.casefold)
+    assert len(names) == len({name.casefold() for name in names})
+    remoteok = next(source for source in sources if source.site == "RemoteOK")
+    assert remoteok.site_status == "live"
+    assert remoteok.search_url == "https://remoteok.com/remote-{query}-jobs"
+
+
+def test_discover_scopes_known_set_to_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    db.add_job("https://remoteok.com/jobs/123", "Engineer", "Acme", None, "Body", user_id=1)
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: SAMPLE_HTML)
+    source = discovery.resolve_source("https://remoteok.com")
+
+    first = discovery.discover(source, limit=10, user_id=1)
+    second = discovery.discover(source, limit=10, user_id=2)
+
+    assert first.known_count == 1
+    assert second.known_count == 0
+    assert second.new_count == first.new_count + 1
