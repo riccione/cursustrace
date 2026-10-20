@@ -1,7 +1,8 @@
-"""Tests for the lightpanda-based JavaScript renderer."""
+"""Tests for the JavaScript rendering helpers (lightpanda and headless browser)."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import types
@@ -151,7 +152,7 @@ def test_render_html_browser_returns_document(monkeypatch: pytest.MonkeyPatch) -
         return _FakeCompleted(stdout="<html><body>Rendered</body></html>")
 
     monkeypatch.setattr(renderer, "find_browser", lambda: "/usr/bin/chromium")
-    monkeypatch.setattr(renderer.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
     _stub_subprocess(monkeypatch, _run)
 
     result = renderer.render_html_browser("https://example.com/job")
@@ -177,7 +178,7 @@ def test_render_html_browser_adds_no_sandbox_as_root(monkeypatch: pytest.MonkeyP
         return _FakeCompleted(stdout="<html></html>")
 
     monkeypatch.setattr(renderer, "find_browser", lambda: "/usr/bin/chromium")
-    monkeypatch.setattr(renderer.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
     _stub_subprocess(monkeypatch, _run)
 
     renderer.render_html_browser("https://example.com/job")
