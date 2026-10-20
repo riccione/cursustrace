@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import cast
 
 import pytest
+from nicegui import ui
 from nicegui.storage import Storage
 from nicegui.testing import User, user_simulation
 
@@ -102,6 +105,26 @@ async def test_seeded_admin_can_sign_in(multi_user: User) -> None:
 async def test_register_auto_logs_in(multi_user: User) -> None:
     await _register(multi_user, "alice@example.com")
     await multi_user.should_see(marker="scan-urls")
+
+
+async def test_change_password_dialog_clears_fields_on_reopen(multi_user: User) -> None:
+    await _register(multi_user, "alice@example.com")
+    await multi_user.should_see(marker="scan-urls")
+
+    multi_user.find(marker="change-password-button").click()
+    await asyncio.sleep(0.1)
+    multi_user.find(marker="current-password").type("Secret1")
+    multi_user.find(marker="new-password").type("Secret2")
+    multi_user.find(marker="confirm-new-password").type("Secret2")
+    await asyncio.sleep(0.1)
+    multi_user.find(marker="cancel-change-password").click()
+    await asyncio.sleep(0.2)
+
+    multi_user.find(marker="change-password-button").click()
+    await asyncio.sleep(0.2)
+    assert cast(ui.input, multi_user.find(marker="current-password").elements.pop()).value == ""
+    assert cast(ui.input, multi_user.find(marker="new-password").elements.pop()).value == ""
+    assert cast(ui.input, multi_user.find(marker="confirm-new-password").elements.pop()).value == ""
 
 
 async def test_login_redirects_to_requested_path(multi_user: User) -> None:

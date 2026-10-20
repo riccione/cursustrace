@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TypedDict
 
-from nicegui import ui
+from nicegui import events, ui
 
 from cursustrace import db, salary
 from cursustrace.validation import normalize_deadline, validate_required, validate_url
@@ -146,6 +146,38 @@ def _job_form_dialog(
                     .classes("w-full")
                     .props('autogrow input-style="min-height: 80px"')
                 )
+
+        def apply_values(source: db.Job | None) -> None:
+            """Fill the form from a job snapshot, or empty it for a new position."""
+            url.value = (source["job_url"] if source else "") or ""
+            title_input.value = (source["title"] if source else "") or ""
+            company_input.value = (source["company"] if source else "") or ""
+            location_input.value = (source["location"] if source else "") or ""
+            salary_min_input.value = source["salary_min"] if source else None
+            salary_max_input.value = source["salary_max"] if source else None
+            salary_currency_input.value = (source["salary_currency"] if source else "EUR") or None
+            salary_period_input.value = (source["salary_period"] if source else "year") or None
+            salary_note_input.value = (source["salary_note"] if source else "") or ""
+            deadline_input.value = (source["deadline"] if source else "") or ""
+            description_input.value = (source["description"] if source else "") or ""
+            tags_input.options = db.list_tags(user_id=current_user_id())
+            tags_input.value = db.job_tags(source["id"]) if source else []
+            tags_input.update()
+            for stage, box in comment_inputs.items():
+                box.value = _stage_comment(source, stage) if source else ""
+
+        def reset() -> None:
+            """Restore the form so a reopened dialog never shows a stale entry."""
+            fresh = (
+                db.get_job(values["id"], user_id=current_user_id()) if values is not None else None
+            )
+            apply_values(fresh if fresh is not None else values)
+
+        def on_dialog_value_change(event: events.ValueChangeEventArguments[bool]) -> None:
+            if event.value:
+                reset()
+
+        dialog.on_value_change(on_dialog_value_change)
 
         def save() -> None:
             valid = all(

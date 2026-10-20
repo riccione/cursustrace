@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from nicegui import ui
+from nicegui import events, ui
 
 from cursustrace import db
 from cursustrace.web.session import current_user_id
@@ -131,6 +131,17 @@ def _tag_manager_dialog(refresh: Callable[[], None]) -> ui.dialog:
                             old_id, tag_name, uses
                         ),
                     ).props("flat color=negative").mark(f"delete-tag-{tag_id}")
+
+    def reset() -> None:
+        """Clear the new-tag field and refresh the list when the dialog opens."""
+        name_input.value = ""
+        render_list()
+
+    def on_dialog_value_change(event: events.ValueChangeEventArguments[bool]) -> None:
+        if event.value:
+            reset()
+
+    dialog.on_value_change(on_dialog_value_change)
 
     render_list()
     return dialog
