@@ -165,6 +165,12 @@ title repeated):
    the binary; each render is capped at 20 seconds. Set
    `render = "never"` (or `CURSUS_RENDER=never`) to skip this tier on
    hosts where no browser may run.
+4. Headless Chrome/Chromium: if the lightpanda render still leaves too
+   little text, the page is rendered again in headless Chrome or
+   Chromium (`--dump-dom`), which handles sites whose JavaScript
+   lightpanda cannot execute. Put the binary on your `PATH` or point
+   `CURSUS_CHROMIUM` at it; the render waits up to 15 seconds and is
+   capped at 45 seconds, so expect roughly half a minute per page.
 
 If every step comes up empty the scan fails with a
 `JavaScript-rendered or blocked` error and the position is left for
