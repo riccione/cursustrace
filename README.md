@@ -57,6 +57,9 @@ shows its status, e.g. `[Applied]`.
 When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
 to enter a position's URL, title, company, description, and an optional
 application deadline, and edit those fields from the position's detail page.
+The add and edit forms always open on a clean slate: a new position starts
+empty, and an edit starts from the saved values, so a cancelled change never
+leaks into the next opening.
 Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
 `validThrough` date or type it as an ISO date like `2026-12-31`.
