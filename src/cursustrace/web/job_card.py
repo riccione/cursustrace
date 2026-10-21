@@ -80,7 +80,7 @@ def _render_job_card(
     reasons = attention_reasons(job)
     if reasons:
         ui.chip(f"⚠ {most_urgent(reasons)}").props("color=warning").mark("attention-chip")
-    with ui.expansion(label).classes("w-full"):
+    with ui.expansion(label).classes("w-full ct-row"):
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")
         salary_text = salary.format_salary(job)

@@ -278,8 +278,28 @@ export, so changes apply immediately without restarting the app.
 ## Customizing the webapp CSS
 
 Global UI styles live at [`styles/webapp.css`](styles/webapp.css): font sizes,
-Quasar overrides, markdown overflow, and the header tab rules. Unlike the CV
-stylesheet, it is read once at startup, so restart the app after editing.
+Quasar overrides, markdown overflow, the header tab rules, and the color
+system. Unlike the CV stylesheet, it is read once at startup, so restart the
+app after editing.
+
+### Color system
+
+The palette is defined once as CSS variables and overridden for the dark
+theme, so both themes stay in sync:
+
+| Variable | Purpose |
+|---|---|
+| `--bg-base`, `--bg-surface`, `--bg-header` | page, card and header backgrounds |
+| `--text-primary`, `--text-secondary` | body and muted text |
+| `--border-color` | dividers, card and row outlines |
+| `--primary`, `--primary-hover`, `--primary-text` | primary buttons, active tabs |
+| `--success`, `--warning`, `--danger`, `--info` | stage dots, badges and alerts |
+
+Light and dark values are set in `:root` and `body.body--dark`; Quasar's own
+brand variables are remapped onto them, so components follow the palette
+automatically. `tests/test_design_system.py` checks that every token exists in
+both themes and that each color pair meets its WCAG contrast ratio, so a
+palette change that breaks accessibility fails the test suite.
 
 ## Command-line usage
 

@@ -225,11 +225,7 @@ def dashboard_page(request: Request) -> None:
 
     with ui.header().classes("items-center flex-nowrap"):
         ui.label(APP_TITLE).classes("text-h6 flex-1 truncate min-w-0")
-        with (
-            ui.tabs()
-            .classes("header-tabs text-grey-4")
-            .props('active-color="white" indicator-color="white"') as main_tabs
-        ):
+        with ui.tabs().classes("header-tabs") as main_tabs:
             dashboard_tab = ui.tab("📋 Dashboard")
             stats_tab = ui.tab("📊 Statistics")
             profile_tab = ui.tab("👤 Profile & CV Editor")
@@ -238,16 +234,21 @@ def dashboard_page(request: Request) -> None:
             if _multi_user_enabled():
                 email = current_email()
                 if email:
-                    ui.label(email).classes("text-caption text-grey-4 truncate max-w-48").mark(
-                        "header-email"
-                    )
+                    ui.label(email).classes(
+                        "text-caption ct-text-secondary truncate max-w-48"
+                    ).mark("header-email")
                 change_password_dialog = _change_password_dialog()
                 ui.button("Change password", on_click=change_password_dialog.open).props(
-                    "flat color=white"
-                ).mark("change-password-button")
-                ui.button("Logout", on_click=logout).props("flat color=white").mark("logout-button")
+                    "flat"
+                ).classes("ct-ghost-btn").mark("change-password-button")
+                ui.button("Logout", on_click=logout).props("flat").classes("ct-ghost-btn").mark(
+                    "logout-button"
+                )
             settings_button = (
-                ui.button(icon="settings").props("flat color=white").mark("settings-button")
+                ui.button(icon="settings")
+                .props("flat")
+                .classes("ct-ghost-btn")
+                .mark("settings-button")
             )
 
     with ui.right_drawer(value=False).props("width=480") as drawer:
@@ -381,7 +382,12 @@ def dashboard_page(request: Request) -> None:
                 .props("clearable debounce=300")
                 .classes("flex-1 min-w-0")
             )
-            filters_button = ui.button("Filters", icon="tune").props("flat").mark("filters-button")
+            filters_button = (
+                ui.button("Filters", icon="tune")
+                .props("flat")
+                .classes("ct-ghost-btn")
+                .mark("filters-button")
+            )
             with filters_button:
                 filters_badge = ui.badge("").props("color=negative")
                 filters_badge.set_visibility(False)
@@ -413,16 +419,20 @@ def dashboard_page(request: Request) -> None:
                             if status not in PRIMARY_STATUSES:
                                 continue
                             tab = ui.tab(status, label=label)
+                            tab.classes(f"ct-stage-{status}")
                             tab.mark(f"status-tab-{status}")
                             tab.on("click", on_primary_tab_click)
                             status_tab_elements[status] = tab
                             with tab:
-                                badge = ui.badge("").props("color=negative")
+                                badge = ui.badge("").props("color=warning")
                                 badge.set_visibility(False)
                                 badge.mark(f"attention-badge-{status}")
                                 attention_badges[status] = badge
                     more_button = (
-                        ui.button("More", icon="more_horiz").props("flat").mark("more-stages")
+                        ui.button("More", icon="more_horiz")
+                        .props("flat")
+                        .classes("ct-ghost-btn")
+                        .mark("more-stages")
                     )
                     with more_button:
                         # The menu must live inside its trigger: Quasar opens a QMenu
@@ -437,7 +447,7 @@ def dashboard_page(request: Request) -> None:
                                     )
                                     item.mark(f"more-stage-{status}")
                 with ui.tab_panels(status_tabs, value="unapplied").classes(
-                    "w-full"
+                    "w-full ct-surface"
                 ) as status_panels:
                     for status, _label, _message in STATUS_TABS:
                         if status not in PRIMARY_STATUSES:
