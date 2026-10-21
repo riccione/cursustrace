@@ -33,10 +33,10 @@ options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
 ## Dashboard
 
 The pipeline is the main view: positions land in the `Unapplied` tab and move
-through `Applied`, `Interview`, `Rejected`, and `Outdated` by ticking the
-matching stage checkbox on a card. The tab strip shows the three active
-stages — `Unapplied`, `Applied` and `Interview` — each with the number of
-positions it holds; the archival `Rejected` and `Outdated` stages live behind
+through `Applied`, `Interview`, `Offer`, `Rejected`, and `Outdated` by ticking
+the matching stage checkbox on a card. The tab strip shows the four active
+stages — `Unapplied`, `Applied`, `Interview` and `Offer` — each with the number
+of positions it holds; the archival `Rejected` and `Outdated` stages live behind
 the `More` menu next to the tabs. Adding a position is a secondary action
 behind the `➕ Add Job` button above the tabs: it opens a panel where you can
 paste one or more job listing URLs (one per line) and click
@@ -56,6 +56,20 @@ range, the tag filter, the sort order and the rows per page. The button
 carries a badge with the number of active filters, and the pagination sits
 below the list.
 
+### Job cards
+
+Every position is a card: a soft, bordered surface with generous padding that
+lifts off the page. The top line carries the job title, the company and a
+pill-shaped status badge; below it a linear tracker shows how far the
+application got — `Unapplied` → `Applied` → `Interview` → `Offer` — with the
+finished stages filled in, the current stage ringed, and the future ones left
+empty. A rejected or outdated position replaces the tracker with a single
+line (`❌ Application rejected after 14 days`) because the pipeline ended
+there. The tag, `CV:` and attention chips sit under the tracker, so they stay
+visible without opening the card, and clicking a tag chip only filters the
+list — it never opens the card. On narrow screens the tracker keeps its dots
+and drops the stage labels. Clicking the card opens the position details.
+
 Select `View full details` on a card to open the complete scraped description
 and metadata. The detail view has the same stage checkboxes, plus a
 `Your profile` section: the `CV used for this application` dropdown records
@@ -64,7 +78,7 @@ name, email, phone, LinkedIn, and GitHub fields show below, each with an
 in-field copy button for pasting into application forms. The dashboard card
 displays the saved choice as a `CV:` chip. The `Search company` box matches
 fuzzy company names across all pipeline stages at once, and each result
-shows its status, e.g. `[Applied]`.
+carries a status badge naming its stage.
 
 When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
 in the `➕ Add Job` panel to enter a position's URL, title, company, description,
@@ -293,7 +307,8 @@ theme, so both themes stay in sync:
 | `--text-primary`, `--text-secondary` | body and muted text |
 | `--border-color` | dividers, card and row outlines |
 | `--primary`, `--primary-hover`, `--primary-text` | primary buttons, active tabs |
-| `--success`, `--warning`, `--danger`, `--info` | stage dots, badges and alerts |
+| `--success`, `--warning`, `--danger`, `--info`, `--offer` | stage dots, badges and alerts |
+| `--badge-*-text`, `--badge-*-soft` | status badge text and its background tint |
 
 Light and dark values are set in `:root` and `body.body--dark`; Quasar's own
 brand variables are remapped onto them, so components follow the palette
