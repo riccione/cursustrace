@@ -92,8 +92,8 @@ def _render_discover(refresh: Callable[[], None]) -> None:
                 url = str(candidate["url"])
                 if candidate.get("known"):
                     with ui.row().classes("w-full items-center gap-2"):
-                        ui.icon("check_circle").classes("text-grey")
-                        ui.label(url).classes("text-caption text-grey truncate flex-1")
+                        ui.icon("check_circle").classes("ct-text-secondary")
+                        ui.label(url).classes("text-caption ct-text-secondary truncate flex-1")
                         ui.chip(str(candidate.get("status", ""))).props("dense color=grey")
                 else:
                     box = (

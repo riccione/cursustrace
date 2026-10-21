@@ -24,4 +24,4 @@ def app_footer() -> None:
     with ui.column().classes("w-full gap-0 q-mt-lg").mark("app-footer"):
         ui.separator()
         with ui.row().classes("w-full justify-center q-py-sm"):
-            ui.label(f"{APP_NAME} v{app_version()}").classes("text-caption text-grey")
+            ui.label(f"{APP_NAME} v{app_version()}").classes("text-caption ct-text-secondary")

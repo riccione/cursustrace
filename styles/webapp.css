@@ -2,7 +2,6 @@ html { font-size: 22px; }
 body { font-size: 22px; }
 .q-btn, .q-field, .q-field__label, .q-tab__label, .q-item, .q-checkbox,
 .q-notification { font-size: inherit; }
-body.body--dark .q-drawer { background: #1d1d1d; }
 .q-textarea .q-field__native { line-height: 1.7; }
 .nicegui-markdown { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .nicegui-markdown pre,
@@ -14,3 +13,106 @@ body.body--dark .q-drawer { background: #1d1d1d; }
 .header-tabs { flex: 0 0 auto; min-width: 0; }
 .header-tabs .q-tabs__content { overflow-x: auto; scrollbar-width: thin; }
 @media (max-width: 999px) { .header-tabs { flex: 1 1 0%; } }
+
+/* Design system: semantic color tokens for light and dark themes. */
+:root {
+  --bg-base: #F8F9FA;
+  --bg-surface: #FFFFFF;
+  --bg-header: #FFFFFF;
+  --text-primary: #212529;
+  --text-secondary: #6A7178;
+  --border-color: #DEE2E6;
+  --primary: #4F46E5;
+  --primary-hover: #4338CA;
+  --primary-text: #FFFFFF;
+  --success: #047857;
+  --warning: #B45309;
+  --danger: #DC2626;
+  --info: #2563EB;
+}
+
+body.body--dark {
+  --bg-base: #121212;
+  --bg-surface: #1E1E1E;
+  --bg-header: #1E1E1E;
+  --text-primary: #E9ECEF;
+  --text-secondary: #ADB5BD;
+  --border-color: #343A40;
+  --primary: #5B57E8;
+  --primary-hover: #4F46E5;
+  --primary-text: #FFFFFF;
+  --success: #34D399;
+  --warning: #FBBF24;
+  --danger: #F87171;
+  --info: #60A5FA;
+}
+
+/* Quasar writes its brand colors inline on <body>, so remapping them needs
+   !important to win over that inline declaration. The !important rules join
+   Quasar's own important layer: for important declarations earlier layers win,
+   so the same layer plus later source order is what makes them win here. */
+@layer quasar_importants {
+  body {
+    --q-primary: var(--primary) !important;
+    --q-primary-hover: var(--primary-hover) !important;
+    --q-positive: var(--success) !important;
+    --q-negative: var(--danger) !important;
+    --q-warning: var(--warning) !important;
+    --q-info: var(--info) !important;
+    --q-dark: var(--bg-surface) !important;
+    --q-dark-page: var(--bg-base) !important;
+  }
+  .ct-text-secondary { color: var(--text-secondary) !important; }
+  .ct-ghost-btn { color: var(--text-secondary) !important; }
+  .ct-ghost-btn:hover { color: var(--primary) !important; }
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.q-header {
+  background: var(--bg-header);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.q-tab__label { color: var(--text-secondary); }
+.q-tab--active .q-tab__label { color: var(--text-primary); }
+.q-tab__indicator { background: var(--primary); }
+
+.q-drawer { background: var(--bg-surface); }
+.q-card {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.ct-surface {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+.ct-row {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+/* Stage dot: colour never carries the stage meaning on its own. */
+.q-tab[class*="ct-stage-"] .q-tab__label::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+  background: var(--text-secondary);
+}
+.q-tab.ct-stage-unapplied .q-tab__label::before { background: var(--primary); }
+.q-tab.ct-stage-applied .q-tab__label::before { background: var(--success); }
+.q-tab.ct-stage-interview .q-tab__label::before { background: var(--info); }
+.q-tab.ct-stage-rejected .q-tab__label::before { background: var(--danger); }
+.q-tab.ct-stage-outdated .q-tab__label::before { background: var(--text-secondary); }
