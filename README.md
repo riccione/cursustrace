@@ -530,6 +530,9 @@ uv run pre-commit install
 uv run pre-commit run --all-files   # run the hooks across the repo
 ```
 
+Dependencies are pinned in `uv.lock`. To refresh them, run `uv lock --upgrade`,
+then `uv sync` and the checks above.
+
 The database lives at `data/cursustrace.db` and is created on first run.
 
 ## Contributing
