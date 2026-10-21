@@ -83,8 +83,11 @@ that stage. A position qualifies when:
 
 Only unapplied and applied positions can qualify: once an employer responds
 the staleness clocks stop, and a deadline no longer matters after the pipeline
-moves on. The badges clear as soon as positions move on. Turn them off under
-the settings drawer's Notifications section; the choice persists.
+moves on. Flagged positions are listed first in their tab and carry a
+`⚠ <reason>` chip next to their title (an imminent deadline wins over
+staleness), and the detail page repeats the reason. Everything clears as soon
+as positions move on. Turn the highlights off under the settings drawer's
+Notifications section; the choice persists.
 
 The badges only count positions you can still act on. Once a stale
 position has also been silent past `outdated_after_days` (default `30`), the
