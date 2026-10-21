@@ -44,7 +44,21 @@ async def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None
     raise AssertionError("condition not met in time")
 
 
+async def _open_add_job(user: User) -> None:
+    """Open the Add Job panel that holds the scan and manual-add actions."""
+    user.find(marker="add-job").click()
+    await asyncio.sleep(0.05)
+
+
+async def _open_manual_add(user: User) -> None:
+    """Open the Add Job panel and switch to the manual entry form."""
+    await _open_add_job(user)
+    user.find(marker="add-manually").click()
+    await asyncio.sleep(0.05)
+
+
 async def _scan(user: User, url: str = JOB_URL) -> None:
+    await _open_add_job(user)
     user.find(marker="scan-urls").clear().type(url)
     await asyncio.sleep(0.05)
     user.find("Scan & Save Positions").click()
@@ -204,9 +218,54 @@ async def test_similar_notice_can_be_disabled(user: User, monkeypatch: pytest.Mo
 
 async def test_empty_url_shows_warning(user: User) -> None:
     await user.open("/")
+    await _open_add_job(user)
     user.find("Scan & Save Positions").click()
 
     await _see_notice(user, "Please enter at least one job URL.")
+
+
+async def test_add_job_button_opens_the_panel(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see(marker="add-job")
+    await _open_add_job(user)
+    await user.should_see(marker="add-job-dialog")
+    await user.should_see(marker="scan-urls")
+
+
+async def test_add_job_panel_scans_a_position(user: User) -> None:
+    await user.open("/")
+    await _open_add_job(user)
+    user.find(marker="scan-urls").clear().type("https://example.com/jobs/1")
+    await asyncio.sleep(0.05)
+    user.find("Scan & Save Positions").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    await _see_notice(user, "Saved 1")
+
+
+async def test_add_job_panel_opens_manual_entry(user: User) -> None:
+    await user.open("/")
+    await _open_add_job(user)
+    user.find(marker="add-manually").click()
+    await asyncio.sleep(0.1)
+
+    await user.should_see(marker="job-form")
+    with user.scope(marker="job-form"):
+        assert cast(ui.input, user.find("Title").elements.pop()).value == ""
+
+
+async def test_add_job_panel_resets_url_box_on_reopen(user: User) -> None:
+    await user.open("/")
+    await _open_add_job(user)
+    user.find(marker="scan-urls").clear().type("https://example.com/jobs/1")
+    await asyncio.sleep(0.05)
+
+    # Switching to manual entry closes the panel; reopening it starts fresh.
+    user.find(marker="add-manually").click()
+    await asyncio.sleep(0.1)
+    await _open_add_job(user)
+    assert cast(ui.textarea, user.find(marker="scan-urls").elements.pop()).value == ""
 
 
 async def test_scrape_error_shows_error(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,6 +293,7 @@ async def test_scan_multiple_urls_saves_all(user: User, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
     await user.open("/")
+    await _open_add_job(user)
     user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/1\nhttps://example.com/jobs/2\nhttps://example.com/jobs/3"
     )
@@ -301,6 +361,7 @@ async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
     await user.open("/")
+    await _open_add_job(user)
     user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/1\nhttps://example.com/jobs/bad"
     )
@@ -553,7 +614,7 @@ async def test_delete_from_detail_returns_to_dashboard(user: User) -> None:
 
 async def test_add_job_manually(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/1")
         user.find("Title").clear().type("Manual Engineer")
@@ -574,7 +635,7 @@ async def test_add_job_manually(user: User) -> None:
 
 async def test_add_manually_dialog_resets_after_previous_add(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/9")
         user.find("Title").clear().type("Manual Engineer")
@@ -585,7 +646,7 @@ async def test_add_manually_dialog_resets_after_previous_add(user: User) -> None
 
     await _wait_for(lambda: len(db.get_jobs()) == 1)
 
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     await asyncio.sleep(0.2)
     with user.scope(marker="job-form"):
         assert cast(ui.input, user.find("Job URL").elements.pop()).value == ""
@@ -596,7 +657,7 @@ async def test_add_manually_dialog_resets_after_previous_add(user: User) -> None
 
 async def test_add_manually_dialog_restores_salary_defaults(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     await asyncio.sleep(0.2)
     with user.scope(marker="job-form"):
         assert cast(ui.select, user.find("Currency").elements.pop()).value == "EUR"
@@ -657,7 +718,7 @@ async def test_manage_tags_dialog_clears_new_tag_field_on_reopen(user: User) -> 
 async def test_add_job_manually_shows_similar_notice(user: User) -> None:
     _seed_job(title="Manual Engineer")
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/2")
         user.find("Title").clear().type("Manual Engineer")
@@ -674,7 +735,7 @@ async def test_add_job_manually_shows_similar_notice(user: User) -> None:
 
 async def test_add_job_manually_with_salary(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/3")
         user.find("Title").clear().type("Paid Engineer")
@@ -695,7 +756,7 @@ async def test_add_job_manually_with_salary(user: User) -> None:
 
 async def test_add_job_manually_rejects_inverted_salary(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/4")
         user.find("Title").clear().type("Paid Engineer")
@@ -712,7 +773,7 @@ async def test_add_job_manually_rejects_inverted_salary(user: User) -> None:
 
 async def test_add_job_manually_with_deadline(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/5")
         user.find("Title").clear().type("Dated Engineer")
@@ -728,7 +789,7 @@ async def test_add_job_manually_with_deadline(user: User) -> None:
 
 async def test_add_job_manually_rejects_invalid_deadline(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/6")
         user.find("Title").clear().type("Dated Engineer")
@@ -990,7 +1051,7 @@ async def test_search_results_are_paginated_without_sorting(user: User) -> None:
 
 async def test_add_job_manually_requires_fields(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Save").click()
     await asyncio.sleep(0.1)
@@ -1008,7 +1069,7 @@ async def test_add_job_manually_requires_fields(user: User) -> None:
 
 async def test_add_job_manually_rejects_invalid_url(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("not-a-url")
         user.find("Title").clear().type("Title")
@@ -2384,7 +2445,7 @@ async def test_add_job_manually_assigns_tags(user: User) -> None:
     db.create_tag("remote")
     db.create_tag("startup")
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/tags")
         user.find("Title").clear().type("Tagged Engineer")

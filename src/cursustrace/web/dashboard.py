@@ -16,7 +16,7 @@ from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
 from cursustrace.web.nav import app_footer, scroll_to_top_button
 from cursustrace.web.profile import _render_profile_editor
-from cursustrace.web.scan import _handle_scan
+from cursustrace.web.scan import _add_job_dialog
 from cursustrace.web.session import current_email, current_user_id
 from cursustrace.web.settings_drawer import _render_settings
 from cursustrace.web.state import _apply_dark_mode
@@ -208,28 +208,17 @@ def dashboard_page(request: Request) -> None:
         settings_button.on_click(lambda: drawer.toggle())
         _render_settings(refresh, dark)
 
+    add_dialog = _job_form_dialog(
+        None,
+        lambda values: _add_job_manually(values, refresh),
+    )
+    add_job_dialog = _add_job_dialog(refresh, add_dialog)
+
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
-        with ui.column().classes("w-full gap-2"):
-            urls_input = (
-                ui.textarea(
-                    "Job URLs (one per line)",
-                    placeholder="https://example.com/job/1\nhttps://example.com/job/2",
-                )
-                .classes("w-full")
-                .props('autogrow input-style="min-height: 80px"')
-                .mark("scan-urls")
+        with ui.row().classes("w-full items-center gap-3"):
+            ui.button("➕ Add Job", on_click=add_job_dialog.open).props("color=primary").mark(
+                "add-job"
             )
-            with ui.row().classes("w-full items-center gap-3"):
-                scan_button = ui.button("Scan & Save Positions")
-                status_label = ui.label()
-            add_dialog = _job_form_dialog(
-                None,
-                lambda values: _add_job_manually(values, refresh),
-            )
-            scan_button.on_click(
-                lambda: _handle_scan(urls_input, refresh, status_label, scan_button)
-            )
-            ui.button("➕ Add Manually", on_click=add_dialog.open).props("flat color=primary")
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):

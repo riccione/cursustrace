@@ -99,17 +99,17 @@ async def test_login_with_wrong_password_shows_error(multi_user: User) -> None:
 
 async def test_seeded_admin_can_sign_in(multi_user: User) -> None:
     await _login(multi_user, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD)
-    await multi_user.should_see(marker="scan-urls")
+    await multi_user.should_see(marker="add-job")
 
 
 async def test_register_auto_logs_in(multi_user: User) -> None:
     await _register(multi_user, "alice@example.com")
-    await multi_user.should_see(marker="scan-urls")
+    await multi_user.should_see(marker="add-job")
 
 
 async def test_change_password_dialog_clears_fields_on_reopen(multi_user: User) -> None:
     await _register(multi_user, "alice@example.com")
-    await multi_user.should_see(marker="scan-urls")
+    await multi_user.should_see(marker="add-job")
 
     multi_user.find(marker="change-password-button").click()
     await asyncio.sleep(0.1)
@@ -141,7 +141,7 @@ async def test_register_rejects_duplicate_email(
     _setup_multi_user(monkeypatch, tmp_path)
     async with user_simulation(main_file=APP_PATH) as first:
         await _register(first, "alice@example.com")
-        await first.should_see(marker="scan-urls")
+        await first.should_see(marker="add-job")
     async with user_simulation(main_file=APP_PATH) as second:
         await second.open("/register")
         second.find(marker="register-email").type("alice@example.com")
@@ -157,7 +157,7 @@ async def test_user_data_is_isolated_between_sessions(
     _setup_multi_user(monkeypatch, tmp_path)
     async with user_simulation(main_file=APP_PATH) as alice:
         await _register(alice, "alice@example.com")
-        await alice.should_see(marker="scan-urls")
+        await alice.should_see(marker="add-job")
         row = db.get_user_by_email("alice@example.com")
         assert row is not None
         db.add_job(
@@ -172,7 +172,7 @@ async def test_user_data_is_isolated_between_sessions(
         await alice.should_see("Alice Role")
     async with user_simulation(main_file=APP_PATH) as bob:
         await _register(bob, "bob@example.com")
-        await bob.should_see(marker="scan-urls")
+        await bob.should_see(marker="add-job")
         await bob.should_not_see("Alice Role")
 
 
@@ -187,19 +187,19 @@ async def test_seeded_admin_adopts_orphan_rows(
     assert orphan is not None
     async with user_simulation(main_file=APP_PATH) as user:
         await _login(user, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD)
-        await user.should_see(marker="scan-urls")
+        await user.should_see(marker="add-job")
         await user.should_see("Orphan")
 
 
 async def test_multi_user_off_keeps_dashboard_open(user: User) -> None:
     """Regression guard: with the toggle off the dashboard still loads without login."""
     await user.open("/")
-    await user.should_see(marker="scan-urls")
+    await user.should_see(marker="add-job")
 
 
 async def test_logout_returns_to_login(multi_user: User) -> None:
     await _register(multi_user, "alice@example.com")
-    await multi_user.should_see(marker="scan-urls")
+    await multi_user.should_see(marker="add-job")
     multi_user.find(marker="logout-button").click()
     await multi_user.should_see(marker="login-email")
 
@@ -212,7 +212,7 @@ async def test_header_controls_hidden_when_multi_user_off(user: User) -> None:
 
 async def test_change_password_rejects_wrong_current(multi_user: User) -> None:
     await _register(multi_user, "alice@example.com")
-    await multi_user.should_see(marker="scan-urls")
+    await multi_user.should_see(marker="add-job")
     multi_user.find(marker="change-password-button").click()
     multi_user.find(marker="current-password").type("Wrong1")
     multi_user.find(marker="new-password").type("NewPass1")
@@ -223,7 +223,7 @@ async def test_change_password_rejects_wrong_current(multi_user: User) -> None:
 
 async def test_change_password_allows_login_with_new_password(multi_user: User) -> None:
     await _register(multi_user, "alice@example.com")
-    await multi_user.should_see(marker="scan-urls")
+    await multi_user.should_see(marker="add-job")
     multi_user.find(marker="change-password-button").click()
     multi_user.find(marker="current-password").type("Secret1")
     multi_user.find(marker="new-password").type("NewPass1")
@@ -235,4 +235,4 @@ async def test_change_password_allows_login_with_new_password(multi_user: User) 
     multi_user.find(marker="login-email").type("alice@example.com")
     multi_user.find(marker="login-password").type("NewPass1")
     multi_user.find(marker="login-submit").click()
-    await multi_user.should_see(marker="scan-urls")
+    await multi_user.should_see(marker="add-job")
