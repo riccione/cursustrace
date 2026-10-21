@@ -32,10 +32,13 @@ options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
 
 ## Dashboard
 
-Paste one or more job listing URLs (one per line) and click
-`Scan & Save Positions`. Positions land in the `Unapplied` tab; move them
+The pipeline is the main view: positions land in the `Unapplied` tab and move
 through `Applied`, `Interview`, `Rejected`, and `Outdated` by ticking the
-matching stage checkbox on a card.
+matching stage checkbox on a card. Adding a position is a secondary action
+behind the `➕ Add Job` button above the tabs: it opens a panel where you can
+paste one or more job listing URLs (one per line) and click
+`Scan & Save Positions`, or switch to `➕ Add Manually` to type the details
+yourself.
 
 Prefer to start from a board rather than a specific URL? The `🔍 Discover` tab
 searches a job source for listing links and lets you pick which to add: enter a
@@ -55,8 +58,9 @@ fuzzy company names across all pipeline stages at once, and each result
 shows its status, e.g. `[Applied]`.
 
 When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
-to enter a position's URL, title, company, description, and an optional
-application deadline, and edit those fields from the position's detail page.
+in the `➕ Add Job` panel to enter a position's URL, title, company, description,
+and an optional application deadline; the same fields can be edited later from
+the position's detail page.
 The add and edit forms always open on a clean slate: a new position starts
 empty, and an edit starts from the saved values, so a cancelled change never
 leaks into the next opening.
