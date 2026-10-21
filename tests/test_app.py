@@ -572,6 +572,88 @@ async def test_add_job_manually(user: User) -> None:
     assert job["description"] == "Manual body"
 
 
+async def test_add_manually_dialog_resets_after_previous_add(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    with user.scope(marker="job-form"):
+        user.find("Job URL").clear().type("https://manual.example/9")
+        user.find("Title").clear().type("Manual Engineer")
+        user.find("Company").clear().type("ManualCo")
+        user.find("Description").clear().type("Manual body")
+        await asyncio.sleep(0.1)
+        user.find("Save").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+
+    user.find("➕ Add Manually").click()
+    await asyncio.sleep(0.2)
+    with user.scope(marker="job-form"):
+        assert cast(ui.input, user.find("Job URL").elements.pop()).value == ""
+        assert cast(ui.input, user.find("Title").elements.pop()).value == ""
+        assert cast(ui.input, user.find("Company").elements.pop()).value == ""
+        assert cast(ui.textarea, user.find("Description").elements.pop()).value == ""
+
+
+async def test_add_manually_dialog_restores_salary_defaults(user: User) -> None:
+    await user.open("/")
+    user.find("➕ Add Manually").click()
+    await asyncio.sleep(0.2)
+    with user.scope(marker="job-form"):
+        assert cast(ui.select, user.find("Currency").elements.pop()).value == "EUR"
+        assert cast(ui.select, user.find("Period").elements.pop()).value == "year"
+
+
+async def test_edit_dialog_discards_cancelled_changes(user: User) -> None:
+    job_id = _seed_job(title="Original Title")
+    await user.open(f"/job/{job_id}")
+    user.find("✏️ Edit").click()
+    await asyncio.sleep(0.1)
+    with user.scope(marker="job-form"):
+        user.find("Title").clear().type("Changed Title")
+        await asyncio.sleep(0.1)
+        user.find("Cancel").click()
+    await asyncio.sleep(0.2)
+
+    user.find("✏️ Edit").click()
+    await asyncio.sleep(0.2)
+    with user.scope(marker="job-form"):
+        assert cast(ui.input, user.find("Title").elements.pop()).value == "Original Title"
+
+
+async def test_add_profile_dialog_clears_name_after_cancel(user: User) -> None:
+    db.init_db()
+    db.create_profile("Default")
+    await user.open("/")
+
+    user.find(marker="add-profile").click()
+    user.find(marker="new-profile-name").type("Draft")
+    await asyncio.sleep(0.1)
+    user.find(marker="cancel-add-profile").click()
+    await asyncio.sleep(0.2)
+
+    user.find(marker="add-profile").click()
+    await asyncio.sleep(0.2)
+    assert cast(ui.input, user.find(marker="new-profile-name").elements.pop()).value == ""
+
+
+async def test_manage_tags_dialog_clears_new_tag_field_on_reopen(user: User) -> None:
+    db.init_db()
+    await user.open("/")
+
+    user.find(marker="manage-tags").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="new-tag-name").type("Draft")
+    await asyncio.sleep(0.1)
+    # The dialog is dismissed by a backdrop click, which the simulator cannot do.
+    dialog = cast(ui.dialog, user.find(marker="tag-manager").elements.pop())
+    dialog.value = False
+    await asyncio.sleep(0.1)
+
+    user.find(marker="manage-tags").click()
+    await asyncio.sleep(0.2)
+    assert cast(ui.input, user.find(marker="new-tag-name").elements.pop()).value == ""
+
+
 async def test_add_job_manually_shows_similar_notice(user: User) -> None:
     _seed_job(title="Manual Engineer")
     await user.open("/")

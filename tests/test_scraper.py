@@ -47,6 +47,7 @@ def _stub_extract(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _stub_render(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(renderer, "render_html", lambda url: None)
+    monkeypatch.setattr(renderer, "render_html_browser", lambda url: None)
 
 
 def _patch_get(
@@ -364,6 +365,37 @@ def test_scrape_job_skips_render_when_disabled(monkeypatch: pytest.MonkeyPatch) 
         raise AssertionError("render must not run when render = never")
 
     monkeypatch.setattr(renderer, "render_html", _unexpected)
+    monkeypatch.setattr(renderer, "render_html_browser", _unexpected)
+    with pytest.raises(ScrapeError, match="JavaScript-rendered"):
+        scraper.scrape_job("https://example.com/job")
+
+
+def test_scrape_job_uses_browser_when_lightpanda_is_thin(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+    monkeypatch.setattr(renderer, "render_html", lambda url: "<html><body>shell</body></html>")
+    monkeypatch.setattr(
+        renderer,
+        "render_html_browser",
+        lambda url: (
+            "<html><head><title>Browser Job</title>"
+            f'<meta property="og:description" content="{LONG_BODY}" />'
+            "</head><body></body></html>"
+        ),
+    )
+
+    job = scraper.scrape_job("https://example.com/job")
+
+    assert job["title"] == "Browser Job"
+    assert job["description"] == LONG_BODY
+
+
+def test_scrape_job_raises_when_every_renderer_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_get(monkeypatch, SHELL_HTML)
+    monkeypatch.setattr(renderer, "render_html", lambda url: "<html><body>shell</body></html>")
+    monkeypatch.setattr(
+        renderer, "render_html_browser", lambda url: "<html><body>shell</body></html>"
+    )
+
     with pytest.raises(ScrapeError, match="JavaScript-rendered"):
         scraper.scrape_job("https://example.com/job")
 

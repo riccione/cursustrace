@@ -50,7 +50,7 @@ def _render_profile_editor() -> None:
             .mark("copy-cv-sections")
         )
         with ui.row():
-            ui.button("Cancel", on_click=add_dialog.close).props("flat")
+            ui.button("Cancel", on_click=add_dialog.close).props("flat").mark("cancel-add-profile")
             ui.button("Add", on_click=lambda: confirm_add()).props("color=primary").mark(
                 "confirm-add-profile"
             )
@@ -118,6 +118,7 @@ def _render_profile_editor() -> None:
         render_form()
 
     def open_add() -> None:
+        new_name_input.value = ""
         copy_cv_checkbox.value = True
         copy_cv_checkbox.enabled = selected["id"] is not None
         add_dialog.open()

@@ -633,13 +633,19 @@ def _merge_rendered(static: ScrapedJob, rendered: ScrapedJob) -> ScrapedJob:
 
 
 def _attempt_render(static: ScrapedJob, url: str) -> ScrapedJob:
-    """Render the page with lightpanda when enabled; None results fall through."""
+    """Render the page with the available engines; the first sufficient result wins."""
     if config.load_settings().render != "auto":
         return static
-    html = renderer.render_html(url)
-    if html is None:
-        return static
-    return _merge_rendered(static, _extract_job(html, url))
+    best = static
+    for render in (renderer.render_html, renderer.render_html_browser):
+        html = render(url)
+        if html is None:
+            continue
+        candidate = _merge_rendered(static, _extract_job(html, url))
+        if data_is_sufficient(candidate):
+            return candidate
+        best = candidate
+    return best
 
 
 def scrape_job(url: str) -> ScrapedJob:
@@ -663,5 +669,6 @@ def scrape_job(url: str) -> ScrapedJob:
     if data_is_sufficient(job):
         return job
     raise ScrapeError(
-        f"No job content found at {url} (JavaScript-rendered or blocked); add the position manually"
+        f"No job content found at {url} (JavaScript-rendered or blocked; static HTML, "
+        "board APIs and headless rendering all failed); add the position manually"
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nicegui import app, ui
+from nicegui import app, events, ui
 from starlette.requests import Request
 
 from cursustrace import auth, db
@@ -157,6 +157,19 @@ def _change_password_dialog() -> ui.dialog:
         new_input.on_value_change(lambda _: render_checklist())
         render_checklist()
 
+        def reset() -> None:
+            """Clear the password fields so a reopened dialog starts empty."""
+            current_input.value = ""
+            new_input.value = ""
+            confirm_input.value = ""
+            render_checklist()
+
+        def on_dialog_value_change(event: events.ValueChangeEventArguments[bool]) -> None:
+            if event.value:
+                reset()
+
+        dialog.on_value_change(on_dialog_value_change)
+
         def submit() -> None:
             error.set_text("")
             user_id = current_user_id()
@@ -178,7 +191,7 @@ def _change_password_dialog() -> ui.dialog:
             ui.notify("Password changed.", type="positive")
 
         with ui.row():
-            ui.button("Cancel", on_click=dialog.close).props("flat")
+            ui.button("Cancel", on_click=dialog.close).props("flat").mark("cancel-change-password")
             ui.button("Change password", on_click=submit).props("color=primary").mark(
                 "change-password-submit"
             )

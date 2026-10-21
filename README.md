@@ -57,6 +57,9 @@ shows its status, e.g. `[Applied]`.
 When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
 to enter a position's URL, title, company, description, and an optional
 application deadline, and edit those fields from the position's detail page.
+The add and edit forms always open on a clean slate: a new position starts
+empty, and an edit starts from the saved values, so a cancelled change never
+leaks into the next opening.
 Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
 `validThrough` date or type it as an ISO date like `2026-12-31`.
@@ -165,6 +168,12 @@ title repeated):
    the binary; each render is capped at 20 seconds. Set
    `render = "never"` (or `CURSUS_RENDER=never`) to skip this tier on
    hosts where no browser may run.
+4. Headless Chrome/Chromium: if the lightpanda render still leaves too
+   little text, the page is rendered again in headless Chrome or
+   Chromium (`--dump-dom`), which handles sites whose JavaScript
+   lightpanda cannot execute. Put the binary on your `PATH` or point
+   `CURSUS_CHROMIUM` at it; the render waits up to 15 seconds and is
+   capped at 45 seconds, so expect roughly half a minute per page.
 
 If every step comes up empty the scan fails with a
 `JavaScript-rendered or blocked` error and the position is left for
