@@ -5,13 +5,13 @@ description = "Trace job listings against a CV"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "trafilatura",
+    "trafilatura>=2.3.1",
     "beautifulsoup4",
-    "pydantic",
+    "pydantic>=2.14.1",
     "rapidfuzz>=3.14.6",
     "weasyprint>=68.1",
     "markdown-it-py>=4.2.0",
-    "nicegui>=3.17.1",
+    "nicegui>=3.18.0",
     "click>=8.5.0",
     "mcp>=2.3.0",
     "curl-cffi==0.16.3",
@@ -26,10 +26,10 @@ cursustrace = "cursustrace.cli:cli"
 dev = [
     "pytest",
     "mypy",
-    "ruff",
-    "pypdf>=6.19.0",
+    "ruff>=0.17.1",
+    "pypdf>=6.21.1",
     "pytest-asyncio>=1.4.0",
-    "pre-commit>=4.6.2",
+    "pre-commit>=4.7.0",
 ]
 
 [build-system]
