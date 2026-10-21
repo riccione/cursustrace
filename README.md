@@ -34,7 +34,10 @@ options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
 
 The pipeline is the main view: positions land in the `Unapplied` tab and move
 through `Applied`, `Interview`, `Rejected`, and `Outdated` by ticking the
-matching stage checkbox on a card. Adding a position is a secondary action
+matching stage checkbox on a card. The tab strip shows the three active
+stages — `Unapplied`, `Applied` and `Interview` — each with the number of
+positions it holds; the archival `Rejected` and `Outdated` stages live behind
+the `More` menu next to the tabs. Adding a position is a secondary action
 behind the `➕ Add Job` button above the tabs: it opens a panel where you can
 paste one or more job listing URLs (one per line) and click
 `Scan & Save Positions`, or switch to `➕ Add Manually` to type the details
