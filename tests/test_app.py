@@ -1297,6 +1297,16 @@ async def test_dashboard_lists_status_tabs(user: User) -> None:
     await user.should_not_see("No outdated positions yet.")
 
 
+async def test_more_menu_is_anchored_to_the_button(user: User) -> None:
+    await user.open("/")
+
+    button = cast(ui.button, user.find(marker="more-stages").elements.pop())
+    menu = cast(ui.menu, user.find(marker="more-menu").elements.pop())
+
+    assert button.props["menu"] == menu.props["id"]
+    assert menu.props["auto-close"] is True
+
+
 async def test_more_menu_shows_secondary_stage(user: User) -> None:
     db.init_db()
     job_id = db.add_job("https://a.com/1", "Gone role", "Acme", "Remote", "Body")

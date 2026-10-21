@@ -39,6 +39,7 @@ def dashboard_page(request: Request) -> None:
     secondary_views: dict[db.JobStatus, ui.column] = {}
     more_container: ui.column | None = None
     more_button: ui.button | None = None
+    more_menu: ui.menu | None = None
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
     tag_filter_select: ui.select | None = None
@@ -115,6 +116,8 @@ def dashboard_page(request: Request) -> None:
         """Show a stage that lives behind the More menu."""
         nonlocal more_status
         more_status = status
+        if more_menu is not None:
+            more_menu.close()
         refresh()
 
     def show_primary() -> None:
@@ -418,7 +421,8 @@ def dashboard_page(request: Request) -> None:
                                 badge.set_visibility(False)
                                 badge.mark(f"attention-badge-{status}")
                                 attention_badges[status] = badge
-                    more_menu = ui.menu()
+                    more_menu = ui.menu().props("id=more-stages-menu auto-close")
+                    more_menu.mark("more-menu")
                     with more_menu:
                         for status, label, _message in STATUS_TABS:
                             if status in SECONDARY_STATUSES:
@@ -426,9 +430,8 @@ def dashboard_page(request: Request) -> None:
                                 item.mark(f"more-stage-{status}")
                     more_button = (
                         ui.button("More", icon="more_horiz")
-                        .props("flat")
+                        .props("flat menu=more-stages-menu")
                         .mark("more-stages")
-                        .on_click(more_menu.open)
                     )
                 with ui.tab_panels(status_tabs, value="unapplied").classes(
                     "w-full"
