@@ -12,7 +12,7 @@ from cursustrace import db, salary, scraper
 from cursustrace.errors import ScrapeError
 from cursustrace.validation import normalize_deadline, required_error, validate_url
 
-STATUSES = ["unapplied", "applied", "interview", "rejected", "outdated"]
+STATUSES: tuple[str, ...] = db.JOB_STATUSES
 SORT_ORDERS = ["newest", "oldest", "company", "company_desc", "status"]
 SIMILAR_NOTICE_KEY = "similar_notice"
 
@@ -182,16 +182,14 @@ def _ingest_item(
 
 def _restore_comments(item: dict[object, object], job_id: int) -> None:
     """Copy stage comments back onto a freshly imported position when present."""
-    comments = {
-        stage: _optional_str(item.get(f"{stage}_comment"))
-        for stage in ("applied", "interview", "rejected")
-    }
+    comments = {stage: _optional_str(item.get(f"{stage}_comment")) for stage in db.COMMENT_STAGES}
     if any(comment is not None for comment in comments.values()):
         db.update_job_comments(
             job_id,
             comments["applied"] or "",
             comments["interview"] or "",
             comments["rejected"] or "",
+            offer=comments["offer"] or "",
         )
 
 

@@ -1351,7 +1351,7 @@ async def test_primary_tabs_show_position_counts(user: User) -> None:
     await user.open("/")
 
     tab = cast(ui.tab, user.find(marker="status-tab-unapplied").elements.pop())
-    assert tab.props["label"] == "⏳ Unapplied Positions (1)"
+    assert tab.props["label"] == "⏳ Unapplied (1)"
 
 
 async def test_clicking_a_primary_tab_leaves_the_secondary_view(user: User) -> None:
@@ -1548,6 +1548,7 @@ async def test_statistics_status_pie(user: User) -> None:
         {"name": "Unapplied", "value": 1},
         {"name": "Applied", "value": 1},
         {"name": "Interview", "value": 0},
+        {"name": "Offer", "value": 0},
         {"name": "Rejected", "value": 1},
         {"name": "Outdated", "value": 0},
     ]
@@ -1569,6 +1570,7 @@ async def test_statistics_funnel(user: User) -> None:
         {"name": "Applied", "value": 2},
         {"name": "Response", "value": 1},
         {"name": "Interview", "value": 0},
+        {"name": "Offer", "value": 0},
     ]
 
 

@@ -37,6 +37,7 @@ class JobFormValues:
     deadline: str = ""
     applied_comment: str = ""
     interview_comment: str = ""
+    offer_comment: str = ""
     rejected_comment: str = ""
     tags: list[str] = field(default_factory=list)
 
@@ -222,6 +223,7 @@ def _job_form_dialog(
                     interview_comment=(comment_inputs["interview"].value or "")
                     if with_comments
                     else "",
+                    offer_comment=(comment_inputs["offer"].value or "") if with_comments else "",
                     rejected_comment=(comment_inputs["rejected"].value or "")
                     if with_comments
                     else "",
@@ -289,6 +291,7 @@ def _update_job_fields(job_id: int, values: JobFormValues) -> bool:
         values.applied_comment,
         values.interview_comment,
         values.rejected_comment,
+        offer=values.offer_comment,
         user_id=user_id,
     )
     db.set_job_tags(job_id, values.tags, user_id=user_id)

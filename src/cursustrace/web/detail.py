@@ -72,6 +72,8 @@ def job_detail_page(job_id: int) -> None:
                 ui.markdown(f"**Applied:** {job['date_applied']}")
             if job["date_interview"]:
                 ui.markdown(f"**Interview:** {job['date_interview']}")
+            if job["date_offer"]:
+                ui.markdown(f"**Offer:** {job['date_offer']}")
             if job["date_rejected"]:
                 ui.markdown(f"**Rejected:** {job['date_rejected']}")
             if job["date_outdated"]:

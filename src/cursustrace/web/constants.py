@@ -11,20 +11,22 @@ APP_NAME = "CursusTrace"
 APP_TITLE = "CursusTrace — Job Application Tracker"
 
 STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
-    ("unapplied", "⏳ Unapplied Positions", "No unapplied positions yet."),
-    ("applied", "✅ Applied Positions", "No applied positions yet."),
-    ("interview", "🗣️ Interview Positions", "No interview positions yet."),
-    ("rejected", "❌ Rejected Positions", "No rejected positions yet."),
-    ("outdated", "🗄️ Outdated Positions", "No outdated positions yet."),
+    ("unapplied", "⏳ Unapplied", "No unapplied positions yet."),
+    ("applied", "✅ Applied", "No applied positions yet."),
+    ("interview", "🗣️ Interview", "No interview positions yet."),
+    ("offer", "🎉 Offer", "No offer positions yet."),
+    ("rejected", "❌ Rejected", "No rejected positions yet."),
+    ("outdated", "🗄️ Outdated", "No outdated positions yet."),
 )
 
 # Stages shown as tabs; the remaining ones live behind the "More" menu.
-PRIMARY_STATUSES: tuple[db.JobStatus, ...] = ("unapplied", "applied", "interview")
+PRIMARY_STATUSES: tuple[db.JobStatus, ...] = ("unapplied", "applied", "interview", "offer")
 SECONDARY_STATUSES: tuple[db.JobStatus, ...] = ("rejected", "outdated")
 
 STATUS_CHECKBOXES: tuple[tuple[db.JobFlag | Literal["outdated"], str], ...] = (
     ("applied", "Applied"),
     ("interview", "Interview"),
+    ("offer", "Offer"),
     ("rejected", "Rejected"),
     ("outdated", "Outdated"),
 )
@@ -34,6 +36,7 @@ STAT_CARDS: tuple[tuple[str, str], ...] = (
     ("unapplied", "⏳ Unapplied"),
     ("applied", "✅ Applied"),
     ("interview", "🗣️ Interview"),
+    ("offer", "🎉 Offer"),
     ("rejected", "❌ Rejected"),
     ("outdated", "🗄️ Outdated"),
 )
@@ -42,6 +45,7 @@ STATUS_NAMES: tuple[tuple[db.JobStatus, str], ...] = (
     ("unapplied", "Unapplied"),
     ("applied", "Applied"),
     ("interview", "Interview"),
+    ("offer", "Offer"),
     ("rejected", "Rejected"),
     ("outdated", "Outdated"),
 )
@@ -51,6 +55,7 @@ FUNNEL_STAGES: tuple[tuple[str, str], ...] = (
     ("applied", "Applied"),
     ("response", "Response"),
     ("interview", "Interview"),
+    ("offer", "Offer"),
 )
 
 WEBAPP_CSS_PATH: Path = Path("styles/webapp.css")

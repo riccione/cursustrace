@@ -72,9 +72,9 @@ def _deadline_reason(remaining: int) -> str:
 def reasons_for(job: db.Job, thresholds: Thresholds, *, today: date | None = None) -> list[str]:
     """Return one short reason per attention rule this position triggers.
 
-    Only unapplied and applied positions can ever match: interview and rejected
-    mean the employer already responded, which stops both staleness clocks, and
-    a deadline no longer matters once the pipeline moved on.
+    Only unapplied and applied positions can ever match: interview, offer and
+    rejected mean the employer already responded, which stops both staleness
+    clocks, and a deadline no longer matters once the pipeline moved on.
     """
     reference = today if today is not None else _today()
     status = db.job_status(job)
