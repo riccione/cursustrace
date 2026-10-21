@@ -16,7 +16,7 @@ from nicegui import ui
 from nicegui.testing import User
 from pypdf import PdfReader
 
-from cursustrace import app, attention, backup, config, db, logsetup, scraper
+from cursustrace import app, backup, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
 from cursustrace.version import app_version
 from cursustrace.web import (
@@ -44,7 +44,35 @@ async def _wait_for(predicate: Callable[[], bool], timeout: float = 2.0) -> None
     raise AssertionError("condition not met in time")
 
 
+async def _open_add_job(user: User) -> None:
+    """Open the Add Job panel that holds the scan and manual-add actions."""
+    user.find(marker="add-job").click()
+    await asyncio.sleep(0.05)
+
+
+async def _open_filters(user: User) -> None:
+    """Open the filters drawer that holds the sort, page size and filter controls."""
+    user.find(marker="filters-button").click()
+    await asyncio.sleep(0.1)
+
+
+async def _show_secondary_stage(user: User, status: str) -> None:
+    """Open the More menu and show a secondary stage's list."""
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker=f"more-stage-{status}").click()
+    await asyncio.sleep(0.2)
+
+
+async def _open_manual_add(user: User) -> None:
+    """Open the Add Job panel and switch to the manual entry form."""
+    await _open_add_job(user)
+    user.find(marker="add-manually").click()
+    await asyncio.sleep(0.05)
+
+
 async def _scan(user: User, url: str = JOB_URL) -> None:
+    await _open_add_job(user)
     user.find(marker="scan-urls").clear().type(url)
     await asyncio.sleep(0.05)
     user.find("Scan & Save Positions").click()
@@ -204,9 +232,54 @@ async def test_similar_notice_can_be_disabled(user: User, monkeypatch: pytest.Mo
 
 async def test_empty_url_shows_warning(user: User) -> None:
     await user.open("/")
+    await _open_add_job(user)
     user.find("Scan & Save Positions").click()
 
     await _see_notice(user, "Please enter at least one job URL.")
+
+
+async def test_add_job_button_opens_the_panel(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see(marker="add-job")
+    await _open_add_job(user)
+    await user.should_see(marker="add-job-dialog")
+    await user.should_see(marker="scan-urls")
+
+
+async def test_add_job_panel_scans_a_position(user: User) -> None:
+    await user.open("/")
+    await _open_add_job(user)
+    user.find(marker="scan-urls").clear().type("https://example.com/jobs/1")
+    await asyncio.sleep(0.05)
+    user.find("Scan & Save Positions").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    await _see_notice(user, "Saved 1")
+
+
+async def test_add_job_panel_opens_manual_entry(user: User) -> None:
+    await user.open("/")
+    await _open_add_job(user)
+    user.find(marker="add-manually").click()
+    await asyncio.sleep(0.1)
+
+    await user.should_see(marker="job-form")
+    with user.scope(marker="job-form"):
+        assert cast(ui.input, user.find("Title").elements.pop()).value == ""
+
+
+async def test_add_job_panel_resets_url_box_on_reopen(user: User) -> None:
+    await user.open("/")
+    await _open_add_job(user)
+    user.find(marker="scan-urls").clear().type("https://example.com/jobs/1")
+    await asyncio.sleep(0.05)
+
+    # Switching to manual entry closes the panel; reopening it starts fresh.
+    user.find(marker="add-manually").click()
+    await asyncio.sleep(0.1)
+    await _open_add_job(user)
+    assert cast(ui.textarea, user.find(marker="scan-urls").elements.pop()).value == ""
 
 
 async def test_scrape_error_shows_error(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,6 +307,7 @@ async def test_scan_multiple_urls_saves_all(user: User, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
     await user.open("/")
+    await _open_add_job(user)
     user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/1\nhttps://example.com/jobs/2\nhttps://example.com/jobs/3"
     )
@@ -301,6 +375,7 @@ async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(scraper, "scrape_job", scrape)
     await user.open("/")
+    await _open_add_job(user)
     user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/1\nhttps://example.com/jobs/bad"
     )
@@ -388,6 +463,7 @@ async def test_unchecking_rejected_returns_to_unapplied(user: User) -> None:
     user.find(kind=ui.checkbox, content="Rejected").click()
     await _wait_for(lambda: db.get_jobs()[0]["rejected"] == 1)
 
+    await _show_secondary_stage(user, "rejected")
     user.find(kind=ui.checkbox, content="Rejected").click()
     await _wait_for(
         lambda: (
@@ -447,6 +523,7 @@ async def test_checkbox_states_rejected_from_applied(user: User) -> None:
     db.set_job_status(job_id, "applied")
     db.set_job_status(job_id, "rejected")
     await user.open("/")
+    await _show_secondary_stage(user, "rejected")
 
     assert _checkbox(user, "Applied").enabled is False
     assert _checkbox(user, "Applied").value is True
@@ -462,6 +539,7 @@ async def test_checkbox_states_rejected_from_interview(user: User) -> None:
     db.set_job_status(job_id, "interview")
     db.set_job_status(job_id, "rejected")
     await user.open("/")
+    await _show_secondary_stage(user, "rejected")
 
     assert _checkbox(user, "Applied").enabled is False
     assert _checkbox(user, "Applied").value is True
@@ -475,6 +553,7 @@ async def test_checkbox_states_outdated(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "outdated")
     await user.open("/")
+    await _show_secondary_stage(user, "outdated")
 
     assert _checkbox(user, "Outdated").enabled is False
     assert _checkbox(user, "Outdated").value is True
@@ -493,6 +572,7 @@ async def test_outdated_checkbox_parks_position(user: User) -> None:
 
     assert db.job_status(db.get_jobs()[0]) == "outdated"
     await user.should_see("No unapplied positions yet.")
+    await _show_secondary_stage(user, "outdated")
     assert _checkbox(user, "Outdated").value is True
 
 
@@ -501,6 +581,7 @@ async def test_applied_checkbox_restores_parked_position(user: User) -> None:
     db.set_job_status(job_id, "applied")
     db.set_job_status(job_id, "outdated")
     await user.open("/")
+    await _show_secondary_stage(user, "outdated")
 
     user.find(kind=ui.checkbox, content="Applied").click()
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
@@ -553,7 +634,7 @@ async def test_delete_from_detail_returns_to_dashboard(user: User) -> None:
 
 async def test_add_job_manually(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/1")
         user.find("Title").clear().type("Manual Engineer")
@@ -574,7 +655,7 @@ async def test_add_job_manually(user: User) -> None:
 
 async def test_add_manually_dialog_resets_after_previous_add(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/9")
         user.find("Title").clear().type("Manual Engineer")
@@ -585,7 +666,7 @@ async def test_add_manually_dialog_resets_after_previous_add(user: User) -> None
 
     await _wait_for(lambda: len(db.get_jobs()) == 1)
 
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     await asyncio.sleep(0.2)
     with user.scope(marker="job-form"):
         assert cast(ui.input, user.find("Job URL").elements.pop()).value == ""
@@ -596,7 +677,7 @@ async def test_add_manually_dialog_resets_after_previous_add(user: User) -> None
 
 async def test_add_manually_dialog_restores_salary_defaults(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     await asyncio.sleep(0.2)
     with user.scope(marker="job-form"):
         assert cast(ui.select, user.find("Currency").elements.pop()).value == "EUR"
@@ -657,7 +738,7 @@ async def test_manage_tags_dialog_clears_new_tag_field_on_reopen(user: User) -> 
 async def test_add_job_manually_shows_similar_notice(user: User) -> None:
     _seed_job(title="Manual Engineer")
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/2")
         user.find("Title").clear().type("Manual Engineer")
@@ -674,7 +755,7 @@ async def test_add_job_manually_shows_similar_notice(user: User) -> None:
 
 async def test_add_job_manually_with_salary(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/3")
         user.find("Title").clear().type("Paid Engineer")
@@ -695,7 +776,7 @@ async def test_add_job_manually_with_salary(user: User) -> None:
 
 async def test_add_job_manually_rejects_inverted_salary(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/4")
         user.find("Title").clear().type("Paid Engineer")
@@ -712,7 +793,7 @@ async def test_add_job_manually_rejects_inverted_salary(user: User) -> None:
 
 async def test_add_job_manually_with_deadline(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/5")
         user.find("Title").clear().type("Dated Engineer")
@@ -728,7 +809,7 @@ async def test_add_job_manually_with_deadline(user: User) -> None:
 
 async def test_add_job_manually_rejects_invalid_deadline(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/6")
         user.find("Title").clear().type("Dated Engineer")
@@ -792,17 +873,118 @@ async def test_card_hides_deadline_when_unset(user: User) -> None:
     await user.should_not_see(marker="deadline")
 
 
-async def test_banner_shows_stale_unapplied_position(user: User) -> None:
+def _attention_badge_text(user: User, status: str) -> str:
+    """Text of the visible attention badge of a pipeline tab ('' when it is hidden)."""
+    try:
+        badge = cast(ui.badge, user.find(marker=f"attention-badge-{status}").elements.pop())
+    except AssertionError:
+        return ""
+    return str(badge.text)
+
+
+def _attention_chip_text(user: User) -> str:
+    """Text of the visible attention chip on a card ('' when there is none)."""
+    try:
+        chip = cast(ui.chip, user.find(marker="attention-chip").elements.pop())
+    except AssertionError:
+        return ""
+    return str(chip.text)
+
+
+async def test_badge_shows_stale_unapplied_position(user: User) -> None:
     _seed_stale_job(15)
 
     await user.open("/")
 
-    await user.should_see("1 position needs attention")
-    await user.should_see("added 15 days ago, not applied")
-    assert user.find(marker="attention-item").elements
+    assert _attention_badge_text(user, "unapplied") == "1"
+    assert _attention_badge_text(user, "applied") == ""
+    badge = cast(ui.badge, user.find(marker="attention-badge-unapplied").elements.pop())
+    assert any(isinstance(ancestor, ui.tab) for ancestor in badge.ancestors())
 
 
-async def test_banner_shows_imminent_deadline(user: User) -> None:
+async def test_badge_shows_stale_applied_position(user: User) -> None:
+    _seed_stale_applied_job(25)
+
+    await user.open("/")
+
+    assert _attention_badge_text(user, "applied") == "1"
+    assert _attention_badge_text(user, "unapplied") == ""
+
+
+async def test_card_shows_attention_chip(user: User) -> None:
+    _seed_stale_applied_job(25)
+
+    await user.open("/")
+
+    assert _attention_chip_text(user) == "⚠ no response in 25 days"
+
+
+async def test_card_hides_attention_chip_for_healthy_position(user: User) -> None:
+    _seed_job()
+
+    await user.open("/")
+
+    assert _attention_chip_text(user) == ""
+
+
+async def test_attention_chip_prefers_the_deadline_reason(user: User) -> None:
+    db.init_db()
+    job_id = db.add_job("https://example.com/dated", "Dated Lead", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "applied")
+    now = time.localtime()
+    in_three_days = date(now.tm_year, now.tm_mon, now.tm_mday) + timedelta(days=3)
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET date_applied = ? WHERE id = ?", (_days_ago_stamp(25), job_id))
+        conn.execute(
+            "UPDATE jobs SET deadline = ? WHERE id = ?", (in_three_days.isoformat(), job_id)
+        )
+
+    await user.open("/")
+
+    assert _attention_chip_text(user) == "⚠ deadline in 3 days"
+
+
+async def test_flagged_positions_are_listed_first(user: User) -> None:
+    db.init_db()
+    stale = db.add_job("https://example.com/stale", "Stale Lead", "Acme", "Remote", "Body")
+    assert stale is not None
+    db.set_job_status(stale, "applied")
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET date_applied = ? WHERE id = ?", (_days_ago_stamp(25), stale))
+    fresh = db.add_job("https://example.com/fresh", "Fresh Lead", "Acme", "Remote", "Body")
+    assert fresh is not None
+    db.set_job_status(fresh, "applied")
+
+    await user.open("/")
+
+    ordered = attention_ui.attention_first(db.get_jobs())
+    assert [job["title"] for job in ordered] == ["Stale Lead", "Fresh Lead"]
+    labels = {element.text for element in user.find(kind=ui.expansion).elements}
+    assert "Stale Lead — Acme" in labels
+    assert "Fresh Lead — Acme" in labels
+
+
+async def test_detail_shows_attention_reason(user: User) -> None:
+    job_id = _seed_stale_applied_job(25)
+
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("Needs attention: no response in 25 days")
+
+
+async def test_attention_toggle_hides_the_card_chip(user: User) -> None:
+    _seed_stale_applied_job(25)
+    await user.open("/")
+    assert _attention_chip_text(user) != ""
+
+    user.find(marker="settings-button").click()
+    user.find(marker="attention-badge-toggle").click()
+
+    await _wait_for(lambda: _attention_chip_text(user) == "")
+
+
+async def test_badge_shows_imminent_deadline(user: User) -> None:
     db.init_db()
     now = time.localtime()
     in_three_days = date(now.tm_year, now.tm_mon, now.tm_mday) + timedelta(days=3)
@@ -817,41 +999,41 @@ async def test_banner_shows_imminent_deadline(user: User) -> None:
 
     await user.open("/")
 
-    await user.should_see("deadline in 3 days")
-    assert user.find(marker="attention-item").elements
+    assert _attention_badge_text(user, "unapplied") == "1"
 
 
-async def test_banner_hidden_when_nothing_needs_attention(user: User) -> None:
+async def test_no_badge_when_nothing_needs_attention(user: User) -> None:
     _seed_job()
 
     await user.open("/")
 
-    await user.should_not_see(marker="attention-banner")
+    assert _attention_badge_text(user, "unapplied") == ""
+    assert _attention_badge_text(user, "applied") == ""
 
 
-async def test_banner_clears_after_marking_applied(user: User) -> None:
+async def test_badge_clears_after_marking_applied(user: User) -> None:
     _seed_stale_job(15)
     await user.open("/")
-    await user.should_see("added 15 days ago, not applied")
+    assert _attention_badge_text(user, "unapplied") == "1"
 
     user.find(kind=ui.checkbox, content="Applied").click()
 
-    await user.should_not_see(marker="attention-banner")
+    await _wait_for(lambda: _attention_badge_text(user, "unapplied") == "")
 
 
-async def test_banner_toggle_hides_and_persists(user: User) -> None:
+async def test_badge_toggle_hides_and_persists(user: User) -> None:
     _seed_stale_job(15)
     await user.open("/")
-    await user.should_see(marker="attention-banner")
+    assert _attention_badge_text(user, "unapplied") == "1"
 
     user.find(marker="settings-button").click()
-    user.find(marker="attention-banner-toggle").click()
+    user.find(marker="attention-badge-toggle").click()
 
-    await user.should_not_see(marker="attention-banner")
+    await _wait_for(lambda: _attention_badge_text(user, "unapplied") == "")
     assert db.get_setting("attention_notice") == "off"
 
     await user.open("/")
-    await user.should_not_see(marker="attention-banner")
+    assert _attention_badge_text(user, "unapplied") == ""
 
 
 def _seed_stale_applied_job(days: int) -> int:
@@ -866,12 +1048,12 @@ def _seed_stale_applied_job(days: int) -> int:
     return job_id
 
 
-async def test_banner_warns_before_parking(user: User) -> None:
+async def test_badge_warns_before_parking(user: User) -> None:
     _seed_stale_applied_job(25)
 
     await user.open("/")
 
-    await user.should_see("1 position needs attention")
+    assert _attention_badge_text(user, "applied") == "1"
     assert db.get_jobs()[0]["outdated"] == 0
     assert db.job_status(db.get_jobs()[0]) == "applied"
 
@@ -883,7 +1065,7 @@ async def test_auto_parks_stale_applied_position(user: User) -> None:
 
     await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
     assert db.job_status(db.get_jobs()[0]) == "outdated"
-    await user.should_not_see(marker="attention-banner")
+    assert _attention_badge_text(user, "applied") == ""
 
 
 async def test_manual_restore_wins_over_parking(user: User) -> None:
@@ -891,6 +1073,7 @@ async def test_manual_restore_wins_over_parking(user: User) -> None:
 
     await user.open("/")
     await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
+    await _show_secondary_stage(user, "outdated")
 
     user.find(kind=ui.checkbox, content="Applied").click()
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
@@ -918,7 +1101,7 @@ async def test_salary_filter_narrows_status_lists(user: User) -> None:
     await user.should_see("Unknown Salary")
     await user.should_see("Paid Role")
 
-    cast(ui.expansion, user.find(marker="advanced-filters").elements.pop()).open()
+    await _open_filters(user)
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
 
     await user.should_not_see("Unknown Salary")
@@ -931,6 +1114,7 @@ async def test_sort_and_page_size_control_the_list(user: User) -> None:
     db.add_job("https://a.com/2", "Alpha role", "Alpha", "Remote", "Body")
     db.add_job("https://a.com/3", "Mike role", "Mid", "Remote", "Body")
     await user.open("/")
+    await _open_filters(user)
 
     cast(ui.select, user.find(marker="page-size").elements.pop()).set_value(1)
 
@@ -953,6 +1137,7 @@ async def test_pagination_pages_through_large_list(user: User) -> None:
         db.add_job(f"https://a.com/{i}", f"Filler {i}", "Acme", "Remote", "Body")
     db.add_job("https://a.com/99", "Newest role", "Acme", "Remote", "Body")
     await user.open("/")
+    await _open_filters(user)
 
     cast(ui.select, user.find(marker="page-size").elements.pop()).set_value(10)
 
@@ -974,6 +1159,7 @@ async def test_search_results_are_paginated_without_sorting(user: User) -> None:
         db.add_job(f"https://a.com/{i}", f"Filler {i}", "Acme", "Remote", "Body")
     db.add_job("https://a.com/99", "Newest role", "Acme", "Remote", "Body")
     await user.open("/")
+    await _open_filters(user)
     sort_element = cast(ui.select, user.find(marker="sort-select").elements.pop())
 
     user.find("Search company").clear().type("Acme")
@@ -990,7 +1176,7 @@ async def test_search_results_are_paginated_without_sorting(user: User) -> None:
 
 async def test_add_job_manually_requires_fields(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Save").click()
     await asyncio.sleep(0.1)
@@ -1008,7 +1194,7 @@ async def test_add_job_manually_requires_fields(user: User) -> None:
 
 async def test_add_job_manually_rejects_invalid_url(user: User) -> None:
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("not-a-url")
         user.find("Title").clear().type("Title")
@@ -1107,8 +1293,85 @@ async def test_dashboard_lists_status_tabs(user: User) -> None:
     await user.should_see("No unapplied positions yet.")
     await user.should_see("No applied positions yet.")
     await user.should_see("No interview positions yet.")
-    await user.should_see("No rejected positions yet.")
-    await user.should_see("No outdated positions yet.")
+    await user.should_not_see("No rejected positions yet.")
+    await user.should_not_see("No outdated positions yet.")
+
+
+async def test_more_menu_is_anchored_to_the_button(user: User) -> None:
+    await user.open("/")
+
+    button = cast(ui.button, user.find(marker="more-stages").elements.pop())
+    menu = cast(ui.menu, user.find(marker="more-menu").elements.pop())
+    item = user.find(marker="more-stage-rejected").elements.pop()
+
+    # Quasar anchors a menu to its DOM parent, so the button has to be that parent.
+    assert any(ancestor.id == button.id for ancestor in menu.ancestors())
+    # The entries have to live inside the menu, not next to it in the button.
+    assert any(ancestor.id == menu.id for ancestor in item.ancestors())
+    assert menu.props["auto-close"] is True
+
+
+async def test_more_menu_shows_secondary_stage(user: User) -> None:
+    db.init_db()
+    job_id = db.add_job("https://a.com/1", "Gone role", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "rejected")
+    await user.open("/")
+
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="more-stage-rejected").click()
+    await asyncio.sleep(0.2)
+
+    view = cast(ui.column, user.find(marker="secondary-view-rejected").elements.pop())
+    assert view.visible
+    await user.should_see("Gone role")
+
+
+async def test_more_menu_secondary_stage_has_its_own_pagination(user: User) -> None:
+    db.init_db()
+    for index in range(3):
+        job_id = db.add_job(f"https://a.com/{index}", f"Old role {index}", "Acme", "Remote", "B")
+        assert job_id is not None
+        db.set_job_status(job_id, "outdated")
+    await user.open("/")
+
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="more-stage-outdated").click()
+    await asyncio.sleep(0.2)
+
+    await user.should_see("Showing 1-3 of 3")
+    await user.should_see("Old role 0")
+
+
+async def test_primary_tabs_show_position_counts(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Fresh role", "Acme", "Remote", "Body")
+    await user.open("/")
+
+    tab = cast(ui.tab, user.find(marker="status-tab-unapplied").elements.pop())
+    assert tab.props["label"] == "⏳ Unapplied Positions (1)"
+
+
+async def test_clicking_a_primary_tab_leaves_the_secondary_view(user: User) -> None:
+    db.init_db()
+    job_id = db.add_job("https://a.com/1", "Gone role", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "rejected")
+    await user.open("/")
+
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="more-stage-rejected").click()
+    await asyncio.sleep(0.2)
+    await user.should_see(marker="secondary-view-rejected")
+
+    user.find(marker="status-tab-unapplied").click()
+    await asyncio.sleep(0.2)
+
+    await user.should_not_see(marker="secondary-view-rejected")
+    await user.should_see("No unapplied positions yet.")
 
 
 async def test_dashboard_shows_parked_position(user: User) -> None:
@@ -1667,36 +1930,22 @@ def test_deadline_text_relative_phrases() -> None:
     assert job_card._deadline_text("2026-10-06", today) == "— passed 2 days ago"
 
 
-def test_attention_items_orders_deadlines_before_staleness() -> None:
-    today = date(2026, 10, 8)
-    thresholds = attention.Thresholds(21, 10, 7)
+async def test_attention_counts_are_per_stage(user: User) -> None:
+    _seed_stale_job(15)
+    db.init_db()
+    applied_id = db.add_job("https://example.com/quiet-lead", "Silent Lead", "Acme", "Remote", "B")
+    assert applied_id is not None
+    db.set_job_status(applied_id, "applied")
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_applied = ? WHERE id = ?",
+            (_days_ago_stamp(25), applied_id),
+        )
+    await user.open("/")
 
-    def entry(job_id: int, **overrides: object) -> db.Job:
-        row: dict[str, object] = {
-            "id": job_id,
-            "applied": 0,
-            "interview": 0,
-            "rejected": 0,
-            "outdated": 0,
-            "date_added": "2026-10-01 09:00:00",
-            "date_applied": None,
-            "date_interview": None,
-            "date_rejected": None,
-            "deadline": None,
-        }
-        row.update(overrides)
-        return cast(db.Job, row)
+    counts = attention_ui.attention_counts()
 
-    stale_older = entry(1, date_added="2020-01-01 09:00:00")
-    stale_newer = entry(2, date_added="2025-06-01 09:00:00")
-    dated_soon = entry(3, deadline="2026-10-10")
-    dated_later = entry(4, deadline="2026-10-14")
-
-    items = attention_ui._attention_items(
-        [stale_newer, dated_later, stale_older, dated_soon], thresholds, today=today
-    )
-
-    assert [job["id"] for job, _reasons in items] == [3, 4, 1, 2]
+    assert counts == {"unapplied": 1, "applied": 1}
 
 
 async def test_card_shows_days_since_applied(user: User) -> None:
@@ -2384,7 +2633,7 @@ async def test_add_job_manually_assigns_tags(user: User) -> None:
     db.create_tag("remote")
     db.create_tag("startup")
     await user.open("/")
-    user.find("➕ Add Manually").click()
+    await _open_manual_add(user)
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://manual.example/tags")
         user.find("Title").clear().type("Tagged Engineer")
@@ -2478,14 +2727,11 @@ async def test_clicking_chip_filters_dashboard(user: User) -> None:
     await user.open("/")
     await user.should_see("Zulu role")
     await user.should_see("Alpha role")
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.value is False
 
     user.find(kind=ui.chip, content="golang").click()
 
     tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
     await _wait_for(lambda: list(tag_select.value or []) == ["golang"])
-    assert advanced.value is True  # chip click expands the Advanced bar
     await user.should_see("Zulu role")
     await user.should_not_see("Alpha role")
 
@@ -2504,8 +2750,6 @@ async def test_detail_chip_navigates_to_filtered_dashboard(user: User) -> None:
     await user.should_not_see("Untagged role")
     tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
     assert list(tag_select.value or []) == ["golang"]
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.value is True  # deep-linked tag opens the Advanced bar
 
 
 async def test_opening_with_tag_query_filters_dashboard(user: User) -> None:
@@ -2518,16 +2762,58 @@ async def test_opening_with_tag_query_filters_dashboard(user: User) -> None:
     await user.should_not_see("Alpha role")
 
 
-async def test_advanced_filters_hidden_during_search(user: User) -> None:
+async def test_sort_controls_hidden_during_search(user: User) -> None:
     db.init_db()
     db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
     await user.open("/")
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.visible
+    await _open_filters(user)
+    await user.should_see(marker="sort-select")
 
     user.find("Search company").clear().type("Zeta")
     await user.should_see("[Unapplied]")
-    assert not advanced.visible
+    await user.should_not_see(marker="sort-select")
+
+
+async def test_toolbar_has_search_and_filters_button(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see(marker="filters-button")
+    await user.should_see("Search company")
+
+
+async def test_filters_button_opens_the_drawer(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    await user.open("/")
+
+    await _open_filters(user)
+
+    await user.should_see("Filters")
+    await user.should_see(marker="sort-select")
+    await user.should_see(marker="page-size")
+    await user.should_see(marker="tag-filter")
+    await user.should_see("Min salary")
+
+
+async def test_filters_badge_counts_active_filters(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    await user.open("/")
+    await _open_filters(user)
+
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
+
+    await _wait_for(lambda: _filters_badge_text(user) == "1")
+    await user.should_not_see("Zulu role")
+
+
+def _filters_badge_text(user: User) -> str:
+    """Text of the active-filter badge on the Filters button ('' when hidden)."""
+    try:
+        badge = cast(ui.badge, user.find(marker="filters-badge").elements.pop())
+    except AssertionError:
+        return ""
+    return str(badge.text)
 
 
 async def test_tag_manager_adds_renames_and_deletes(user: User) -> None:
@@ -2605,33 +2891,33 @@ async def test_advanced_bar_collapsed_by_default(user: User) -> None:
     )
     await user.open("/")
 
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.value is False  # default view: search, sort, pagination only
+    drawer = cast(ui.left_drawer, user.find(marker="filters-drawer").elements.pop())
+    assert drawer.value is False  # default view: the filter panel is closed
     await user.should_see("High role")
     await user.should_see("Low role")
 
-    advanced.open()
-    assert advanced.value is True
+    await _open_filters(user)
+    assert drawer.value is True
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
 
     await user.should_see("High role")
     await user.should_not_see("Low role")
 
 
-async def test_advanced_bar_shows_active_count(user: User) -> None:
+async def test_filters_badge_shows_active_count(user: User) -> None:
     _tagged_pair()
     await user.open("/")
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.text == "Advanced filters"
+    await _open_filters(user)
+    assert _filters_badge_text(user) == ""
 
     cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value(["golang"])
-    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+    await _wait_for(lambda: _filters_badge_text(user) == "1")
 
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
-    await _wait_for(lambda: advanced.text == "Advanced filters (2 active)")
+    await _wait_for(lambda: _filters_badge_text(user) == "2")
 
     cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value([])
-    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+    await _wait_for(lambda: _filters_badge_text(user) == "1")
 
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(None)
-    await _wait_for(lambda: advanced.text == "Advanced filters")
+    await _wait_for(lambda: _filters_badge_text(user) == "")

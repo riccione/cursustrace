@@ -30,7 +30,7 @@ def _similar_notice_enabled() -> bool:
     return db.get_setting(SIMILAR_NOTICE_KEY, "on", user_id=current_user_id()) != "off"
 
 
-def _attention_banner_enabled() -> bool:
+def _attention_notice_enabled() -> bool:
     return db.get_setting(ATTENTION_NOTICE_KEY, "on", user_id=current_user_id()) != "off"
 
 

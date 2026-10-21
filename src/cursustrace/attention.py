@@ -105,7 +105,7 @@ def is_outdated(job: db.Job, thresholds: Thresholds, *, today: date | None = Non
     """Return True when an unapplied/applied position is stale enough to park.
 
     Parking is graduated: the position must have missed its own stage's
-    staleness threshold (so the attention banner has already warned about
+    staleness threshold (so the attention badge has already warned about
     it) *and* have aged past ``outdated_after_days``. Interview and rejected
     positions never park because the employer already replied, and an
     already-parked position never matches again.

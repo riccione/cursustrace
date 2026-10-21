@@ -9,6 +9,7 @@ from datetime import date, datetime
 from nicegui import ui
 
 from cursustrace import db, salary
+from cursustrace.web.attention_ui import attention_reasons, most_urgent
 from cursustrace.web.status_controls import (
     _render_comment_box,
     _render_delete_controls,
@@ -76,6 +77,9 @@ def _render_job_card(
                     chip.on_click(lambda tag=name: on_tag_click(tag))
     if job["profile_name"]:
         ui.chip(f"CV: {job['profile_name']}").mark("cv-used-chip")
+    reasons = attention_reasons(job)
+    if reasons:
+        ui.chip(f"⚠ {most_urgent(reasons)}").props("color=warning").mark("attention-chip")
     with ui.expansion(label).classes("w-full"):
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")

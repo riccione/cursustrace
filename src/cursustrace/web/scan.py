@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import Literal
 
-from nicegui import ui
+from nicegui import events, ui
 from nicegui.run import io_bound
 
 from cursustrace import db, scraper
@@ -129,3 +129,44 @@ async def _handle_scan(
 
     failed_urls = await run_scan(urls, refresh, status_label, button)
     urls_input.value = "\n".join(failed_urls) if failed_urls else ""
+
+
+def _add_job_dialog(refresh: Callable[[], None], add_dialog: ui.dialog) -> ui.dialog:
+    """Dialog with the ways to add a position: scan listing URLs or enter details."""
+    with ui.dialog() as dialog, ui.card().classes("w-full max-w-xl"):
+        dialog.mark("add-job-dialog")
+
+        def open_manual() -> None:
+            dialog.close()
+            add_dialog.open()
+
+        def reset() -> None:
+            """Clear the URL box and the status line when the dialog opens."""
+            urls_input.value = ""
+            status_label.set_text("")
+
+        def on_dialog_value_change(event: events.ValueChangeEventArguments[bool]) -> None:
+            if event.value:
+                reset()
+
+        ui.label("Add positions").classes("text-h6")
+        ui.label("Scan listing URLs, or enter the details yourself.").classes("text-caption")
+        urls_input = (
+            ui.textarea(
+                "Job URLs (one per line)",
+                placeholder="https://example.com/job/1\nhttps://example.com/job/2",
+            )
+            .classes("w-full")
+            .props('autogrow input-style="min-height: 80px"')
+            .mark("scan-urls")
+        )
+        with ui.row().classes("w-full items-center gap-3"):
+            scan_button = ui.button("Scan & Save Positions")
+            status_label = ui.label()
+        scan_button.on_click(lambda: _handle_scan(urls_input, refresh, status_label, scan_button))
+        ui.separator()
+        ui.button("➕ Add Manually", on_click=open_manual).props("flat color=primary").mark(
+            "add-manually"
+        )
+        dialog.on_value_change(on_dialog_value_change)
+    return dialog

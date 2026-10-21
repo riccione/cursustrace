@@ -32,10 +32,16 @@ options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
 
 ## Dashboard
 
-Paste one or more job listing URLs (one per line) and click
-`Scan & Save Positions`. Positions land in the `Unapplied` tab; move them
+The pipeline is the main view: positions land in the `Unapplied` tab and move
 through `Applied`, `Interview`, `Rejected`, and `Outdated` by ticking the
-matching stage checkbox on a card.
+matching stage checkbox on a card. The tab strip shows the three active
+stages — `Unapplied`, `Applied` and `Interview` — each with the number of
+positions it holds; the archival `Rejected` and `Outdated` stages live behind
+the `More` menu next to the tabs. Adding a position is a secondary action
+behind the `➕ Add Job` button above the tabs: it opens a panel where you can
+paste one or more job listing URLs (one per line) and click
+`Scan & Save Positions`, or switch to `➕ Add Manually` to type the details
+yourself.
 
 Prefer to start from a board rather than a specific URL? The `🔍 Discover` tab
 searches a job source for listing links and lets you pick which to add: enter a
@@ -43,6 +49,12 @@ full URL or a board name from `job-sources/` (with an optional keyword query and
 an `Only live` filter), click `Discover`, then tick the candidates you want and
 press `Add selected`. Listings you already track appear with their status and
 cannot be re-added.
+
+Narrowing the list takes one row: a `Search company` field next to a
+`Filters` button, which slides out a panel on the left holding the salary
+range, the tag filter, the sort order and the rows per page. The button
+carries a badge with the number of active filters, and the pagination sits
+below the list.
 
 Select `View full details` on a card to open the complete scraped description
 and metadata. The detail view has the same stage checkboxes, plus a
@@ -55,8 +67,9 @@ fuzzy company names across all pipeline stages at once, and each result
 shows its status, e.g. `[Applied]`.
 
 When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
-to enter a position's URL, title, company, description, and an optional
-application deadline, and edit those fields from the position's detail page.
+in the `➕ Add Job` panel to enter a position's URL, title, company, description,
+and an optional application deadline; the same fields can be edited later from
+the position's detail page.
 The add and edit forms always open on a clean slate: a new position starts
 empty, and an edit starts from the saved values, so a cancelled change never
 leaks into the next opening.
@@ -68,20 +81,24 @@ Each dashboard and detail page ends with a `↑ Go up` button that scrolls back
 to the top. Every page also carries a footer at the bottom of the page (below
 the content) showing the app name and version, e.g. `CursusTrace v0.1.0`.
 
-The dashboard opens with a needs-attention banner whenever any position is
-stale or has an imminent deadline. A position qualifies when:
+The dashboard flags positions that need attention with a badge on the
+`⏳ Unapplied` and `✅ Applied` tabs, each counting the flagged positions of
+that stage. A position qualifies when:
 
 - it is applied with no response for `stale_applied_days` (default `21`);
 - it is unapplied and untouched for `stale_unapplied_days` (default `10`);
 - its deadline falls within `deadline_warning_days` (default `7`), and
   already-overdue deadlines count too.
 
-Entries with deadlines come first (soonest or most overdue first), then the
-longest-silent stages. Each entry links to its position with the reason, and
-the banner clears as soon as positions move on. Turn it off under the settings
-drawer's Notifications section; the choice persists.
+Only unapplied and applied positions can qualify: once an employer responds
+the staleness clocks stop, and a deadline no longer matters after the pipeline
+moves on. Flagged positions are listed first in their tab and carry a
+`⚠ <reason>` chip next to their title (an imminent deadline wins over
+staleness), and the detail page repeats the reason. Everything clears as soon
+as positions move on. Turn the highlights off under the settings drawer's
+Notifications section; the choice persists.
 
-The banner only ever shows positions you can still act on. Once a stale
+The badges only count positions you can still act on. Once a stale
 position has also been silent past `outdated_after_days` (default `30`), the
 next refresh parks it in the `Outdated` tab. Parking happens once per
 position: tick `Applied`, `Interview`, or `Rejected` and it stays back in the
@@ -233,7 +250,7 @@ proxy with basic auth, …) in front of it or keep registration in mind.
 What is isolated per account:
 
 - Positions (jobs), tags, CV profiles, and dashboard settings
-  (dark mode, banner toggles, selected profile).
+  (dark mode, notification toggles, selected profile).
 - History events follow their position, so they inherit the isolation.
 
 What is shared or global:

@@ -18,6 +18,10 @@ STATUS_TABS: tuple[tuple[db.JobStatus, str, str], ...] = (
     ("outdated", "🗄️ Outdated Positions", "No outdated positions yet."),
 )
 
+# Stages shown as tabs; the remaining ones live behind the "More" menu.
+PRIMARY_STATUSES: tuple[db.JobStatus, ...] = ("unapplied", "applied", "interview")
+SECONDARY_STATUSES: tuple[db.JobStatus, ...] = ("rejected", "outdated")
+
 STATUS_CHECKBOXES: tuple[tuple[db.JobFlag | Literal["outdated"], str], ...] = (
     ("applied", "Applied"),
     ("interview", "Interview"),

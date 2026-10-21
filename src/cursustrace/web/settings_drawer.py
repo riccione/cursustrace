@@ -14,7 +14,7 @@ from cursustrace.web.state import (
     DARK_MODE_KEY,
     DARK_MODE_OPTIONS,
     SIMILAR_NOTICE_KEY,
-    _attention_banner_enabled,
+    _attention_notice_enabled,
     _dark_mode_name,
     _dark_mode_value,
     _similar_notice_enabled,
@@ -47,9 +47,9 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     similar_toggle.on_value_change(update_similar)
 
     attention_toggle = (
-        ui.switch("Show needs-attention banner", value=_attention_banner_enabled())
+        ui.switch("Show needs-attention highlights", value=_attention_notice_enabled())
         .classes("w-full")
-        .mark("attention-banner-toggle")
+        .mark("attention-badge-toggle")
     )
 
     def update_attention(event: events.ValueChangeEventArguments[bool | None]) -> None:
