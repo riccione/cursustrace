@@ -8,7 +8,7 @@ from nicegui import events, ui
 from starlette.requests import Request
 
 from cursustrace import db, salary
-from cursustrace.web.attention_ui import _park_stale_positions, _render_attention_banner
+from cursustrace.web.attention_ui import _park_stale_positions, attention_counts
 from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
 from cursustrace.web.constants import APP_TITLE, STATUS_TABS
 from cursustrace.web.discover import _render_discover
@@ -29,7 +29,7 @@ def dashboard_page(request: Request) -> None:
     containers: dict[db.JobStatus, ui.column] = {}
     stats_container: ui.column | None = None
     results_container: ui.column | None = None
-    attention_container: ui.column | None = None
+    attention_badges: dict[db.JobStatus, ui.badge] = {}
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
     advanced_bar: ui.expansion | None = None
@@ -174,8 +174,11 @@ def dashboard_page(request: Request) -> None:
             stats_container.clear()
             with stats_container:
                 _render_statistics(dark.value is True)
-        if attention_container is not None:
-            _render_attention_banner(attention_container)
+        counts = attention_counts()
+        for status, badge in attention_badges.items():
+            count = counts.get(status, 0)
+            badge.set_text(str(count))
+            badge.set_visibility(count > 0)
 
     with ui.header().classes("items-center flex-nowrap"):
         ui.label(APP_TITLE).classes("text-h6 flex-1 truncate min-w-0")
@@ -222,7 +225,6 @@ def dashboard_page(request: Request) -> None:
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
-                attention_container = ui.column().classes("w-full")
                 search_input = (
                     ui.input("Search company", placeholder="e.g. Adapty")
                     .props("clearable debounce=300")
@@ -356,7 +358,12 @@ def dashboard_page(request: Request) -> None:
                 pagination.on_value_change(on_page_change)
                 with ui.tabs().classes("w-full") as status_tabs:
                     for status, label, _message in STATUS_TABS:
-                        ui.tab(status, label=label)
+                        tab = ui.tab(status, label=label)
+                        with tab:
+                            badge = ui.badge("").props("color=negative")
+                            badge.set_visibility(False)
+                            badge.mark(f"attention-badge-{status}")
+                            attention_badges[status] = badge
                 with ui.tab_panels(status_tabs, value="unapplied").classes(
                     "w-full"
                 ) as status_panels:

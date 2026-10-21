@@ -16,7 +16,7 @@ from nicegui import ui
 from nicegui.testing import User
 from pypdf import PdfReader
 
-from cursustrace import app, attention, backup, config, db, logsetup, scraper
+from cursustrace import app, backup, config, db, logsetup, scraper
 from cursustrace.errors import ScrapeError
 from cursustrace.version import app_version
 from cursustrace.web import (
@@ -853,17 +853,36 @@ async def test_card_hides_deadline_when_unset(user: User) -> None:
     await user.should_not_see(marker="deadline")
 
 
-async def test_banner_shows_stale_unapplied_position(user: User) -> None:
+def _attention_badge_text(user: User, status: str) -> str:
+    """Text of the visible attention badge of a pipeline tab ('' when it is hidden)."""
+    try:
+        badge = cast(ui.badge, user.find(marker=f"attention-badge-{status}").elements.pop())
+    except AssertionError:
+        return ""
+    return str(badge.text)
+
+
+async def test_badge_shows_stale_unapplied_position(user: User) -> None:
     _seed_stale_job(15)
 
     await user.open("/")
 
-    await user.should_see("1 position needs attention")
-    await user.should_see("added 15 days ago, not applied")
-    assert user.find(marker="attention-item").elements
+    assert _attention_badge_text(user, "unapplied") == "1"
+    assert _attention_badge_text(user, "applied") == ""
+    badge = cast(ui.badge, user.find(marker="attention-badge-unapplied").elements.pop())
+    assert any(isinstance(ancestor, ui.tab) for ancestor in badge.ancestors())
 
 
-async def test_banner_shows_imminent_deadline(user: User) -> None:
+async def test_badge_shows_stale_applied_position(user: User) -> None:
+    _seed_stale_applied_job(25)
+
+    await user.open("/")
+
+    assert _attention_badge_text(user, "applied") == "1"
+    assert _attention_badge_text(user, "unapplied") == ""
+
+
+async def test_badge_shows_imminent_deadline(user: User) -> None:
     db.init_db()
     now = time.localtime()
     in_three_days = date(now.tm_year, now.tm_mon, now.tm_mday) + timedelta(days=3)
@@ -878,41 +897,41 @@ async def test_banner_shows_imminent_deadline(user: User) -> None:
 
     await user.open("/")
 
-    await user.should_see("deadline in 3 days")
-    assert user.find(marker="attention-item").elements
+    assert _attention_badge_text(user, "unapplied") == "1"
 
 
-async def test_banner_hidden_when_nothing_needs_attention(user: User) -> None:
+async def test_no_badge_when_nothing_needs_attention(user: User) -> None:
     _seed_job()
 
     await user.open("/")
 
-    await user.should_not_see(marker="attention-banner")
+    assert _attention_badge_text(user, "unapplied") == ""
+    assert _attention_badge_text(user, "applied") == ""
 
 
-async def test_banner_clears_after_marking_applied(user: User) -> None:
+async def test_badge_clears_after_marking_applied(user: User) -> None:
     _seed_stale_job(15)
     await user.open("/")
-    await user.should_see("added 15 days ago, not applied")
+    assert _attention_badge_text(user, "unapplied") == "1"
 
     user.find(kind=ui.checkbox, content="Applied").click()
 
-    await user.should_not_see(marker="attention-banner")
+    await _wait_for(lambda: _attention_badge_text(user, "unapplied") == "")
 
 
-async def test_banner_toggle_hides_and_persists(user: User) -> None:
+async def test_badge_toggle_hides_and_persists(user: User) -> None:
     _seed_stale_job(15)
     await user.open("/")
-    await user.should_see(marker="attention-banner")
+    assert _attention_badge_text(user, "unapplied") == "1"
 
     user.find(marker="settings-button").click()
-    user.find(marker="attention-banner-toggle").click()
+    user.find(marker="attention-badge-toggle").click()
 
-    await user.should_not_see(marker="attention-banner")
+    await _wait_for(lambda: _attention_badge_text(user, "unapplied") == "")
     assert db.get_setting("attention_notice") == "off"
 
     await user.open("/")
-    await user.should_not_see(marker="attention-banner")
+    assert _attention_badge_text(user, "unapplied") == ""
 
 
 def _seed_stale_applied_job(days: int) -> int:
@@ -927,12 +946,12 @@ def _seed_stale_applied_job(days: int) -> int:
     return job_id
 
 
-async def test_banner_warns_before_parking(user: User) -> None:
+async def test_badge_warns_before_parking(user: User) -> None:
     _seed_stale_applied_job(25)
 
     await user.open("/")
 
-    await user.should_see("1 position needs attention")
+    assert _attention_badge_text(user, "applied") == "1"
     assert db.get_jobs()[0]["outdated"] == 0
     assert db.job_status(db.get_jobs()[0]) == "applied"
 
@@ -944,7 +963,7 @@ async def test_auto_parks_stale_applied_position(user: User) -> None:
 
     await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
     assert db.job_status(db.get_jobs()[0]) == "outdated"
-    await user.should_not_see(marker="attention-banner")
+    assert _attention_badge_text(user, "applied") == ""
 
 
 async def test_manual_restore_wins_over_parking(user: User) -> None:
@@ -1728,36 +1747,22 @@ def test_deadline_text_relative_phrases() -> None:
     assert job_card._deadline_text("2026-10-06", today) == "— passed 2 days ago"
 
 
-def test_attention_items_orders_deadlines_before_staleness() -> None:
-    today = date(2026, 10, 8)
-    thresholds = attention.Thresholds(21, 10, 7)
+async def test_attention_counts_are_per_stage(user: User) -> None:
+    _seed_stale_job(15)
+    db.init_db()
+    applied_id = db.add_job("https://example.com/quiet-lead", "Silent Lead", "Acme", "Remote", "B")
+    assert applied_id is not None
+    db.set_job_status(applied_id, "applied")
+    with db.get_connection() as conn:
+        conn.execute(
+            "UPDATE jobs SET date_applied = ? WHERE id = ?",
+            (_days_ago_stamp(25), applied_id),
+        )
+    await user.open("/")
 
-    def entry(job_id: int, **overrides: object) -> db.Job:
-        row: dict[str, object] = {
-            "id": job_id,
-            "applied": 0,
-            "interview": 0,
-            "rejected": 0,
-            "outdated": 0,
-            "date_added": "2026-10-01 09:00:00",
-            "date_applied": None,
-            "date_interview": None,
-            "date_rejected": None,
-            "deadline": None,
-        }
-        row.update(overrides)
-        return cast(db.Job, row)
+    counts = attention_ui.attention_counts()
 
-    stale_older = entry(1, date_added="2020-01-01 09:00:00")
-    stale_newer = entry(2, date_added="2025-06-01 09:00:00")
-    dated_soon = entry(3, deadline="2026-10-10")
-    dated_later = entry(4, deadline="2026-10-14")
-
-    items = attention_ui._attention_items(
-        [stale_newer, dated_later, stale_older, dated_soon], thresholds, today=today
-    )
-
-    assert [job["id"] for job, _reasons in items] == [3, 4, 1, 2]
+    assert counts == {"unapplied": 1, "applied": 1}
 
 
 async def test_card_shows_days_since_applied(user: User) -> None:
