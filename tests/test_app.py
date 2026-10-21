@@ -56,6 +56,14 @@ async def _open_filters(user: User) -> None:
     await asyncio.sleep(0.1)
 
 
+async def _show_secondary_stage(user: User, status: str) -> None:
+    """Open the More menu and show a secondary stage's list."""
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker=f"more-stage-{status}").click()
+    await asyncio.sleep(0.2)
+
+
 async def _open_manual_add(user: User) -> None:
     """Open the Add Job panel and switch to the manual entry form."""
     await _open_add_job(user)
@@ -455,6 +463,7 @@ async def test_unchecking_rejected_returns_to_unapplied(user: User) -> None:
     user.find(kind=ui.checkbox, content="Rejected").click()
     await _wait_for(lambda: db.get_jobs()[0]["rejected"] == 1)
 
+    await _show_secondary_stage(user, "rejected")
     user.find(kind=ui.checkbox, content="Rejected").click()
     await _wait_for(
         lambda: (
@@ -514,6 +523,7 @@ async def test_checkbox_states_rejected_from_applied(user: User) -> None:
     db.set_job_status(job_id, "applied")
     db.set_job_status(job_id, "rejected")
     await user.open("/")
+    await _show_secondary_stage(user, "rejected")
 
     assert _checkbox(user, "Applied").enabled is False
     assert _checkbox(user, "Applied").value is True
@@ -529,6 +539,7 @@ async def test_checkbox_states_rejected_from_interview(user: User) -> None:
     db.set_job_status(job_id, "interview")
     db.set_job_status(job_id, "rejected")
     await user.open("/")
+    await _show_secondary_stage(user, "rejected")
 
     assert _checkbox(user, "Applied").enabled is False
     assert _checkbox(user, "Applied").value is True
@@ -542,6 +553,7 @@ async def test_checkbox_states_outdated(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "outdated")
     await user.open("/")
+    await _show_secondary_stage(user, "outdated")
 
     assert _checkbox(user, "Outdated").enabled is False
     assert _checkbox(user, "Outdated").value is True
@@ -560,6 +572,7 @@ async def test_outdated_checkbox_parks_position(user: User) -> None:
 
     assert db.job_status(db.get_jobs()[0]) == "outdated"
     await user.should_see("No unapplied positions yet.")
+    await _show_secondary_stage(user, "outdated")
     assert _checkbox(user, "Outdated").value is True
 
 
@@ -568,6 +581,7 @@ async def test_applied_checkbox_restores_parked_position(user: User) -> None:
     db.set_job_status(job_id, "applied")
     db.set_job_status(job_id, "outdated")
     await user.open("/")
+    await _show_secondary_stage(user, "outdated")
 
     user.find(kind=ui.checkbox, content="Applied").click()
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
@@ -1059,6 +1073,7 @@ async def test_manual_restore_wins_over_parking(user: User) -> None:
 
     await user.open("/")
     await _wait_for(lambda: db.get_jobs()[0]["outdated"] == 1)
+    await _show_secondary_stage(user, "outdated")
 
     user.find(kind=ui.checkbox, content="Applied").click()
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
@@ -1278,8 +1293,71 @@ async def test_dashboard_lists_status_tabs(user: User) -> None:
     await user.should_see("No unapplied positions yet.")
     await user.should_see("No applied positions yet.")
     await user.should_see("No interview positions yet.")
-    await user.should_see("No rejected positions yet.")
-    await user.should_see("No outdated positions yet.")
+    await user.should_not_see("No rejected positions yet.")
+    await user.should_not_see("No outdated positions yet.")
+
+
+async def test_more_menu_shows_secondary_stage(user: User) -> None:
+    db.init_db()
+    job_id = db.add_job("https://a.com/1", "Gone role", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "rejected")
+    await user.open("/")
+
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="more-stage-rejected").click()
+    await asyncio.sleep(0.2)
+
+    view = cast(ui.column, user.find(marker="secondary-view-rejected").elements.pop())
+    assert view.visible
+    await user.should_see("Gone role")
+
+
+async def test_more_menu_secondary_stage_has_its_own_pagination(user: User) -> None:
+    db.init_db()
+    for index in range(3):
+        job_id = db.add_job(f"https://a.com/{index}", f"Old role {index}", "Acme", "Remote", "B")
+        assert job_id is not None
+        db.set_job_status(job_id, "outdated")
+    await user.open("/")
+
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="more-stage-outdated").click()
+    await asyncio.sleep(0.2)
+
+    await user.should_see("Showing 1-3 of 3")
+    await user.should_see("Old role 0")
+
+
+async def test_primary_tabs_show_position_counts(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Fresh role", "Acme", "Remote", "Body")
+    await user.open("/")
+
+    tab = cast(ui.tab, user.find(marker="status-tab-unapplied").elements.pop())
+    assert tab.props["label"] == "⏳ Unapplied Positions (1)"
+
+
+async def test_clicking_a_primary_tab_leaves_the_secondary_view(user: User) -> None:
+    db.init_db()
+    job_id = db.add_job("https://a.com/1", "Gone role", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "rejected")
+    await user.open("/")
+
+    user.find(marker="more-stages").click()
+    await asyncio.sleep(0.1)
+    user.find(marker="more-stage-rejected").click()
+    await asyncio.sleep(0.2)
+    await user.should_see(marker="secondary-view-rejected")
+
+    user.find(marker="status-tab-unapplied").click()
+    await asyncio.sleep(0.2)
+
+    await user.should_not_see(marker="secondary-view-rejected")
+    await user.should_see("No unapplied positions yet.")
 
 
 async def test_dashboard_shows_parked_position(user: User) -> None:

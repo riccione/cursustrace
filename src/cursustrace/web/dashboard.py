@@ -10,7 +10,7 @@ from starlette.requests import Request
 from cursustrace import db, salary
 from cursustrace.web.attention_ui import _park_stale_positions, attention_counts, attention_first
 from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
-from cursustrace.web.constants import APP_TITLE, STATUS_TABS
+from cursustrace.web.constants import APP_TITLE, PRIMARY_STATUSES, SECONDARY_STATUSES, STATUS_TABS
 from cursustrace.web.discover import _render_discover
 from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
@@ -23,6 +23,11 @@ from cursustrace.web.state import _apply_dark_mode
 from cursustrace.web.statistics import _render_statistics
 
 
+def _stage_label(status: db.JobStatus) -> str:
+    """Label of a pipeline stage, e.g. '✅ Applied Positions'."""
+    return next(label for stage, label, _message in STATUS_TABS if stage == status)
+
+
 def dashboard_page(request: Request) -> None:
     ui.page_title(APP_TITLE)
     dark = _apply_dark_mode()
@@ -30,6 +35,10 @@ def dashboard_page(request: Request) -> None:
     stats_container: ui.column | None = None
     results_container: ui.column | None = None
     attention_badges: dict[db.JobStatus, ui.badge] = {}
+    status_tab_elements: dict[db.JobStatus, ui.tab] = {}
+    secondary_views: dict[db.JobStatus, ui.column] = {}
+    more_container: ui.column | None = None
+    more_button: ui.button | None = None
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
     tag_filter_select: ui.select | None = None
@@ -45,6 +54,7 @@ def dashboard_page(request: Request) -> None:
     sort_order: db.JobSort = "newest"
     page_size = 25
     pages: dict[str, int] = {}
+    more_status: db.JobStatus | None = None
     requested_tag = (request.query_params.get("tag") or "").strip()
     canonical_tag = next(
         (
@@ -59,6 +69,8 @@ def dashboard_page(request: Request) -> None:
     def active_context() -> str:
         if query:
             return "search"
+        if more_status is not None:
+            return more_status
         value = status_tabs.value if status_tabs is not None else None
         return value if isinstance(value, str) else "unapplied"
 
@@ -99,6 +111,27 @@ def dashboard_page(request: Request) -> None:
                 )
         return (page_count, page, len(jobs))
 
+    def select_secondary(status: db.JobStatus) -> None:
+        """Show a stage that lives behind the More menu."""
+        nonlocal more_status
+        more_status = status
+        refresh()
+
+    def show_primary() -> None:
+        """Return to the primary stage tabs."""
+        nonlocal more_status
+        more_status = None
+        refresh()
+
+    def on_primary_tab_click() -> None:
+        """Leave the secondary view when a primary tab is clicked."""
+        nonlocal more_status
+        if more_status is None:
+            # A normal tab switch; the value change handler refreshes the list.
+            return
+        more_status = None
+        refresh()
+
     def refresh() -> None:
         _park_stale_positions()
         if tag_filter_select is not None:
@@ -112,10 +145,20 @@ def dashboard_page(request: Request) -> None:
                 return
             tag_filter_select.update()
         searching = bool(query)
+        show_panels = not searching and more_status is None
         if status_tabs is not None:
             status_tabs.set_visibility(not searching)
         if status_panels is not None:
-            status_panels.set_visibility(not searching)
+            status_panels.set_visibility(show_panels)
+        if more_container is not None:
+            more_container.set_visibility(not searching and more_status is not None)
+        for status, view in secondary_views.items():
+            view.set_visibility(status == more_status)
+        if more_button is not None:
+            more_button.set_text("More" if more_status is None else _stage_label(more_status))
+        stage_counts = db.job_counts(user_id=current_user_id())
+        for status, tab in status_tab_elements.items():
+            tab.props["label"] = f"{_stage_label(status)} ({stage_counts.get(status, 0)})"
         active = active_filter_count()
         if filters_badge is not None:
             filters_badge.set_text(str(active))
@@ -361,19 +404,51 @@ def dashboard_page(request: Request) -> None:
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
-                with ui.tabs().classes("w-full") as status_tabs:
-                    for status, label, _message in STATUS_TABS:
-                        tab = ui.tab(status, label=label)
-                        with tab:
-                            badge = ui.badge("").props("color=negative")
-                            badge.set_visibility(False)
-                            badge.mark(f"attention-badge-{status}")
-                            attention_badges[status] = badge
+                with ui.row().classes("w-full items-center gap-2"):
+                    with ui.tabs().classes("flex-1 min-w-0") as status_tabs:
+                        for status, label, _message in STATUS_TABS:
+                            if status not in PRIMARY_STATUSES:
+                                continue
+                            tab = ui.tab(status, label=label)
+                            tab.mark(f"status-tab-{status}")
+                            tab.on("click", on_primary_tab_click)
+                            status_tab_elements[status] = tab
+                            with tab:
+                                badge = ui.badge("").props("color=negative")
+                                badge.set_visibility(False)
+                                badge.mark(f"attention-badge-{status}")
+                                attention_badges[status] = badge
+                    more_menu = ui.menu()
+                    with more_menu:
+                        for status, label, _message in STATUS_TABS:
+                            if status in SECONDARY_STATUSES:
+                                item = ui.item(label, on_click=lambda s=status: select_secondary(s))
+                                item.mark(f"more-stage-{status}")
+                    more_button = (
+                        ui.button("More", icon="more_horiz")
+                        .props("flat")
+                        .mark("more-stages")
+                        .on_click(more_menu.open)
+                    )
                 with ui.tab_panels(status_tabs, value="unapplied").classes(
                     "w-full"
                 ) as status_panels:
                     for status, _label, _message in STATUS_TABS:
+                        if status not in PRIMARY_STATUSES:
+                            continue
                         with ui.tab_panel(status):
+                            containers[status] = ui.column().classes("w-full")
+                with ui.column().classes("w-full") as more_container:
+                    more_container.set_visibility(False)
+                    more_container.mark("secondary-view")
+                    for status, label, _message in STATUS_TABS:
+                        if status not in SECONDARY_STATUSES:
+                            continue
+                        with ui.column().classes("w-full gap-2") as view:
+                            view.set_visibility(False)
+                            view.mark(f"secondary-view-{status}")
+                            secondary_views[status] = view
+                            ui.label(label).classes("text-h6")
                             containers[status] = ui.column().classes("w-full")
                 results_container = ui.column().classes("w-full")
                 with ui.row().classes("w-full items-center gap-3"):
@@ -382,7 +457,7 @@ def dashboard_page(request: Request) -> None:
                     )
                     page_label = ui.label().mark("page-info")
                 pagination.on_value_change(on_page_change)
-                status_tabs.on_value_change(lambda _: refresh())
+                status_tabs.on_value_change(lambda _: show_primary())
             with ui.tab_panel(stats_tab):
                 stats_container = ui.column().classes("w-full")
             with ui.tab_panel(profile_tab):
