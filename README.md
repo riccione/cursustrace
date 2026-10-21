@@ -47,6 +47,12 @@ an `Only live` filter), click `Discover`, then tick the candidates you want and
 press `Add selected`. Listings you already track appear with their status and
 cannot be re-added.
 
+Narrowing the list takes one row: a `Search company` field next to a
+`Filters` button, which slides out a panel on the left holding the salary
+range, the tag filter, the sort order and the rows per page. The button
+carries a badge with the number of active filters, and the pagination sits
+below the list.
+
 Select `View full details` on a card to open the complete scraped description
 and metadata. The detail view has the same stage checkboxes, plus a
 `Your profile` section: the `CV used for this application` dropdown records
