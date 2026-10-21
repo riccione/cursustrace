@@ -11,6 +11,30 @@ def _job_label(job: db.Job) -> str:
     return f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}"
 
 
+def attention_reasons(job: db.Job) -> list[str]:
+    """Reasons this position needs attention; empty when it is fine or disabled."""
+    if not _attention_notice_enabled():
+        return []
+    return attention.reasons_for(job, _attention_thresholds())
+
+
+def most_urgent(reasons: list[str]) -> str:
+    """Return the most pressing reason, preferring an imminent deadline."""
+    for reason in reasons:
+        if reason.startswith("deadline"):
+            return reason
+    return reasons[0]
+
+
+def attention_first(jobs: list[db.Job]) -> list[db.Job]:
+    """Put the positions needing attention first, keeping the order of each group."""
+    flagged: list[db.Job] = []
+    rest: list[db.Job] = []
+    for job in jobs:
+        (flagged if attention_reasons(job) else rest).append(job)
+    return flagged + rest
+
+
 def attention_counts() -> dict[db.JobStatus, int]:
     """Count the positions needing attention in each pipeline stage.
 

@@ -47,7 +47,7 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     similar_toggle.on_value_change(update_similar)
 
     attention_toggle = (
-        ui.switch("Show needs-attention badges", value=_attention_notice_enabled())
+        ui.switch("Show needs-attention highlights", value=_attention_notice_enabled())
         .classes("w-full")
         .mark("attention-badge-toggle")
     )

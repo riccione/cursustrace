@@ -8,7 +8,7 @@ from nicegui import events, ui
 from starlette.requests import Request
 
 from cursustrace import db, salary
-from cursustrace.web.attention_ui import _park_stale_positions, attention_counts
+from cursustrace.web.attention_ui import _park_stale_positions, attention_counts, attention_first
 from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
 from cursustrace.web.constants import APP_TITLE, STATUS_TABS
 from cursustrace.web.discover import _render_discover
@@ -75,6 +75,7 @@ def dashboard_page(request: Request) -> None:
             if not jobs:
                 ui.label(empty_message)
                 return (1, 1, 0)
+            jobs = attention_first(jobs)
             if page_size > 0:
                 page_count = (len(jobs) + page_size - 1) // page_size
                 page = min(pages.get(context, 1), page_count)

@@ -7,6 +7,7 @@ from urllib.parse import quote
 from nicegui import ui
 
 from cursustrace import db, salary
+from cursustrace.web.attention_ui import attention_reasons
 from cursustrace.web.constants import APP_TITLE, STATUS_CHECKBOXES
 from cursustrace.web.dialogs import _confirm_delete_dialog, _delete_job_from_detail
 from cursustrace.web.job_card import _deadline_text
@@ -50,6 +51,11 @@ def job_detail_page(job_id: int) -> None:
                     "deadline"
                 )
             ui.markdown(f"**Status:** {current.title()}")
+            reasons = attention_reasons(job)
+            if reasons:
+                ui.label(f"⚠ Needs attention: {'; '.join(reasons)}").classes("text-negative").mark(
+                    "attention-detail"
+                )
             _render_status_controls(job, current, refresh_detail)
             detail_tags = db.job_tags(job["id"])
             if detail_tags:

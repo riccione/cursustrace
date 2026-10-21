@@ -862,6 +862,15 @@ def _attention_badge_text(user: User, status: str) -> str:
     return str(badge.text)
 
 
+def _attention_chip_text(user: User) -> str:
+    """Text of the visible attention chip on a card ('' when there is none)."""
+    try:
+        chip = cast(ui.chip, user.find(marker="attention-chip").elements.pop())
+    except AssertionError:
+        return ""
+    return str(chip.text)
+
+
 async def test_badge_shows_stale_unapplied_position(user: User) -> None:
     _seed_stale_job(15)
 
@@ -880,6 +889,79 @@ async def test_badge_shows_stale_applied_position(user: User) -> None:
 
     assert _attention_badge_text(user, "applied") == "1"
     assert _attention_badge_text(user, "unapplied") == ""
+
+
+async def test_card_shows_attention_chip(user: User) -> None:
+    _seed_stale_applied_job(25)
+
+    await user.open("/")
+
+    assert _attention_chip_text(user) == "⚠ no response in 25 days"
+
+
+async def test_card_hides_attention_chip_for_healthy_position(user: User) -> None:
+    _seed_job()
+
+    await user.open("/")
+
+    assert _attention_chip_text(user) == ""
+
+
+async def test_attention_chip_prefers_the_deadline_reason(user: User) -> None:
+    db.init_db()
+    job_id = db.add_job("https://example.com/dated", "Dated Lead", "Acme", "Remote", "Body")
+    assert job_id is not None
+    db.set_job_status(job_id, "applied")
+    now = time.localtime()
+    in_three_days = date(now.tm_year, now.tm_mon, now.tm_mday) + timedelta(days=3)
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET date_applied = ? WHERE id = ?", (_days_ago_stamp(25), job_id))
+        conn.execute(
+            "UPDATE jobs SET deadline = ? WHERE id = ?", (in_three_days.isoformat(), job_id)
+        )
+
+    await user.open("/")
+
+    assert _attention_chip_text(user) == "⚠ deadline in 3 days"
+
+
+async def test_flagged_positions_are_listed_first(user: User) -> None:
+    db.init_db()
+    stale = db.add_job("https://example.com/stale", "Stale Lead", "Acme", "Remote", "Body")
+    assert stale is not None
+    db.set_job_status(stale, "applied")
+    with db.get_connection() as conn:
+        conn.execute("UPDATE jobs SET date_applied = ? WHERE id = ?", (_days_ago_stamp(25), stale))
+    fresh = db.add_job("https://example.com/fresh", "Fresh Lead", "Acme", "Remote", "Body")
+    assert fresh is not None
+    db.set_job_status(fresh, "applied")
+
+    await user.open("/")
+
+    ordered = attention_ui.attention_first(db.get_jobs())
+    assert [job["title"] for job in ordered] == ["Stale Lead", "Fresh Lead"]
+    labels = {element.text for element in user.find(kind=ui.expansion).elements}
+    assert "Stale Lead — Acme" in labels
+    assert "Fresh Lead — Acme" in labels
+
+
+async def test_detail_shows_attention_reason(user: User) -> None:
+    job_id = _seed_stale_applied_job(25)
+
+    await user.open(f"/job/{job_id}")
+
+    await user.should_see("Needs attention: no response in 25 days")
+
+
+async def test_attention_toggle_hides_the_card_chip(user: User) -> None:
+    _seed_stale_applied_job(25)
+    await user.open("/")
+    assert _attention_chip_text(user) != ""
+
+    user.find(marker="settings-button").click()
+    user.find(marker="attention-badge-toggle").click()
+
+    await _wait_for(lambda: _attention_chip_text(user) == "")
 
 
 async def test_badge_shows_imminent_deadline(user: User) -> None:
