@@ -1302,8 +1302,12 @@ async def test_more_menu_is_anchored_to_the_button(user: User) -> None:
 
     button = cast(ui.button, user.find(marker="more-stages").elements.pop())
     menu = cast(ui.menu, user.find(marker="more-menu").elements.pop())
+    item = user.find(marker="more-stage-rejected").elements.pop()
 
-    assert button.props["menu"] == menu.props["id"]
+    # Quasar anchors a menu to its DOM parent, so the button has to be that parent.
+    assert any(ancestor.id == button.id for ancestor in menu.ancestors())
+    # The entries have to live inside the menu, not next to it in the button.
+    assert any(ancestor.id == menu.id for ancestor in item.ancestors())
     assert menu.props["auto-close"] is True
 
 

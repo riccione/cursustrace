@@ -421,18 +421,21 @@ def dashboard_page(request: Request) -> None:
                                 badge.set_visibility(False)
                                 badge.mark(f"attention-badge-{status}")
                                 attention_badges[status] = badge
-                    more_menu = ui.menu().props("id=more-stages-menu auto-close")
-                    more_menu.mark("more-menu")
-                    with more_menu:
-                        for status, label, _message in STATUS_TABS:
-                            if status in SECONDARY_STATUSES:
-                                item = ui.item(label, on_click=lambda s=status: select_secondary(s))
-                                item.mark(f"more-stage-{status}")
                     more_button = (
-                        ui.button("More", icon="more_horiz")
-                        .props("flat menu=more-stages-menu")
-                        .mark("more-stages")
+                        ui.button("More", icon="more_horiz").props("flat").mark("more-stages")
                     )
+                    with more_button:
+                        # The menu must live inside its trigger: Quasar opens a QMenu
+                        # when its parent is clicked and anchors it to that parent.
+                        more_menu = ui.menu().props("auto-close")
+                        more_menu.mark("more-menu")
+                        with more_menu:
+                            for status, label, _message in STATUS_TABS:
+                                if status in SECONDARY_STATUSES:
+                                    item = ui.item(
+                                        label, on_click=lambda s=status: select_secondary(s)
+                                    )
+                                    item.mark(f"more-stage-{status}")
                 with ui.tab_panels(status_tabs, value="unapplied").classes(
                     "w-full"
                 ) as status_panels:
