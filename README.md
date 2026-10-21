@@ -72,20 +72,21 @@ Each dashboard and detail page ends with a `↑ Go up` button that scrolls back
 to the top. Every page also carries a footer at the bottom of the page (below
 the content) showing the app name and version, e.g. `CursusTrace v0.1.0`.
 
-The dashboard opens with a needs-attention banner whenever any position is
-stale or has an imminent deadline. A position qualifies when:
+The dashboard flags positions that need attention with a badge on the
+`⏳ Unapplied` and `✅ Applied` tabs, each counting the flagged positions of
+that stage. A position qualifies when:
 
 - it is applied with no response for `stale_applied_days` (default `21`);
 - it is unapplied and untouched for `stale_unapplied_days` (default `10`);
 - its deadline falls within `deadline_warning_days` (default `7`), and
   already-overdue deadlines count too.
 
-Entries with deadlines come first (soonest or most overdue first), then the
-longest-silent stages. Each entry links to its position with the reason, and
-the banner clears as soon as positions move on. Turn it off under the settings
-drawer's Notifications section; the choice persists.
+Only unapplied and applied positions can qualify: once an employer responds
+the staleness clocks stop, and a deadline no longer matters after the pipeline
+moves on. The badges clear as soon as positions move on. Turn them off under
+the settings drawer's Notifications section; the choice persists.
 
-The banner only ever shows positions you can still act on. Once a stale
+The badges only count positions you can still act on. Once a stale
 position has also been silent past `outdated_after_days` (default `30`), the
 next refresh parks it in the `Outdated` tab. Parking happens once per
 position: tick `Applied`, `Interview`, or `Rejected` and it stays back in the
@@ -237,7 +238,7 @@ proxy with basic auth, …) in front of it or keep registration in mind.
 What is isolated per account:
 
 - Positions (jobs), tags, CV profiles, and dashboard settings
-  (dark mode, banner toggles, selected profile).
+  (dark mode, notification toggles, selected profile).
 - History events follow their position, so they inherit the isolation.
 
 What is shared or global:
