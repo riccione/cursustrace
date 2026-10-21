@@ -32,11 +32,12 @@ def dashboard_page(request: Request) -> None:
     attention_badges: dict[db.JobStatus, ui.badge] = {}
     status_tabs: ui.tabs | None = None
     status_panels: ui.tab_panels | None = None
-    advanced_bar: ui.expansion | None = None
     tag_filter_select: ui.select | None = None
     sort_select: ui.select | None = None
+    page_size_select: ui.select | None = None
     pagination: ui.pagination | None = None
     page_label: ui.label | None = None
+    filters_badge: ui.badge | None = None
     query = ""
     salary_currency = ""
     salary_min: int | None = None
@@ -115,15 +116,10 @@ def dashboard_page(request: Request) -> None:
             status_tabs.set_visibility(not searching)
         if status_panels is not None:
             status_panels.set_visibility(not searching)
-        if advanced_bar is not None:
-            advanced_bar.set_visibility(not searching)
-            salary_active = (
-                salary_min is not None or salary_max is not None or bool(salary_currency)
-            )
-            active = int(salary_active) + int(bool(tag_filter))
-            advanced_bar.text = (
-                f"Advanced filters ({active} active)" if active else "Advanced filters"
-            )
+        active = active_filter_count()
+        if filters_badge is not None:
+            filters_badge.set_text(str(active))
+            filters_badge.set_visibility(active > 0)
         if sort_select is not None:
             sort_select.set_visibility(not searching)
         for status, _label, _empty in STATUS_TABS:
@@ -212,6 +208,117 @@ def dashboard_page(request: Request) -> None:
         settings_button.on_click(lambda: drawer.toggle())
         _render_settings(refresh, dark)
 
+    with ui.left_drawer(value=False).props("width=360") as filters_drawer:
+        filters_drawer.mark("filters-drawer")
+        ui.label("Filters").classes("text-h6")
+        with ui.row().classes("w-full items-center gap-2"):
+            currency_filter = ui.select(
+                ["", *salary.CURRENCIES], value="", label="Salary currency"
+            ).classes("w-48")
+            min_filter = ui.number("Min salary", min=0, step=1000).classes("w-40")
+            max_filter = ui.number("Max salary", min=0, step=1000).classes("w-40")
+
+        def update_salary_filter() -> None:
+            nonlocal salary_currency, salary_min, salary_max
+            salary_currency = currency_filter.value or ""
+            salary_min = int(min_filter.value) if min_filter.value is not None else None
+            salary_max = int(max_filter.value) if max_filter.value is not None else None
+            pages.clear()
+            refresh()
+
+        currency_filter.on_value_change(lambda _: update_salary_filter())
+        min_filter.on_value_change(lambda _: update_salary_filter())
+        max_filter.on_value_change(lambda _: update_salary_filter())
+
+        with ui.row().classes("w-full items-center gap-2").mark("tag-filter-row"):
+            tag_filter_select = (
+                ui.select(
+                    db.list_tags(user_id=current_user_id()),
+                    value=tag_filter,
+                    label="Filter by tag",
+                    multiple=True,
+                    clearable=True,
+                )
+                .classes("w-96")
+                .mark("tag-filter")
+            )
+
+        def update_tag_filter() -> None:
+            nonlocal tag_filter
+            if tag_filter_select is None:
+                return
+            new = [str(name) for name in tag_filter_select.value or []]
+            if new == tag_filter:
+                return
+            tag_filter = new
+            pages.clear()
+            refresh()
+
+        tag_filter_select.on_value_change(lambda _: update_tag_filter())
+
+        ui.separator()
+        sort_select = (
+            ui.select(
+                {
+                    "newest": "Newest first",
+                    "oldest": "Oldest first",
+                    "company": "Company A-Z",
+                    "company_desc": "Company Z-A",
+                    "status": "Status",
+                },
+                value="newest",
+                label="Sort by",
+            )
+            .classes("w-56")
+            .mark("sort-select")
+        )
+        page_size_select = (
+            ui.select(
+                {10: "10 per page", 25: "25 per page", 50: "50 per page", 0: "All"},
+                value=25,
+                label="Rows per page",
+            )
+            .classes("w-48")
+            .mark("page-size")
+        )
+
+    def active_filter_count() -> int:
+        """Number of filters narrowing the list (salary and tags)."""
+        return (
+            int(bool(salary_currency))
+            + int(salary_min is not None)
+            + int(salary_max is not None)
+            + int(bool(tag_filter))
+        )
+
+    if tag_filter:
+        # A deep-linked tag filter opens the panel so the applied filter is visible.
+        filters_drawer.set_value(True)
+
+    def update_sort(event: events.ValueChangeEventArguments[str | None]) -> None:
+        nonlocal sort_order
+        sort_order = cast("db.JobSort", event.value or "newest")
+        pages.clear()
+        refresh()
+
+    def update_page_size(event: events.ValueChangeEventArguments[int | None]) -> None:
+        nonlocal page_size
+        if event.value is not None:
+            page_size = int(event.value)
+        pages.clear()
+        refresh()
+
+    def on_page_change(event: events.ValueChangeEventArguments[int | None]) -> None:
+        context = active_context()
+        page = event.value or 1
+        if pages.get(context, 1) == page:
+            return
+        pages[context] = page
+        refresh()
+
+    sort_select.on_value_change(update_sort)
+    page_size_select.on_value_change(update_page_size)
+
     add_dialog = _job_form_dialog(
         None,
         lambda values: _add_job_manually(values, refresh),
@@ -223,140 +330,37 @@ def dashboard_page(request: Request) -> None:
             ui.button("➕ Add Job", on_click=add_job_dialog.open).props("color=primary").mark(
                 "add-job"
             )
+            search_input = (
+                ui.input("Search company", placeholder="e.g. Adapty")
+                .props("clearable debounce=300")
+                .classes("flex-1 min-w-0")
+            )
+            filters_button = ui.button("Filters", icon="tune").props("flat").mark("filters-button")
+            with filters_button:
+                filters_badge = ui.badge("").props("color=negative")
+                filters_badge.set_visibility(False)
+                filters_badge.mark("filters-badge")
+
+            def on_search(event: events.ValueChangeEventArguments[str | None]) -> None:
+                nonlocal query
+                query = event.value or ""
+                pages.clear()
+                refresh()
+
+            search_input.on_value_change(on_search)
+            filters_button.on_click(lambda: filters_drawer.toggle())
+
+            def apply_tag_filter(name: str) -> None:
+                nonlocal query
+                if query:
+                    query = ""
+                    search_input.value = ""
+                filters_drawer.set_value(True)
+                if tag_filter_select is not None:
+                    tag_filter_select.set_value([name])
 
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
-                search_input = (
-                    ui.input("Search company", placeholder="e.g. Adapty")
-                    .props("clearable debounce=300")
-                    .classes("w-full")
-                )
-
-                def on_search(event: events.ValueChangeEventArguments[str | None]) -> None:
-                    nonlocal query
-                    query = event.value or ""
-                    pages.clear()
-                    refresh()
-
-                search_input.on_value_change(on_search)
-                advanced_bar = (
-                    ui.expansion(
-                        "Advanced filters",
-                        icon="tune",
-                        value=bool(tag_filter),
-                    )
-                    .classes("w-full")
-                    .mark("advanced-filters")
-                )
-                with advanced_bar:
-                    with ui.row().classes("w-full items-center gap-2"):
-                        currency_filter = ui.select(
-                            ["", *salary.CURRENCIES], value="", label="Salary currency"
-                        ).classes("w-48")
-                        min_filter = ui.number("Min salary", min=0, step=1000).classes("w-40")
-                        max_filter = ui.number("Max salary", min=0, step=1000).classes("w-40")
-
-                    def update_salary_filter() -> None:
-                        nonlocal salary_currency, salary_min, salary_max
-                        salary_currency = currency_filter.value or ""
-                        salary_min = int(min_filter.value) if min_filter.value is not None else None
-                        salary_max = int(max_filter.value) if max_filter.value is not None else None
-                        pages.clear()
-                        refresh()
-
-                    currency_filter.on_value_change(lambda _: update_salary_filter())
-                    min_filter.on_value_change(lambda _: update_salary_filter())
-                    max_filter.on_value_change(lambda _: update_salary_filter())
-
-                    with ui.row().classes("w-full items-center gap-2").mark("tag-filter-row"):
-                        tag_filter_select = (
-                            ui.select(
-                                db.list_tags(user_id=current_user_id()),
-                                value=tag_filter,
-                                label="Filter by tag",
-                                multiple=True,
-                                clearable=True,
-                            )
-                            .classes("w-96")
-                            .mark("tag-filter")
-                        )
-
-                    def update_tag_filter() -> None:
-                        nonlocal tag_filter
-                        if tag_filter_select is None:
-                            return
-                        new = [str(name) for name in tag_filter_select.value or []]
-                        if new == tag_filter:
-                            return
-                        tag_filter = new
-                        pages.clear()
-                        refresh()
-
-                    def apply_tag_filter(name: str) -> None:
-                        nonlocal query
-                        if query:
-                            query = ""
-                            search_input.value = ""
-                        if advanced_bar is not None:
-                            advanced_bar.open()
-                        if tag_filter_select is not None:
-                            tag_filter_select.set_value([name])
-
-                    tag_filter_select.on_value_change(lambda _: update_tag_filter())
-
-                def update_sort(event: events.ValueChangeEventArguments[str | None]) -> None:
-                    nonlocal sort_order
-                    sort_order = cast("db.JobSort", event.value or "newest")
-                    pages.clear()
-                    refresh()
-
-                def update_page_size(event: events.ValueChangeEventArguments[int | None]) -> None:
-                    nonlocal page_size
-                    if event.value is not None:
-                        page_size = int(event.value)
-                    pages.clear()
-                    refresh()
-
-                def on_page_change(event: events.ValueChangeEventArguments[int | None]) -> None:
-                    context = active_context()
-                    page = event.value or 1
-                    if pages.get(context, 1) == page:
-                        return
-                    pages[context] = page
-                    refresh()
-
-                with ui.row().classes("w-full items-center gap-3"):
-                    sort_select = (
-                        ui.select(
-                            {
-                                "newest": "Newest first",
-                                "oldest": "Oldest first",
-                                "company": "Company A-Z",
-                                "company_desc": "Company Z-A",
-                                "status": "Status",
-                            },
-                            value="newest",
-                            label="Sort by",
-                        )
-                        .classes("w-56")
-                        .mark("sort-select")
-                    )
-                    page_size_select = (
-                        ui.select(
-                            {10: "10 per page", 25: "25 per page", 50: "50 per page", 0: "All"},
-                            value=25,
-                            label="Rows per page",
-                        )
-                        .classes("w-48")
-                        .mark("page-size")
-                    )
-                    pagination = ui.pagination(min=1, max=1, direction_links=True).mark(
-                        "pagination"
-                    )
-                    page_label = ui.label().mark("page-info")
-                sort_select.on_value_change(update_sort)
-                page_size_select.on_value_change(update_page_size)
-                pagination.on_value_change(on_page_change)
                 with ui.tabs().classes("w-full") as status_tabs:
                     for status, label, _message in STATUS_TABS:
                         tab = ui.tab(status, label=label)
@@ -372,6 +376,12 @@ def dashboard_page(request: Request) -> None:
                         with ui.tab_panel(status):
                             containers[status] = ui.column().classes("w-full")
                 results_container = ui.column().classes("w-full")
+                with ui.row().classes("w-full items-center gap-3"):
+                    pagination = ui.pagination(min=1, max=1, direction_links=True).mark(
+                        "pagination"
+                    )
+                    page_label = ui.label().mark("page-info")
+                pagination.on_value_change(on_page_change)
                 status_tabs.on_value_change(lambda _: refresh())
             with ui.tab_panel(stats_tab):
                 stats_container = ui.column().classes("w-full")

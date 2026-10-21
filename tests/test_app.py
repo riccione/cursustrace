@@ -50,6 +50,12 @@ async def _open_add_job(user: User) -> None:
     await asyncio.sleep(0.05)
 
 
+async def _open_filters(user: User) -> None:
+    """Open the filters drawer that holds the sort, page size and filter controls."""
+    user.find(marker="filters-button").click()
+    await asyncio.sleep(0.1)
+
+
 async def _open_manual_add(user: User) -> None:
     """Open the Add Job panel and switch to the manual entry form."""
     await _open_add_job(user)
@@ -1080,7 +1086,7 @@ async def test_salary_filter_narrows_status_lists(user: User) -> None:
     await user.should_see("Unknown Salary")
     await user.should_see("Paid Role")
 
-    cast(ui.expansion, user.find(marker="advanced-filters").elements.pop()).open()
+    await _open_filters(user)
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
 
     await user.should_not_see("Unknown Salary")
@@ -1093,6 +1099,7 @@ async def test_sort_and_page_size_control_the_list(user: User) -> None:
     db.add_job("https://a.com/2", "Alpha role", "Alpha", "Remote", "Body")
     db.add_job("https://a.com/3", "Mike role", "Mid", "Remote", "Body")
     await user.open("/")
+    await _open_filters(user)
 
     cast(ui.select, user.find(marker="page-size").elements.pop()).set_value(1)
 
@@ -1115,6 +1122,7 @@ async def test_pagination_pages_through_large_list(user: User) -> None:
         db.add_job(f"https://a.com/{i}", f"Filler {i}", "Acme", "Remote", "Body")
     db.add_job("https://a.com/99", "Newest role", "Acme", "Remote", "Body")
     await user.open("/")
+    await _open_filters(user)
 
     cast(ui.select, user.find(marker="page-size").elements.pop()).set_value(10)
 
@@ -1136,6 +1144,7 @@ async def test_search_results_are_paginated_without_sorting(user: User) -> None:
         db.add_job(f"https://a.com/{i}", f"Filler {i}", "Acme", "Remote", "Body")
     db.add_job("https://a.com/99", "Newest role", "Acme", "Remote", "Body")
     await user.open("/")
+    await _open_filters(user)
     sort_element = cast(ui.select, user.find(marker="sort-select").elements.pop())
 
     user.find("Search company").clear().type("Acme")
@@ -2626,14 +2635,11 @@ async def test_clicking_chip_filters_dashboard(user: User) -> None:
     await user.open("/")
     await user.should_see("Zulu role")
     await user.should_see("Alpha role")
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.value is False
 
     user.find(kind=ui.chip, content="golang").click()
 
     tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
     await _wait_for(lambda: list(tag_select.value or []) == ["golang"])
-    assert advanced.value is True  # chip click expands the Advanced bar
     await user.should_see("Zulu role")
     await user.should_not_see("Alpha role")
 
@@ -2652,8 +2658,6 @@ async def test_detail_chip_navigates_to_filtered_dashboard(user: User) -> None:
     await user.should_not_see("Untagged role")
     tag_select = cast(ui.select, user.find(marker="tag-filter").elements.pop())
     assert list(tag_select.value or []) == ["golang"]
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.value is True  # deep-linked tag opens the Advanced bar
 
 
 async def test_opening_with_tag_query_filters_dashboard(user: User) -> None:
@@ -2666,16 +2670,58 @@ async def test_opening_with_tag_query_filters_dashboard(user: User) -> None:
     await user.should_not_see("Alpha role")
 
 
-async def test_advanced_filters_hidden_during_search(user: User) -> None:
+async def test_sort_controls_hidden_during_search(user: User) -> None:
     db.init_db()
     db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
     await user.open("/")
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.visible
+    await _open_filters(user)
+    await user.should_see(marker="sort-select")
 
     user.find("Search company").clear().type("Zeta")
     await user.should_see("[Unapplied]")
-    assert not advanced.visible
+    await user.should_not_see(marker="sort-select")
+
+
+async def test_toolbar_has_search_and_filters_button(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see(marker="filters-button")
+    await user.should_see("Search company")
+
+
+async def test_filters_button_opens_the_drawer(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    await user.open("/")
+
+    await _open_filters(user)
+
+    await user.should_see("Filters")
+    await user.should_see(marker="sort-select")
+    await user.should_see(marker="page-size")
+    await user.should_see(marker="tag-filter")
+    await user.should_see("Min salary")
+
+
+async def test_filters_badge_counts_active_filters(user: User) -> None:
+    db.init_db()
+    db.add_job("https://a.com/1", "Zulu role", "Zeta", "Remote", "Body")
+    await user.open("/")
+    await _open_filters(user)
+
+    cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
+
+    await _wait_for(lambda: _filters_badge_text(user) == "1")
+    await user.should_not_see("Zulu role")
+
+
+def _filters_badge_text(user: User) -> str:
+    """Text of the active-filter badge on the Filters button ('' when hidden)."""
+    try:
+        badge = cast(ui.badge, user.find(marker="filters-badge").elements.pop())
+    except AssertionError:
+        return ""
+    return str(badge.text)
 
 
 async def test_tag_manager_adds_renames_and_deletes(user: User) -> None:
@@ -2753,33 +2799,33 @@ async def test_advanced_bar_collapsed_by_default(user: User) -> None:
     )
     await user.open("/")
 
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.value is False  # default view: search, sort, pagination only
+    drawer = cast(ui.left_drawer, user.find(marker="filters-drawer").elements.pop())
+    assert drawer.value is False  # default view: the filter panel is closed
     await user.should_see("High role")
     await user.should_see("Low role")
 
-    advanced.open()
-    assert advanced.value is True
+    await _open_filters(user)
+    assert drawer.value is True
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
 
     await user.should_see("High role")
     await user.should_not_see("Low role")
 
 
-async def test_advanced_bar_shows_active_count(user: User) -> None:
+async def test_filters_badge_shows_active_count(user: User) -> None:
     _tagged_pair()
     await user.open("/")
-    advanced = cast(ui.expansion, user.find(marker="advanced-filters").elements.pop())
-    assert advanced.text == "Advanced filters"
+    await _open_filters(user)
+    assert _filters_badge_text(user) == ""
 
     cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value(["golang"])
-    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+    await _wait_for(lambda: _filters_badge_text(user) == "1")
 
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(50000)
-    await _wait_for(lambda: advanced.text == "Advanced filters (2 active)")
+    await _wait_for(lambda: _filters_badge_text(user) == "2")
 
     cast(ui.select, user.find(marker="tag-filter").elements.pop()).set_value([])
-    await _wait_for(lambda: advanced.text == "Advanced filters (1 active)")
+    await _wait_for(lambda: _filters_badge_text(user) == "1")
 
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(None)
-    await _wait_for(lambda: advanced.text == "Advanced filters")
+    await _wait_for(lambda: _filters_badge_text(user) == "")
