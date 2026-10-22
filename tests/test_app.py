@@ -134,7 +134,7 @@ def _profile_payload(
 
 async def test_title_renders(user: User) -> None:
     await user.open("/")
-    await user.should_see(constants.APP_TITLE)
+    await user.should_see(constants.APP_NAME)
 
 
 async def test_scan_saves_position(user: User) -> None:

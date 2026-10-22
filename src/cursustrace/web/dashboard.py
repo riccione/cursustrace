@@ -10,7 +10,13 @@ from starlette.requests import Request
 from cursustrace import db, salary
 from cursustrace.web.attention_ui import _park_stale_positions, attention_counts, attention_first
 from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
-from cursustrace.web.constants import APP_TITLE, PRIMARY_STATUSES, SECONDARY_STATUSES, STATUS_TABS
+from cursustrace.web.constants import (
+    APP_NAME,
+    APP_TITLE,
+    PRIMARY_STATUSES,
+    SECONDARY_STATUSES,
+    STATUS_TABS,
+)
 from cursustrace.web.discover import _render_discover
 from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
@@ -220,7 +226,7 @@ def dashboard_page(request: Request) -> None:
             badge.set_visibility(count > 0)
 
     with ui.header().classes("items-center flex-nowrap"):
-        ui.label(APP_TITLE).classes("text-h6 flex-1 truncate min-w-0")
+        ui.label(APP_NAME).classes("text-h6 flex-1 truncate min-w-0")
         with ui.tabs().classes("header-tabs") as main_tabs:
             dashboard_tab = ui.tab("📋 Dashboard")
             stats_tab = ui.tab("📊 Statistics")
