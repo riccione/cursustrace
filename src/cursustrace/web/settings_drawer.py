@@ -5,12 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from nicegui import events, ui
+from nicegui.element import Element
 
 from cursustrace import db
 from cursustrace.web.dialogs import _clear_database, _tag_manager_dialog
 from cursustrace.web.session import current_user_id
 from cursustrace.web.state import (
     ATTENTION_NOTICE_KEY,
+    DARK_MODE_ICONS,
     DARK_MODE_KEY,
     DARK_MODE_OPTIONS,
     SIMILAR_NOTICE_KEY,
@@ -24,6 +26,19 @@ from cursustrace.web.state import (
 def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     ui.label("Appearance").classes("text-h6")
     theme = ui.toggle(DARK_MODE_OPTIONS, value=_dark_mode_name(dark.value)).classes("w-full")
+    # NiceGUI's toggle rebuilds its options as {value, label} on every update, which
+    # would drop the icons. Set the icon-carrying payload with updates suspended and
+    # send it with the base update, so Quasar's QBtnToggle gets it intact.
+    with theme.props.suspend_updates():
+        theme.props["options"] = [
+            {
+                "value": index,
+                "label": DARK_MODE_OPTIONS[key],
+                "icon": DARK_MODE_ICONS[key],
+            }
+            for index, key in enumerate(DARK_MODE_OPTIONS)
+        ]
+    Element.update(theme)
 
     def update_theme(event: events.ValueChangeEventArguments[str | None]) -> None:
         name = event.value or "system"
@@ -61,15 +76,19 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     attention_toggle.on_value_change(update_attention)
 
     ui.separator()
-    ui.label("🏷️ Tags").classes("text-h6")
+    with ui.row().classes("items-center gap-2"):
+        ui.icon("label")
+        ui.label("Tags").classes("text-h6")
     tag_manager = _tag_manager_dialog(refresh)
     ui.button("Manage tags", on_click=tag_manager.open).mark("manage-tags")
 
     ui.separator()
-    ui.label("⚙️ Settings & Maintenance").classes("text-h6")
-    with ui.expansion("⚠️ Danger Zone: Clear Database"):
+    with ui.row().classes("items-center gap-2"):
+        ui.icon("settings")
+        ui.label("Settings & Maintenance").classes("text-h6")
+    with ui.expansion("Danger Zone: Clear Database", icon="warning").classes("ct-danger-zone"):
         ui.label(
-            "⚠️ This action cannot be undone. All tracked job postings and "
+            "This action cannot be undone. All tracked job postings and "
             "application history will be permanently erased."
         ).classes("text-negative")
         confirm = ui.input("Type 'DELETE' to confirm", placeholder="DELETE").classes("w-full")

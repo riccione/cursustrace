@@ -16,9 +16,14 @@ SIMILAR_NOTICE_KEY = "similar_notice"
 ATTENTION_NOTICE_KEY = "attention_notice"
 SELECTED_PROFILE_KEY = "selected_profile_id"
 DARK_MODE_OPTIONS: dict[str, str] = {
-    "light": "☀️ Light",
-    "dark": "🌙 Dark",
-    "system": "🖥️ System",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+}
+DARK_MODE_ICONS: dict[str, str] = {
+    "light": "light_mode",
+    "dark": "dark_mode",
+    "system": "computer",
 }
 
 

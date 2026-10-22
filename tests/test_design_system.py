@@ -238,6 +238,8 @@ def test_board_classes_are_styled(css: str) -> None:
         ".ct-board-card__title",
         ".ct-view-switch__active",
         ".ct-detail-fact",
+        ".ct-heading-icon",
+        ".ct-danger-zone",
         ".ct-stat-icon",
         ".ct-note__icon",
     ):

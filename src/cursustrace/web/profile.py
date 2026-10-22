@@ -31,7 +31,9 @@ def _attach_copy_button(field: _FieldT, label: str, marker: str) -> _FieldT:
 
 
 def _render_profile_editor() -> None:
-    ui.label("👤 Profile & CV Configuration").classes("text-h5")
+    with ui.row().classes("items-center gap-2"):
+        ui.icon("person").classes("ct-heading-icon")
+        ui.label("Profile & CV Configuration").classes("text-h5")
 
     profiles = db.list_profiles(user_id=current_user_id())
     known_ids = {profile["id"] for profile in profiles}

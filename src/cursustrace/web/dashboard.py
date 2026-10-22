@@ -274,10 +274,10 @@ def dashboard_page(request: Request) -> None:
     with ui.header().classes("items-center flex-nowrap"):
         ui.label(APP_NAME).classes("text-h6 flex-1 truncate min-w-0")
         with ui.tabs().classes("header-tabs") as main_tabs:
-            dashboard_tab = ui.tab("Dashboard", icon="assignment")
-            stats_tab = ui.tab("Statistics", icon="bar_chart")
-            profile_tab = ui.tab("Profile & CV Editor", icon="person")
-            discover_tab = ui.tab("Discover", icon="search")
+            dashboard_tab = ui.tab("Dashboard", icon="assignment").props("no-caps")
+            stats_tab = ui.tab("Statistics", icon="bar_chart").props("no-caps")
+            profile_tab = ui.tab("Profile & CV Editor", icon="person").props("no-caps")
+            discover_tab = ui.tab("Discover", icon="search").props("no-caps")
         with ui.element("div").classes("flex-1 flex justify-end min-w-0 items-center gap-2"):
             if _multi_user_enabled():
                 email = current_email()
@@ -478,6 +478,7 @@ def dashboard_page(request: Request) -> None:
                             if status not in PRIMARY_STATUSES:
                                 continue
                             tab = ui.tab(status, label=label, icon=STAGE_ICONS[status])
+                            tab.props("no-caps")
                             tab.classes(f"ct-stage-{status}")
                             tab.mark(f"status-tab-{status}")
                             tab.on("click", on_primary_tab_click)

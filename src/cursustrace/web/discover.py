@@ -22,7 +22,9 @@ def _board_label(source: discovery.SourceRef) -> str:
 
 def _render_discover(refresh: Callable[[], None]) -> None:
     """Render the discover form, candidate list, and add-selected action."""
-    ui.label("🔍 Discover positions").classes("text-h5")
+    with ui.row().classes("items-center gap-2"):
+        ui.icon("search").classes("ct-heading-icon")
+        ui.label("Discover positions").classes("text-h5")
     ui.label(
         "Search a job board or aggregator for listings, then pick the ones to add. "
         "Enter a full URL or a board name from job-sources/."
