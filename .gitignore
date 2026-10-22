@@ -29,5 +29,4 @@ data/*.csv
 # Database backups (contain personal data)
 backups/
 
-screenshots/
 scripts/

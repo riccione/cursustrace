@@ -4,7 +4,7 @@
 
 **Stop losing track of job applications. Scan a listing in seconds, follow every application through a visual pipeline, and let your own AI agent do the busywork — all from one local dashboard.**
 
-<!-- Add a dashboard screenshot here -->
+![CursusTrace dashboard: the position list with stage tabs, job cards and progress trackers](docs/screenshots/01-dashboard-unapplied.webp)
 
 ## Features
 
@@ -65,6 +65,8 @@ the tabs: it opens a panel where you can paste one or more job listing URLs
 (one per line) and click `Scan & Save Positions`, or switch to `Add Manually`
 to type the details yourself.
 
+![The Add Job panel with the scan and manual entry actions](docs/screenshots/13-add-job.webp)
+
 When scraping fails (or for a listing you track by hand), use `Add Manually`
 in the `Add Job` panel to enter a position's URL, title, company, description,
 and an optional application deadline; the same fields can be edited later from
@@ -80,6 +82,8 @@ full URL or a board name from `job-sources/` (with an optional keyword query and
 an `Only live` filter), click `Discover`, then tick the candidates you want and
 press `Add selected`. Listings you already track appear with their status and
 cannot be re-added.
+
+![The Discover tab with source, query and only-live controls](docs/screenshots/12-discover.webp)
 
 Curated job board lists by region live in [`job-sources/`](job-sources/).
 
@@ -104,6 +108,10 @@ move menu, which is how you change a stage with a keyboard or on a touch screen,
 where dragging is not available. Columns scroll on their own, and a column
 holding more than 50 positions offers a `Show all` link.
 
+![The board view with one column per active stage](docs/screenshots/07-board.webp)
+
+![The board with the archived rejected and outdated columns open](docs/screenshots/08-board-archived.webp)
+
 ### Job cards
 
 Every position is a card: a soft, bordered surface with generous padding that
@@ -127,6 +135,8 @@ which profile you applied with (saved per position), and that profile's
 name, email, phone, LinkedIn, and GitHub fields show below, each with an
 in-field copy button for pasting into application forms. The dashboard card
 displays the saved choice as a `CV:` chip.
+
+![A position's detail page with metadata, profile and history](docs/screenshots/11-job-detail.webp)
 
 Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
@@ -178,12 +188,16 @@ profile` removes the selected one
 after you type `DELETE` to confirm. The selected profile persists across restarts, and PDF
 export always uses it.
 
+![The CV editor with Markdown sections and a live preview](docs/screenshots/10-profile-cv.webp)
+
 ### Statistics
 
 The `Statistics` tab shows how many positions you have in total and in each
 pipeline stage (unapplied, applied, interview, offer, rejected, outdated),
 with charts for the status distribution, applications per month, and a
 response funnel from added to applied, responded, interview, and offer.
+
+![The statistics tab with stage counts, a status donut, a funnel and charts](docs/screenshots/09-statistics.webp)
 
 </details>
 
@@ -446,6 +460,8 @@ theme, so both themes stay in sync:
 | `--success`, `--warning`, `--danger`, `--info`, `--offer` | stage dots, badges and alerts |
 | `--badge-*-text`, `--badge-*-soft` | status badge text and its background tint |
 
+![The dashboard in the dark theme](docs/screenshots/15-dashboard-dark.webp)
+
 Light and dark values are set in `:root` and `body.body--dark`; Quasar's own
 brand variables are remapped onto them, so components follow the palette
 automatically. `tests/test_design_system.py` checks that every token exists in
@@ -484,6 +500,15 @@ uv run python scripts/seed_demo.py --db data/demo.db
 
 # run against it, keeping the startup backups out of the personal ones
 CURSUS_BACKUP_DIR=backups/demo uv run cursustrace --db data/demo.db
+```
+
+To refresh the screenshots in `docs/screenshots/`, capture them from the running
+demo instance and then shrink them to the docs size (lossless WebP):
+
+```sh
+CURSUS_URL=http://127.0.0.1:8080 NODE_PATH="$(npm root -g)/@playwright/test/node_modules" \
+  node scripts/screenshots.mjs
+uv run python scripts/shrink_screenshots.py
 ```
 
 The seeder refuses to touch `data/cursustrace.db` unless `--force` is passed,
