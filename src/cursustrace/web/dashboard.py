@@ -10,6 +10,7 @@ from starlette.requests import Request
 from cursustrace import db, salary
 from cursustrace.web.attention_ui import _park_stale_positions, attention_counts, attention_first
 from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
+from cursustrace.web.board import render_board
 from cursustrace.web.constants import (
     APP_NAME,
     APP_TITLE,
@@ -62,6 +63,12 @@ def dashboard_page(request: Request) -> None:
     page_size = 25
     pages: dict[str, int] = {}
     more_status: db.JobStatus | None = None
+    view_mode = "list"
+    archived_open = False
+    expanded_columns: set[db.JobStatus] = set()
+    board_container: ui.column | None = None
+    list_view_button: ui.button | None = None
+    board_view_button: ui.button | None = None
     requested_tag = (request.query_params.get("tag") or "").strip()
     canonical_tag = next(
         (
@@ -129,6 +136,18 @@ def dashboard_page(request: Request) -> None:
         more_status = None
         refresh()
 
+    def set_view(mode: str) -> None:
+        """Switch between the tabbed list and the board."""
+        nonlocal view_mode
+        view_mode = mode
+        refresh()
+
+    def toggle_archive() -> None:
+        """Show or hide the archived columns on the board."""
+        nonlocal archived_open
+        archived_open = not archived_open
+        refresh()
+
     def on_primary_tab_click() -> None:
         """Leave the secondary view when a primary tab is clicked."""
         nonlocal more_status
@@ -151,17 +170,27 @@ def dashboard_page(request: Request) -> None:
                 return
             tag_filter_select.update()
         searching = bool(query)
-        show_panels = not searching and more_status is None
+        board = view_mode == "board"
+        show_panels = not searching and not board and more_status is None
         if status_tabs is not None:
-            status_tabs.set_visibility(not searching)
+            status_tabs.set_visibility(not searching and not board)
         if status_panels is not None:
             status_panels.set_visibility(show_panels)
         if more_container is not None:
-            more_container.set_visibility(not searching and more_status is not None)
+            more_container.set_visibility(not searching and not board and more_status is not None)
         for status, view in secondary_views.items():
-            view.set_visibility(status == more_status)
+            view.set_visibility(not board and status == more_status)
         if more_button is not None:
             more_button.set_text("More" if more_status is None else _stage_label(more_status))
+            more_button.set_visibility(not board)
+        if board_container is not None:
+            board_container.set_visibility(board)
+        if list_view_button is not None and board_view_button is not None:
+            for button, selected in ((list_view_button, not board), (board_view_button, board)):
+                if selected:
+                    button.classes(add="ct-view-switch__active")
+                else:
+                    button.classes(remove="ct-view-switch__active")
         stage_counts = db.job_counts(user_id=current_user_id())
         for status, tab in status_tab_elements.items():
             tab.props["label"] = f"{_stage_label(status)} ({stage_counts.get(status, 0)})"
@@ -177,21 +206,19 @@ def dashboard_page(request: Request) -> None:
                 container.clear()
         if results_container is not None:
             results_container.clear()
-            results_container.set_visibility(searching)
+            results_container.set_visibility(searching and not board)
         context = "search" if searching else active_context()
         page_count, page, total = 1, 1, 0
-        if searching and results_container is not None:
+        if searching and not board and results_container is not None:
             page_count, page, total = render_page(
                 results_container,
                 db.search_jobs(query, user_id=current_user_id()),
                 f'No positions match "{query}".',
                 "search",
             )
-        if not searching:
+        if not searching or board:
+            jobs_by_status: dict[db.JobStatus, list[db.Job]] = {}
             for status, _label, empty_message in STATUS_TABS:
-                container = containers.get(status)
-                if container is None:
-                    continue
                 jobs = salary.filter_by_salary(
                     db.search_jobs(query, status=status, user_id=current_user_id()),
                     min_annual=salary_min,
@@ -199,13 +226,30 @@ def dashboard_page(request: Request) -> None:
                     currency=salary_currency or None,
                 )
                 jobs = db.filter_by_tags(jobs, tag_filter)
-                jobs = db.sort_jobs(jobs, sort_order)
-                rendered = render_page(container, jobs, empty_message, status)
+                jobs_by_status[status] = db.sort_jobs(jobs, sort_order)
+                container = containers.get(status)
+                if container is None or board:
+                    continue
+                rendered = render_page(container, jobs_by_status[status], empty_message, status)
                 if status == context:
                     page_count, page, total = rendered
+            if board and board_container is not None:
+                render_board(
+                    board_container,
+                    jobs_by_status,
+                    stages=PRIMARY_STATUSES,
+                    archived=SECONDARY_STATUSES,
+                    archived_open=archived_open,
+                    is_expanded=lambda status: status in expanded_columns,
+                    empty_messages={status: message for status, _label, message in STATUS_TABS},
+                    refresh=refresh,
+                    on_tag_click=apply_tag_filter,
+                    toggle_archive=toggle_archive,
+                    mark_expanded=expanded_columns.add,
+                )
         if pagination is not None and page_label is not None:
             pagination.max = max(page_count, 1)
-            pagination.set_visibility(page_size > 0 and total > 0 and page_count > 1)
+            pagination.set_visibility(not board and page_size > 0 and total > 0 and page_count > 1)
             if pagination.value != page:
                 pagination.value = page
             page_label.set_visibility(total > 0)
@@ -384,6 +428,17 @@ def dashboard_page(request: Request) -> None:
                 .props("clearable debounce=300")
                 .classes("flex-1 min-w-0")
             )
+            with ui.row().classes("items-center gap-1").mark("view-switch"):
+                list_view_button = (
+                    ui.button("List", on_click=lambda: set_view("list"))
+                    .props("dense")
+                    .mark("view-list")
+                )
+                board_view_button = (
+                    ui.button("Board", on_click=lambda: set_view("board"))
+                    .props("dense")
+                    .mark("view-board")
+                )
             filters_button = (
                 ui.button("Filters", icon="tune")
                 .props("flat")
@@ -476,6 +531,9 @@ def dashboard_page(request: Request) -> None:
                     page_label = ui.label().mark("page-info")
                 pagination.on_value_change(on_page_change)
                 status_tabs.on_value_change(lambda _: show_primary())
+                board_container = ui.column().classes("w-full")
+                board_container.set_visibility(False)
+                board_container.mark("board-container")
             with ui.tab_panel(stats_tab):
                 stats_container = ui.column().classes("w-full")
             with ui.tab_panel(profile_tab):

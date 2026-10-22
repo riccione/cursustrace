@@ -219,3 +219,17 @@ def test_tracker_hides_its_labels_on_small_screens(css: str) -> None:
     assert "@media (max-width: 640px)" in css
     mobile = css.split("@media (max-width: 640px)", 1)[1]
     assert ".ct-tracker__label { display: none; }" in mobile
+
+
+def test_board_classes_are_styled(css: str) -> None:
+    """The board, its columns and its cards all have rules in the stylesheet."""
+    for selector in (
+        ".ct-board",
+        ".ct-board__column",
+        ".ct-board__column.is-drop-target",
+        ".ct-board__column-head",
+        ".ct-board-card",
+        ".ct-board-card__title",
+        ".ct-view-switch__active",
+    ):
+        assert selector in css, f"missing style for {selector}"

@@ -326,3 +326,110 @@ body.body--dark .ct-card:hover {
 .q-tab.ct-stage-offer .q-tab__label::before { background: var(--offer); }
 .q-tab.ct-stage-rejected .q-tab__label::before { background: var(--danger); }
 .q-tab.ct-stage-outdated .q-tab__label::before { background: var(--text-secondary); }
+
+/* Kanban board: one column per stage, cards can be dragged between them. */
+.ct-view-switch__active {
+  color: var(--primary) !important;
+  background: var(--badge-primary-soft) !important;
+}
+.ct-board {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.ct-board__column {
+  flex: 0 0 300px;
+  width: 300px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow-y: auto;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ct-board__column.is-drop-target {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.ct-board__column-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 6px;
+  background: var(--bg-surface);
+}
+.ct-board__column-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.ct-board__column-attention {
+  font-size: 0.75rem;
+  color: var(--warning);
+}
+.ct-board__cards {
+  flex-wrap: nowrap;
+}
+.ct-board-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  cursor: grab;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.ct-board-card:hover {
+  border-color: var(--text-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.ct-board-card:active {
+  cursor: grabbing;
+}
+body.body--dark .ct-board-card:hover {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+.ct-board-card__top {
+  flex-wrap: nowrap;
+}
+.ct-board-card__title {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-board-card__company {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-board-card__move {
+  flex: 0 0 auto;
+  color: var(--text-secondary) !important;
+}
+.ct-board__empty {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+@media (max-width: 640px) {
+  .ct-board__column {
+    flex: 0 0 260px;
+    width: 260px;
+    max-height: 60vh;
+  }
+}
