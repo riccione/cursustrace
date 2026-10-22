@@ -527,10 +527,17 @@ def test_non_jobposting_jsonld_ignored() -> None:
     assert job["location"] == "Not Specified"
 
 
-def test_location_from_description_marker(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        trafilatura, "extract", lambda *args, **kwargs: "Role text. 📍Location: Croatia"
-    )
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Role text. Location: Croatia",
+        "Role text. \U0001f4cdLocation: Croatia",  # legacy marker, kept compatible
+    ],
+)
+def test_location_from_description_marker(
+    monkeypatch: pytest.MonkeyPatch, description: str
+) -> None:
+    monkeypatch.setattr(trafilatura, "extract", lambda *args, **kwargs: description)
     job = scraper._extract_job("<html><body><p>Role text</p></body></html>", "https://example.com")
     assert job["location"] == "Croatia"
 

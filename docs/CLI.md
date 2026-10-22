@@ -131,7 +131,7 @@ scraped to fill the missing fields; see the
 [Scraping](../README.md#scraping) section for the extraction and fallback
 chain). Scraped positions resolve `location` from
 the page's Open Graph meta, then its JSON-LD `JobPosting` address, then a
-`📍Location:` line in the description, and `deadline` from the JSON-LD
+`Location:` line in the description, and `deadline` from the JSON-LD
 `validThrough` date. `export` writes that same shape, so
 `cursustrace export jobs.json` can be edited and fed back into `import`: status,
 stage comments, tags, and deadlines survive the round trip (unknown tags are
