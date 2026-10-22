@@ -44,7 +44,7 @@ PDF export uses [WeasyPrint](https://weasyprint.org/), which relies on the Pango
 - **Smart Alerts:** The app automatically flags positions that need attention (e.g., 21 days without a response, or an upcoming deadline). Flagged positions rise to the top of their tab.
 - **Advanced Filtering:** A single row provides fuzzy company search, salary range filters, tag filtering, and sorting.
 - **CV Tagging:** Associate specific CV profiles with specific applications (saved per position) so you always know which resume you sent.
-- **Discover:** The `🔍 Discover` tab lets you search curated job boards, extract candidate links, and add them in bulk.
+- **Discover:** The `Discover` tab lets you search curated job boards, extract candidate links, and add them in bulk.
 
 <details>
 <summary><b>Dashboard in depth</b></summary>
@@ -60,13 +60,13 @@ the `More` menu next to the tabs.
 
 ### Adding positions
 
-Adding a position is a secondary action behind the `➕ Add Job` button above
+Adding a position is a secondary action behind the `Add Job` button above
 the tabs: it opens a panel where you can paste one or more job listing URLs
-(one per line) and click `Scan & Save Positions`, or switch to `➕ Add Manually`
+(one per line) and click `Scan & Save Positions`, or switch to `Add Manually`
 to type the details yourself.
 
-When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
-in the `➕ Add Job` panel to enter a position's URL, title, company, description,
+When scraping fails (or for a listing you track by hand), use `Add Manually`
+in the `Add Job` panel to enter a position's URL, title, company, description,
 and an optional application deadline; the same fields can be edited later from
 the position's detail page. The add and edit forms always open on a clean slate:
 a new position starts empty, and an edit starts from the saved values, so a
@@ -74,7 +74,7 @@ cancelled change never leaks into the next opening.
 
 ### Discovering positions
 
-Prefer to start from a board rather than a specific URL? The `🔍 Discover` tab
+Prefer to start from a board rather than a specific URL? The `Discover` tab
 searches a job source for listing links and lets you pick which to add: enter a
 full URL or a board name from `job-sources/` (with an optional keyword query and
 an `Only live` filter), click `Discover`, then tick the candidates you want and
@@ -112,7 +112,7 @@ pill-shaped status badge; below it a linear tracker shows how far the
 application got — `Unapplied` → `Applied` → `Interview` → `Offer` — with the
 finished stages filled in, the current stage ringed, and the future ones left
 empty. A rejected or outdated position replaces the tracker with a single
-line (`❌ Application rejected after 14 days`) because the pipeline ended
+line (`Application rejected after 14 days`) because the pipeline ended
 there. The tag, `CV:` and attention chips sit under the tracker, so they stay
 visible without opening the card, and clicking a tag chip only filters the
 list — it never opens the card. On narrow screens the tracker keeps its dots
@@ -132,14 +132,14 @@ Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
 `validThrough` date or type it as an ISO date like `2026-12-31`.
 
-Each dashboard and detail page ends with a `↑ Go up` button that scrolls back
+Each dashboard and detail page ends with a `Go up` button that scrolls back
 to the top. Every page also carries a footer at the bottom of the page (below
 the content) showing the app name and version, e.g. `CursusTrace v0.1.0`.
 
 ### Smart alerts
 
 The dashboard flags positions that need attention with a badge on the
-`⏳ Unapplied` and `✅ Applied` tabs, each counting the flagged positions of
+`Unapplied` and `Applied` tabs, each counting the flagged positions of
 that stage. A position qualifies when:
 
 - it is applied with no response for `stale_applied_days` (default `21`);
@@ -150,7 +150,7 @@ that stage. A position qualifies when:
 Only unapplied and applied positions can qualify: once an employer responds
 the staleness clocks stop, and a deadline no longer matters after the pipeline
 moves on. Flagged positions are listed first in their tab and carry a
-`⚠ <reason>` chip next to their title (an imminent deadline wins over
+warning chip with the reason next to their title (an imminent deadline wins over
 staleness), and the detail page repeats the reason. Everything clears as soon
 as positions move on. Turn the highlights off under the settings drawer's
 Notifications section; the choice persists.
@@ -163,14 +163,15 @@ pipeline no matter how old its dates look.
 
 ### CV profiles
 
-Use the `👤 Profile & CV Editor` tab to set your contact details and edit
+Use the `Profile & CV Editor` tab to set your contact details and edit
 your CV in Markdown as four sections: Summary, Work History, Education, and
 Skills. A live preview combines them in export order. Your profile and CV are
-stored only in the SQLite database, and `📄 Export to PDF` downloads a
+stored only in the SQLite database, and `Export to PDF` downloads a
 formatted document combining your contact header with the sections in that
 order. When you keep more than one CV (e.g. per role or seniority), a dropdown
-at the top of the tab switches between named profiles: `➕` adds a new
-profile, copying your name and contact details from the profile you are on,
+at the top of the tab switches between named profiles: its `Add Profile`
+button creates a new one, copying your name and contact details from the profile
+you are on,
 and — via a checked-by-default checkbox — its Summary, Work History, Education
 and Skills sections (uncheck it to start those sections empty). `Delete
 profile` removes the selected one
@@ -179,7 +180,7 @@ export always uses it.
 
 ### Statistics
 
-The `📊 Statistics` tab shows how many positions you have in total and in each
+The `Statistics` tab shows how many positions you have in total and in each
 pipeline stage (unapplied, applied, interview, offer, rejected, outdated),
 with charts for the status distribution, applications per month, and a
 response funnel from added to applied, responded, interview, and offer.
@@ -371,7 +372,7 @@ every part of the app uses it, so a demo run never reaches the personal file.
 </details>
 
 `cv_style` / `--css` points at the PDF stylesheet used by the
-`📄 Export to PDF` button in the profile tab. On start the dashboard prints
+`Export to PDF` button in the profile tab. On start the dashboard prints
 which source it resolved from: `Config: using config file cursustrace.toml`
 or `Config: no config file found, using hardcoded default values`.
 

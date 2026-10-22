@@ -160,7 +160,7 @@ async def test_board_counts_flagged_positions_in_the_column(user: User) -> None:
 
     attention = user.find(marker="board-attention-applied").elements
     assert attention
-    assert cast(ui.label, attention.pop()).text == "⚠ 1"
+    assert cast(ui.label, attention.pop()).text == "1"
     await user.should_see(marker="attention-chip")
 
 

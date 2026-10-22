@@ -16,7 +16,7 @@ from cursustrace import auth, backup, config, db
 from cursustrace.logsetup import setup_logging
 from cursustrace.web import state
 from cursustrace.web.auth_middleware import AuthMiddleware
-from cursustrace.web.constants import APP_TITLE, load_webapp_css
+from cursustrace.web.constants import APP_FAVICON, APP_TITLE, load_webapp_css
 from cursustrace.web.pages import register_pages
 
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ def run(settings: config.Settings | None = None) -> None:
     try:
         ui.run(
             title=APP_TITLE,
-            favicon="📋",
+            favicon=APP_FAVICON,
             host=current.host,
             port=current.port,
             show=current.show,

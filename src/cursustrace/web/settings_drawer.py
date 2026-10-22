@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 from nicegui import events, ui
@@ -11,6 +12,7 @@ from cursustrace.web.dialogs import _clear_database, _tag_manager_dialog
 from cursustrace.web.session import current_user_id
 from cursustrace.web.state import (
     ATTENTION_NOTICE_KEY,
+    DARK_MODE_ICONS,
     DARK_MODE_KEY,
     DARK_MODE_OPTIONS,
     SIMILAR_NOTICE_KEY,
@@ -23,7 +25,36 @@ from cursustrace.web.state import (
 
 def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     ui.label("Appearance").classes("text-h6")
-    theme = ui.toggle(DARK_MODE_OPTIONS, value=_dark_mode_name(dark.value)).classes("w-full")
+    theme = (
+        ui.select(
+            DARK_MODE_OPTIONS,
+            value=_dark_mode_name(dark.value),
+            label="Theme",
+        )
+        .classes("w-full ct-theme-select")
+        .mark("theme-select")
+    )
+    theme.props["title"] = "Appearance theme"
+    # The options themselves stay {value, label}; the icon is resolved in the option
+    # template from the label, so a value change cannot wipe it the way it did when
+    # the icons lived in the (rebuilt) options payload.
+    # Single quotes: the JSON is inlined into a double-quoted HTML attribute.
+    theme_icons = json.dumps(
+        {DARK_MODE_OPTIONS[key]: icon for key, icon in DARK_MODE_ICONS.items()}
+    ).replace('"', "'")
+    theme.add_slot(
+        "option",
+        """
+        <q-item v-bind="props.itemProps">
+            <q-item-section avatar>
+                <q-icon :name="__ICONS__[props.label]" />
+            </q-item-section>
+            <q-item-section>
+                <q-item-label>{{ props.label }}</q-item-label>
+            </q-item-section>
+        </q-item>
+        """.replace("__ICONS__", theme_icons),
+    )
 
     def update_theme(event: events.ValueChangeEventArguments[str | None]) -> None:
         name = event.value or "system"
@@ -61,15 +92,19 @@ def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     attention_toggle.on_value_change(update_attention)
 
     ui.separator()
-    ui.label("🏷️ Tags").classes("text-h6")
+    with ui.row().classes("items-center gap-2"):
+        ui.icon("label")
+        ui.label("Tags").classes("text-h6")
     tag_manager = _tag_manager_dialog(refresh)
     ui.button("Manage tags", on_click=tag_manager.open).mark("manage-tags")
 
     ui.separator()
-    ui.label("⚙️ Settings & Maintenance").classes("text-h6")
-    with ui.expansion("⚠️ Danger Zone: Clear Database"):
+    with ui.row().classes("items-center gap-2"):
+        ui.icon("settings")
+        ui.label("Settings & Maintenance").classes("text-h6")
+    with ui.expansion("Danger Zone: Clear Database", icon="warning").classes("ct-danger-zone"):
         ui.label(
-            "⚠️ This action cannot be undone. All tracked job postings and "
+            "This action cannot be undone. All tracked job postings and "
             "application history will be permanently erased."
         ).classes("text-negative")
         confirm = ui.input("Type 'DELETE' to confirm", placeholder="DELETE").classes("w-full")

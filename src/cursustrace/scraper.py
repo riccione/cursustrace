@@ -313,7 +313,7 @@ def _extract_location(soup: BeautifulSoup, description: str | None) -> str | Non
         if found is not None:
             return found
     if description:
-        match = re.search(r"📍\s*Location:\s*([^\n\r]+)", description)
+        match = re.search(r"Location:\s*([^\n\r]+)", description)
         if match is not None:
             return match.group(1).strip()
     return None

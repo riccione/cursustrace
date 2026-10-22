@@ -100,7 +100,7 @@ async def test_rejected_card_replaces_the_tracker_with_a_note(user: User) -> Non
 
     await user.should_not_see(marker="job-card-tracker")
     notes = _texts(user, "job-card-terminal")
-    assert notes == {"❌ Application rejected after 14 days"}
+    assert notes == {"Application rejected after 14 days"}
 
 
 async def test_outdated_card_replaces_the_tracker_with_a_note(user: User) -> None:
@@ -112,7 +112,7 @@ async def test_outdated_card_replaces_the_tracker_with_a_note(user: User) -> Non
 
     await user.should_not_see(marker="job-card-tracker")
     notes = _texts(user, "job-card-terminal")
-    assert notes == {"🗄️ Listing is outdated"}
+    assert notes == {"Listing is outdated"}
 
 
 async def test_offer_card_shows_the_offer_badge(user: User) -> None:

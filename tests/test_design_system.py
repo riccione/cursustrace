@@ -39,6 +39,8 @@ LIGHT_THEME: dict[str, str] = {
     "--badge-danger-soft": "#FCE9E9",
     "--badge-neutral-text": "#525A61",
     "--badge-neutral-soft": "#EDEFF1",
+    "--badge-warning-text": "#92400E",
+    "--badge-warning-soft": "#FBF0E2",
 }
 
 DARK_THEME: dict[str, str] = {
@@ -68,6 +70,8 @@ DARK_THEME: dict[str, str] = {
     "--badge-danger-soft": "#2E1717",
     "--badge-neutral-text": "#ADB5BD",
     "--badge-neutral-soft": "#262A2E",
+    "--badge-warning-text": "#FBBF24",
+    "--badge-warning-soft": "#2E2411",
 }
 
 # Minimum contrast ratios: 4.5 for body text, 3.0 for icons and other graphics.
@@ -173,12 +177,14 @@ def test_only_token_blocks_contain_hex_colors(css: str) -> None:
         ("--badge-offer-text", "--badge-offer-soft", TEXT_CONTRAST),
         ("--badge-danger-text", "--badge-danger-soft", TEXT_CONTRAST),
         ("--badge-neutral-text", "--badge-neutral-soft", TEXT_CONTRAST),
+        ("--badge-warning-text", "--badge-warning-soft", TEXT_CONTRAST),
         ("--badge-primary-text", "--bg-surface", TEXT_CONTRAST),
         ("--badge-success-text", "--bg-surface", TEXT_CONTRAST),
         ("--badge-info-text", "--bg-surface", TEXT_CONTRAST),
         ("--badge-offer-text", "--bg-surface", TEXT_CONTRAST),
         ("--badge-danger-text", "--bg-surface", TEXT_CONTRAST),
         ("--badge-neutral-text", "--bg-surface", TEXT_CONTRAST),
+        ("--badge-warning-text", "--bg-surface", TEXT_CONTRAST),
     ],
 )
 def test_theme_contrast_meets_wcag(
@@ -231,5 +237,10 @@ def test_board_classes_are_styled(css: str) -> None:
         ".ct-board-card",
         ".ct-board-card__title",
         ".ct-view-switch__active",
+        ".ct-detail-fact",
+        ".ct-heading-icon",
+        ".ct-danger-zone",
+        ".ct-stat-icon",
+        ".ct-note__icon",
     ):
         assert selector in css, f"missing style for {selector}"

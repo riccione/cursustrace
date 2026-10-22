@@ -14,9 +14,9 @@ async def _scroll_to_top() -> None:
 
 def scroll_to_top_button() -> None:
     """Bottom-of-page button that scrolls the viewport back to the top."""
-    ui.button("↑ Go up", on_click=_scroll_to_top).props("flat").classes("self-center q-mt-md").mark(
-        "scroll-to-top"
-    )
+    ui.button("Go up", icon="arrow_upward", on_click=_scroll_to_top).props("flat").classes(
+        "self-center q-mt-md"
+    ).mark("scroll-to-top")
 
 
 def app_footer() -> None:
