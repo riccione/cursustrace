@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import click
 
-from cursustrace.config import LOG_LEVELS, load_settings
+from cursustrace import db
+from cursustrace.config import LOG_LEVELS, Settings, load_settings
 from cursustrace.errors import ConfigError
 from cursustrace.logsetup import setup_logging
 
@@ -19,16 +20,23 @@ from cursustrace.logsetup import setup_logging
     message="cursustrace %(version)s",
 )
 @click.option(
+    "--db",
+    "db_path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="SQLite database file (default from config/env).",
+)
+@click.option(
     "--log-level",
     type=click.Choice(LOG_LEVELS, case_sensitive=False),
     default=None,
     help="Logging verbosity (default from config/env).",
 )
 @click.pass_context
-def cli(ctx: click.Context, log_level: str | None) -> None:
+def cli(ctx: click.Context, db_path: str | None, log_level: str | None) -> None:
     """CursusTrace — job application tracker."""
     try:
-        settings = load_settings(log_level=log_level)
+        settings = load_settings(db_path=db_path, log_level=log_level)
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
     setup_logging(
@@ -36,7 +44,10 @@ def cli(ctx: click.Context, log_level: str | None) -> None:
         retention_days=settings.log_retention_days,
         console=False,
     )
-    ctx.obj = settings.log_level
+    # Everything below this point reads the database through this global, so a
+    # demo run can never reach the personal database.
+    db.DEFAULT_DB_PATH = settings.db_path
+    ctx.obj = settings
     if ctx.invoked_subcommand is None:
         from cursustrace.app import run
 
@@ -74,6 +85,7 @@ def run_command(
     config_path: str | None,
 ) -> None:
     """Launch the dashboard (host/port/config overrides)."""
+    group: Settings = ctx.obj
     try:
         settings = load_settings(
             host=host,
@@ -82,7 +94,8 @@ def run_command(
             show=show,
             cv_style_path=cv_style,
             multi_user=multi_user,
-            log_level=ctx.obj,
+            db_path=group.db_path,
+            log_level=group.log_level,
             config_path=config_path,
         )
     except ConfigError as exc:

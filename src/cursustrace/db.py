@@ -10,9 +10,10 @@ from typing import Final, Literal, TypedDict, cast, get_args
 
 from rapidfuzz import fuzz, process, utils
 
+from cursustrace import config
 from cursustrace.utils import clean_url, generate_fingerprint, role_key
 
-DEFAULT_DB_PATH = Path("data/cursustrace.db")
+DEFAULT_DB_PATH: Path = config.DEFAULT_DB_PATH
 
 FUZZY_THRESHOLD = 85
 FUZZY_CANDIDATE_LIMIT = 50
