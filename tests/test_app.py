@@ -1635,7 +1635,7 @@ async def test_statistics_charts_use_dark_theme(user: User) -> None:
     chart = cast(ui.echart, user.find(marker="status-chart").elements.pop())
     assert chart.props["theme"] is None
 
-    user.find(ui.toggle).elements.pop().set_value("dark")
+    cast(ui.select, user.find(marker="theme-select").elements.pop()).set_value("dark")
 
     def theme_is_dark() -> bool:
         try:
@@ -2477,10 +2477,10 @@ def test_load_webapp_css_missing_file_raises(tmp_path: Path) -> None:
         constants.load_webapp_css(tmp_path / "missing.css")
 
 
-async def test_theme_toggle_persists_dark(user: User) -> None:
+async def test_theme_select_persists_dark(user: User) -> None:
     await user.open("/")
 
-    user.find(ui.toggle).elements.pop().set_value("dark")
+    cast(ui.select, user.find(marker="theme-select").elements.pop()).set_value("dark")
     await _wait_for(lambda: db.get_setting("dark_mode") == "dark")
 
     dark = user.find(ui.dark_mode).elements.pop()

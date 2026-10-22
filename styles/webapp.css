@@ -489,12 +489,6 @@ body.body--dark .ct-board-card:hover {
   background: var(--badge-warning-soft);
   color: var(--badge-warning-text);
 }
-/* The theme toggle's buttons stack their icon above the label; keep it inline. */
-.q-btn-toggle .q-btn__content {
-  flex-direction: row;
-  flex-wrap: nowrap;
-  gap: 8px;
-}
 .ct-heading-icon {
   color: var(--text-secondary);
   font-size: 1.5rem;

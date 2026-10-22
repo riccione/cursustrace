@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 from nicegui import events, ui
-from nicegui.element import Element
 
 from cursustrace import db
 from cursustrace.web.dialogs import _clear_database, _tag_manager_dialog
@@ -25,20 +25,36 @@ from cursustrace.web.state import (
 
 def _render_settings(refresh: Callable[[], None], dark: ui.dark_mode) -> None:
     ui.label("Appearance").classes("text-h6")
-    theme = ui.toggle(DARK_MODE_OPTIONS, value=_dark_mode_name(dark.value)).classes("w-full")
-    # NiceGUI's toggle rebuilds its options as {value, label} on every update, which
-    # would drop the icons. Set the icon-carrying payload with updates suspended and
-    # send it with the base update, so Quasar's QBtnToggle gets it intact.
-    with theme.props.suspend_updates():
-        theme.props["options"] = [
-            {
-                "value": index,
-                "label": DARK_MODE_OPTIONS[key],
-                "icon": DARK_MODE_ICONS[key],
-            }
-            for index, key in enumerate(DARK_MODE_OPTIONS)
-        ]
-    Element.update(theme)
+    theme = (
+        ui.select(
+            DARK_MODE_OPTIONS,
+            value=_dark_mode_name(dark.value),
+            label="Theme",
+        )
+        .classes("w-full ct-theme-select")
+        .mark("theme-select")
+    )
+    theme.props["title"] = "Appearance theme"
+    # The options themselves stay {value, label}; the icon is resolved in the option
+    # template from the label, so a value change cannot wipe it the way it did when
+    # the icons lived in the (rebuilt) options payload.
+    # Single quotes: the JSON is inlined into a double-quoted HTML attribute.
+    theme_icons = json.dumps(
+        {DARK_MODE_OPTIONS[key]: icon for key, icon in DARK_MODE_ICONS.items()}
+    ).replace('"', "'")
+    theme.add_slot(
+        "option",
+        """
+        <q-item v-bind="props.itemProps">
+            <q-item-section avatar>
+                <q-icon :name="__ICONS__[props.label]" />
+            </q-item-section>
+            <q-item-section>
+                <q-item-label>{{ props.label }}</q-item-label>
+            </q-item-section>
+        </q-item>
+        """.replace("__ICONS__", theme_icons),
+    )
 
     def update_theme(event: events.ValueChangeEventArguments[str | None]) -> None:
         name = event.value or "system"
