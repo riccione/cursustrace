@@ -165,7 +165,7 @@ def _add_job_dialog(refresh: Callable[[], None], add_dialog: ui.dialog) -> ui.di
             status_label = ui.label()
         scan_button.on_click(lambda: _handle_scan(urls_input, refresh, status_label, scan_button))
         ui.separator()
-        ui.button("➕ Add Manually", on_click=open_manual).props("flat color=primary").mark(
+        ui.button("➕ Add Manually", on_click=open_manual).props("outline color=primary").mark(
             "add-manually"
         )
         dialog.on_value_change(on_dialog_value_change)

@@ -19,6 +19,15 @@ from cursustrace.web.state import _apply_dark_mode
 from cursustrace.web.status_controls import _render_status_controls, _stage_comment
 
 
+def _fact(icon: str, label: str, value: str) -> None:
+    """Render one compact metadata block with a Material icon."""
+    with ui.element("div").classes("ct-detail-fact"):
+        ui.icon(icon).classes("ct-detail-fact__icon")
+        with ui.column().classes("gap-0 min-w-0"):
+            ui.label(label).classes("ct-detail-fact__label")
+            ui.label(value).classes("ct-detail-fact__value")
+
+
 def job_detail_page(job_id: int) -> None:
     ui.page_title(APP_TITLE)
     _apply_dark_mode()
@@ -43,8 +52,14 @@ def job_detail_page(job_id: int) -> None:
             current = db.job_status(job)
             ui.label(job["title"] or "Untitled position").classes("text-h5")
             ui.markdown(f"**Company:** {job['company'] or 'Unknown company'}")
-            ui.markdown(f"**Location:** {job['location'] or 'Not Specified'}")
-            ui.markdown(f"**Added:** {job['date_added']}")
+            salary_text = salary.format_salary(job)
+            with (
+                ui.row().classes("ct-detail-facts gap-2 flex-wrap items-stretch").mark("job-facts")
+            ):
+                _fact("place", "Location", job["location"] or "Not Specified")
+                if salary_text:
+                    _fact("payments", "Salary", salary_text)
+                _fact("schedule", "Added", job["date_added"])
             detail_deadline_text = _deadline_text(job["deadline"])
             if detail_deadline_text is not None:
                 ui.markdown(f"**Deadline:** {job['deadline']} {detail_deadline_text}").mark(
@@ -65,9 +80,6 @@ def job_detail_page(job_id: int) -> None:
                             name,
                             on_click=lambda tag=name: ui.navigate.to(f"/?tag={quote(tag)}"),
                         )
-            salary_text = salary.format_salary(job)
-            if salary_text:
-                ui.markdown(f"**Salary:** {salary_text}")
             if job["date_applied"]:
                 ui.markdown(f"**Applied:** {job['date_applied']}")
             if job["date_interview"]:

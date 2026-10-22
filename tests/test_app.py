@@ -1356,7 +1356,7 @@ async def test_primary_tabs_show_position_counts(user: User) -> None:
     await user.open("/")
 
     tab = cast(ui.tab, user.find(marker="status-tab-unapplied").elements.pop())
-    assert tab.props["label"] == "⏳ Unapplied (1)"
+    assert tab.props["label"] == "Unapplied (1)"
 
 
 async def test_clicking_a_primary_tab_leaves_the_secondary_view(user: User) -> None:
@@ -1515,7 +1515,7 @@ async def test_statistics_tab_shows_salary_chart(user: User) -> None:
         salary_period="year",
     )
     await user.open("/")
-    user.find("📊 Statistics").click()
+    user.find("Statistics").click()
 
     await user.should_see("1 of 1 positions have salary data")
     chart = cast(ui.echart, user.find(marker="salary-chart").elements.pop())
@@ -1525,7 +1525,7 @@ async def test_statistics_tab_shows_salary_chart(user: User) -> None:
 async def test_statistics_without_salary_shows_hint(user: User) -> None:
     _seed_job()
     await user.open("/")
-    user.find("📊 Statistics").click()
+    user.find("Statistics").click()
 
     await user.should_see("Add salary to positions to see the distribution.")
 
@@ -1661,7 +1661,14 @@ async def test_details_view_shows_full_description(user: User) -> None:
 
     await user.should_see("Responsibilities")
     await user.should_see("**Company:** Acme")
-    await user.should_see("**Location:** Remote")
+    # Location, salary and the added date now live in the facts row.
+    facts = user.find(marker="job-facts").elements.pop()
+    values = {
+        cast(ui.label, element).text
+        for element in facts.descendants()
+        if "ct-detail-fact__value" in element.classes
+    }
+    assert "Remote" in values
 
 
 async def test_detail_description_is_constrained(user: User) -> None:
@@ -1787,7 +1794,13 @@ async def test_details_view_shows_tracking_fields(user: User) -> None:
     await user.should_see("**Status:** Interview")
     await user.should_see("**Applied:**")
     await user.should_see("**Interview:**")
-    await user.should_see("**Added:**")
+    facts = user.find(marker="job-facts").elements.pop()
+    labels = [
+        cast(ui.label, element).text
+        for element in facts.descendants()
+        if "ct-detail-fact__label" in element.classes
+    ]
+    assert labels == ["Location", "Added"]
 
 
 async def test_detail_shows_outdated_stage(user: User) -> None:
@@ -2433,7 +2446,7 @@ async def test_settings_drawer_is_wide(user: User) -> None:
 async def test_main_tabs_render_inside_header(user: User) -> None:
     await user.open("/")
 
-    stat_tab = cast(ui.tab, user.find("📊 Statistics").elements.pop())
+    stat_tab = cast(ui.tab, user.find("Statistics").elements.pop())
     ancestors = list(stat_tab.ancestors(include_self=True))
     assert any(isinstance(element, ui.header) for element in ancestors)
     tabs_element = next(element for element in ancestors if isinstance(element, ui.tabs))

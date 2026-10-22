@@ -16,6 +16,7 @@ from cursustrace.web.constants import (
     APP_TITLE,
     PRIMARY_STATUSES,
     SECONDARY_STATUSES,
+    STAGE_ICONS,
     STATUS_TABS,
 )
 from cursustrace.web.discover import _render_discover
@@ -31,7 +32,7 @@ from cursustrace.web.statistics import _render_statistics
 
 
 def _stage_label(status: db.JobStatus) -> str:
-    """Label of a pipeline stage, e.g. '✅ Applied'."""
+    """Label of a pipeline stage, e.g. 'Applied'."""
     return next(label for stage, label, _message in STATUS_TABS if stage == status)
 
 
@@ -41,7 +42,7 @@ def dashboard_page(request: Request) -> None:
     containers: dict[db.JobStatus, ui.column] = {}
     stats_container: ui.column | None = None
     results_container: ui.column | None = None
-    attention_badges: dict[db.JobStatus, ui.badge] = {}
+    attention_badges: dict[db.JobStatus, ui.label] = {}
     status_tab_elements: dict[db.JobStatus, ui.tab] = {}
     secondary_views: dict[db.JobStatus, ui.column] = {}
     more_container: ui.column | None = None
@@ -267,15 +268,16 @@ def dashboard_page(request: Request) -> None:
         for status, badge in attention_badges.items():
             count = counts.get(status, 0)
             badge.set_text(str(count))
+            badge.props["title"] = f"{count} need attention"
             badge.set_visibility(count > 0)
 
     with ui.header().classes("items-center flex-nowrap"):
         ui.label(APP_NAME).classes("text-h6 flex-1 truncate min-w-0")
         with ui.tabs().classes("header-tabs") as main_tabs:
-            dashboard_tab = ui.tab("📋 Dashboard")
-            stats_tab = ui.tab("📊 Statistics")
-            profile_tab = ui.tab("👤 Profile & CV Editor")
-            discover_tab = ui.tab("🔍 Discover")
+            dashboard_tab = ui.tab("Dashboard", icon="assignment")
+            stats_tab = ui.tab("Statistics", icon="bar_chart")
+            profile_tab = ui.tab("Profile & CV Editor", icon="person")
+            discover_tab = ui.tab("Discover", icon="search")
         with ui.element("div").classes("flex-1 flex justify-end min-w-0 items-center gap-2"):
             if _multi_user_enabled():
                 email = current_email()
@@ -475,13 +477,13 @@ def dashboard_page(request: Request) -> None:
                         for status, label, _message in STATUS_TABS:
                             if status not in PRIMARY_STATUSES:
                                 continue
-                            tab = ui.tab(status, label=label)
+                            tab = ui.tab(status, label=label, icon=STAGE_ICONS[status])
                             tab.classes(f"ct-stage-{status}")
                             tab.mark(f"status-tab-{status}")
                             tab.on("click", on_primary_tab_click)
                             status_tab_elements[status] = tab
                             with tab:
-                                badge = ui.badge("").props("color=warning")
+                                badge = ui.label("").classes("ct-attention-badge")
                                 badge.set_visibility(False)
                                 badge.mark(f"attention-badge-{status}")
                                 attention_badges[status] = badge
@@ -502,6 +504,7 @@ def dashboard_page(request: Request) -> None:
                                     item = ui.item(
                                         label, on_click=lambda s=status: select_secondary(s)
                                     )
+                                    item.props["icon"] = STAGE_ICONS[status]
                                     item.mark(f"more-stage-{status}")
                 with ui.tab_panels(status_tabs, value="unapplied").classes(
                     "w-full ct-surface"
@@ -521,7 +524,9 @@ def dashboard_page(request: Request) -> None:
                             view.set_visibility(False)
                             view.mark(f"secondary-view-{status}")
                             secondary_views[status] = view
-                            ui.label(label).classes("text-h6")
+                            with ui.row().classes("items-center gap-2"):
+                                ui.icon(STAGE_ICONS[status])
+                                ui.label(label).classes("text-h6")
                             containers[status] = ui.column().classes("w-full gap-4")
                 results_container = ui.column().classes("w-full gap-4")
                 with ui.row().classes("w-full items-center gap-3"):

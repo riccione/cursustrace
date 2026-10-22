@@ -117,13 +117,17 @@ def _render_terminal_note(job: db.Job, status: db.JobStatus) -> None:
     if status == "rejected":
         days = _days_between(job["date_applied"], job["date_rejected"])
         text = (
-            f"❌ Application rejected after {days} days"
+            f"Application rejected after {days} days"
             if days is not None
-            else "❌ Application rejected"
+            else "Application rejected"
         )
+        icon = "cancel"
     else:
-        text = "🗄️ Listing is outdated"
-    ui.label(text).classes(f"ct-note ct-note--{status}").mark("job-card-terminal")
+        text = "Listing is outdated"
+        icon = "inventory_2"
+    with ui.row().classes(f"ct-note ct-note--{status}"):
+        ui.icon(icon).classes("ct-note__icon")
+        ui.label(text).mark("job-card-terminal")
 
 
 def _render_card_chips(

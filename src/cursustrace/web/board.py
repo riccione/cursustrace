@@ -92,7 +92,7 @@ def _render_move_menu(job: db.Job, current: db.JobStatus, refresh: Callable[[], 
     """Render the menu that moves a card without a mouse (touch and keyboard)."""
     button = (
         ui.button(icon="swap_horiz")
-        .props("flat dense round size=sm aria-label=Move to another stage")
+        .props("flat dense round size=md aria-label=Move to another stage")
         .classes("ct-board-card__move")
         .mark(f"move-{job['id']}")
     )
@@ -124,7 +124,8 @@ def _render_card(
     card.on("dragend", js_handler=_DRAG_END_JS)
     with card:
         with ui.row().classes("ct-board-card__top w-full items-start justify-between gap-1"):
-            ui.link(title, f"/job/{job['id']}").classes("ct-board-card__title")
+            link = ui.link(title, f"/job/{job['id']}").classes("ct-board-card__title")
+            link.props["title"] = title
             _render_move_menu(job, current, refresh)
         ui.label(company).classes("ct-board-card__company")
         if reasons:
@@ -226,7 +227,7 @@ def render_board(
             ui.button(
                 "Hide archived" if archived_open else f"Archived ({archived_count})",
                 on_click=toggle_archive,
-            ).props("flat dense").mark("board-archive")
+            ).props("outline dense").mark("board-archive")
         with ui.row().classes("ct-board w-full").mark("board"):
             for status in visible:
                 _render_column(

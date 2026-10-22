@@ -5,7 +5,12 @@ from __future__ import annotations
 from nicegui import ui
 
 from cursustrace import db, salary
-from cursustrace.web.constants import FUNNEL_STAGES, STAT_CARDS, STATUS_NAMES
+from cursustrace.web.constants import (
+    FUNNEL_STAGES,
+    STAT_CARD_ICONS,
+    STAT_CARDS,
+    STATUS_NAMES,
+)
 from cursustrace.web.session import current_user_id
 
 
@@ -82,7 +87,9 @@ def _render_statistics(dark: bool) -> None:
         for key, label in STAT_CARDS:
             with ui.card().classes("w-full items-center"):
                 ui.label(str(counts[key])).classes("text-h4").mark(f"stat-{key}")
-                ui.label(label)
+                with ui.row().classes("items-center gap-1"):
+                    ui.icon(STAT_CARD_ICONS[key]).classes("ct-stat-icon")
+                    ui.label(label)
 
     if counts["total"]:
         with ui.grid(columns=2).classes("w-full gap-4"):
