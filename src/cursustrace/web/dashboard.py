@@ -10,7 +10,13 @@ from starlette.requests import Request
 from cursustrace import db, salary
 from cursustrace.web.attention_ui import _park_stale_positions, attention_counts, attention_first
 from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
-from cursustrace.web.constants import APP_TITLE, PRIMARY_STATUSES, SECONDARY_STATUSES, STATUS_TABS
+from cursustrace.web.constants import (
+    APP_NAME,
+    APP_TITLE,
+    PRIMARY_STATUSES,
+    SECONDARY_STATUSES,
+    STATUS_TABS,
+)
 from cursustrace.web.discover import _render_discover
 from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
@@ -24,7 +30,7 @@ from cursustrace.web.statistics import _render_statistics
 
 
 def _stage_label(status: db.JobStatus) -> str:
-    """Label of a pipeline stage, e.g. '✅ Applied Positions'."""
+    """Label of a pipeline stage, e.g. '✅ Applied'."""
     return next(label for stage, label, _message in STATUS_TABS if stage == status)
 
 
@@ -80,8 +86,6 @@ def dashboard_page(request: Request) -> None:
         jobs: list[db.Job],
         empty_message: str,
         context: str,
-        *,
-        show_status: bool = False,
     ) -> tuple[int, int, int]:
         """Render one page of jobs; return (page_count, page, total)."""
         container.clear()
@@ -106,7 +110,6 @@ def dashboard_page(request: Request) -> None:
                 _render_job_card(
                     job,
                     refresh,
-                    show_status=show_status,
                     tags=grouped.get(job["id"], []),
                     on_tag_click=apply_tag_filter,
                 )
@@ -183,7 +186,6 @@ def dashboard_page(request: Request) -> None:
                 db.search_jobs(query, user_id=current_user_id()),
                 f'No positions match "{query}".',
                 "search",
-                show_status=True,
             )
         if not searching:
             for status, _label, empty_message in STATUS_TABS:
@@ -224,7 +226,7 @@ def dashboard_page(request: Request) -> None:
             badge.set_visibility(count > 0)
 
     with ui.header().classes("items-center flex-nowrap"):
-        ui.label(APP_TITLE).classes("text-h6 flex-1 truncate min-w-0")
+        ui.label(APP_NAME).classes("text-h6 flex-1 truncate min-w-0")
         with ui.tabs().classes("header-tabs") as main_tabs:
             dashboard_tab = ui.tab("📋 Dashboard")
             stats_tab = ui.tab("📊 Statistics")
@@ -414,7 +416,7 @@ def dashboard_page(request: Request) -> None:
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
                 with ui.row().classes("w-full items-center gap-2"):
-                    with ui.tabs().classes("flex-1 min-w-0") as status_tabs:
+                    with ui.tabs().classes("flex-1 min-w-0 ct-stage-tabs") as status_tabs:
                         for status, label, _message in STATUS_TABS:
                             if status not in PRIMARY_STATUSES:
                                 continue
@@ -453,7 +455,7 @@ def dashboard_page(request: Request) -> None:
                         if status not in PRIMARY_STATUSES:
                             continue
                         with ui.tab_panel(status):
-                            containers[status] = ui.column().classes("w-full")
+                            containers[status] = ui.column().classes("w-full gap-4")
                 with ui.column().classes("w-full") as more_container:
                     more_container.set_visibility(False)
                     more_container.mark("secondary-view")
@@ -465,8 +467,8 @@ def dashboard_page(request: Request) -> None:
                             view.mark(f"secondary-view-{status}")
                             secondary_views[status] = view
                             ui.label(label).classes("text-h6")
-                            containers[status] = ui.column().classes("w-full")
-                results_container = ui.column().classes("w-full")
+                            containers[status] = ui.column().classes("w-full gap-4")
+                results_container = ui.column().classes("w-full gap-4")
                 with ui.row().classes("w-full items-center gap-3"):
                     pagination = ui.pagination(min=1, max=1, direction_links=True).mark(
                         "pagination"

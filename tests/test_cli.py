@@ -1073,6 +1073,7 @@ def test_stats(runner: CliRunner) -> None:
         "unapplied": 1,
         "applied": 1,
         "interview": 0,
+        "offer": 0,
         "rejected": 0,
         "outdated": 0,
     }

@@ -203,6 +203,7 @@ def _job(
     date_added: str = "2026-01-01 00:00:00",
     applied: bool = False,
     interview: bool = False,
+    offer: bool = False,
     rejected: bool = False,
     outdated: bool = False,
 ) -> db.Job:
@@ -215,15 +216,18 @@ def _job(
         "description": "desc",
         "applied": int(applied),
         "interview": int(interview),
+        "offer": int(offer),
         "rejected": int(rejected),
         "outdated": int(outdated),
         "date_added": date_added,
         "date_applied": None,
         "date_interview": None,
+        "date_offer": None,
         "date_rejected": None,
         "date_outdated": None,
         "applied_comment": None,
         "interview_comment": None,
+        "offer_comment": None,
         "rejected_comment": None,
         "salary_min": None,
         "salary_max": None,
@@ -576,6 +580,7 @@ def test_job_counts(db_path: Path) -> None:
         "unapplied": 0,
         "applied": 0,
         "interview": 0,
+        "offer": 0,
         "rejected": 0,
         "outdated": 0,
     }
@@ -594,6 +599,7 @@ def test_job_counts(db_path: Path) -> None:
         "unapplied": 1,
         "applied": 1,
         "interview": 0,
+        "offer": 0,
         "rejected": 1,
         "outdated": 1,
     }
@@ -629,6 +635,7 @@ def test_pipeline_funnel(db_path: Path) -> None:
         "applied": 0,
         "response": 0,
         "interview": 0,
+        "offer": 0,
     }
 
     _add("https://a.com/1")
@@ -644,6 +651,7 @@ def test_pipeline_funnel(db_path: Path) -> None:
         "applied": 3,
         "response": 2,
         "interview": 1,
+        "offer": 0,
     }
 
 
@@ -660,6 +668,7 @@ def test_pipeline_funnel_keeps_history_after_unmark(db_path: Path) -> None:
         "applied": 1,
         "response": 1,
         "interview": 0,
+        "offer": 0,
     }
 
 
@@ -678,6 +687,7 @@ def test_pipeline_funnel_does_not_count_parking_as_applied(db_path: Path) -> Non
         "applied": 1,
         "response": 0,
         "interview": 0,
+        "offer": 0,
     }
 
 
@@ -1989,6 +1999,7 @@ def test_pipeline_funnel_scoped(db_path: Path) -> None:
         "applied": 1,
         "response": 0,
         "interview": 0,
+        "offer": 0,
     }
     assert db.pipeline_funnel(user_id=2)["interview"] == 1
 
@@ -2023,3 +2034,76 @@ def test_check_duplicate_and_find_similar_scoped(db_path: Path) -> None:
     assert db.check_duplicate("https://example.com/1", user_id=2) is False
     assert db.find_similar("Acme", "Engineer", "desc", user_id=1)
     assert db.find_similar("Acme", "Engineer", "desc", user_id=2) == []
+
+
+def test_offer_is_a_pipeline_stage(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "offer")
+
+    job = db.get_jobs()[0]
+    assert db.job_status(job) == "offer"
+    assert job["offer"] == 1
+    assert (job["applied"], job["interview"], job["rejected"], job["outdated"]) == (0, 0, 0, 0)
+    assert TIMESTAMP_RE.match(job["date_offer"] or "")
+    assert [entry["id"] for entry in db.get_jobs(status="offer")] == [job_id]
+    assert db.get_jobs(status="unapplied") == []
+    assert db.job_counts()["offer"] == 1
+    assert db.job_counts()["unapplied"] == 0
+
+
+def test_offer_preserves_the_earlier_stages(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "interview")
+    interview = db.get_jobs()[0]
+    db.set_job_status(job_id, "offer")
+    offered = db.get_jobs()[0]
+
+    assert offered["date_applied"] == interview["date_applied"]
+    assert offered["date_interview"] == interview["date_interview"]
+    assert offered["date_offer"] is not None
+
+
+def test_unmarking_clears_the_offer(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_status(job_id, "offer")
+    db.set_job_status(job_id, "unapplied")
+
+    job = db.get_jobs()[0]
+    assert db.job_status(job) == "unapplied"
+    assert job["offer"] == 0
+    assert job["date_offer"] is None
+
+
+def test_offer_comment_round_trip(db_path: Path) -> None:
+    db.init_db()
+    _add("https://example.com/1")
+    job_id = db.get_jobs()[0]["id"]
+
+    db.set_job_comment(job_id, "offer", "signed on Monday")
+
+    assert db.get_jobs()[0]["offer_comment"] == "signed on Monday"
+
+
+def test_every_status_has_a_place_in_the_interface(db_path: Path) -> None:
+    """A new pipeline stage must not slip past the labels, tabs and charts."""
+    from cursustrace.web import constants
+
+    tabbed = {status for status, _label, _empty in constants.STATUS_TABS}
+    named = {status for status, _label in constants.STATUS_NAMES}
+    carded = {key for key, _label in constants.STAT_CARDS}
+    checkboxed = {stage for stage, _label in constants.STATUS_CHECKBOXES}
+
+    assert tabbed == set(db.JOB_STATUSES)
+    assert named == set(db.JOB_STATUSES)
+    assert carded - {"total"} == set(db.JOB_STATUSES)
+    assert checkboxed >= set(db.JOB_STATUSES) - {"unapplied"}
+    assert set(db.PIPELINE_STAGES) < set(db.JOB_STATUSES)

@@ -26,6 +26,19 @@ LIGHT_THEME: dict[str, str] = {
     "--warning": "#B45309",
     "--danger": "#DC2626",
     "--info": "#2563EB",
+    "--offer": "#6D28D9",
+    "--badge-primary-text": "#4F46E5",
+    "--badge-primary-soft": "#ECEBFD",
+    "--badge-success-text": "#047857",
+    "--badge-success-soft": "#E6F4EF",
+    "--badge-info-text": "#1D4ED8",
+    "--badge-info-soft": "#E7EEFD",
+    "--badge-offer-text": "#6D28D9",
+    "--badge-offer-soft": "#F1EBFE",
+    "--badge-danger-text": "#B91C1C",
+    "--badge-danger-soft": "#FCE9E9",
+    "--badge-neutral-text": "#525A61",
+    "--badge-neutral-soft": "#EDEFF1",
 }
 
 DARK_THEME: dict[str, str] = {
@@ -42,6 +55,19 @@ DARK_THEME: dict[str, str] = {
     "--warning": "#FBBF24",
     "--danger": "#F87171",
     "--info": "#60A5FA",
+    "--offer": "#C4B5FD",
+    "--badge-primary-text": "#A5A1FF",
+    "--badge-primary-soft": "#23214A",
+    "--badge-success-text": "#34D399",
+    "--badge-success-soft": "#12291D",
+    "--badge-info-text": "#93C5FD",
+    "--badge-info-soft": "#131F35",
+    "--badge-offer-text": "#C4B5FD",
+    "--badge-offer-soft": "#241F3D",
+    "--badge-danger-text": "#FCA5A5",
+    "--badge-danger-soft": "#2E1717",
+    "--badge-neutral-text": "#ADB5BD",
+    "--badge-neutral-soft": "#262A2E",
 }
 
 # Minimum contrast ratios: 4.5 for body text, 3.0 for icons and other graphics.
@@ -141,6 +167,18 @@ def test_only_token_blocks_contain_hex_colors(css: str) -> None:
         ("--danger", "--bg-surface", GRAPHIC_CONTRAST),
         ("--info", "--bg-surface", GRAPHIC_CONTRAST),
         ("--border-color", "--bg-surface", 1.0),
+        ("--badge-primary-text", "--badge-primary-soft", TEXT_CONTRAST),
+        ("--badge-success-text", "--badge-success-soft", TEXT_CONTRAST),
+        ("--badge-info-text", "--badge-info-soft", TEXT_CONTRAST),
+        ("--badge-offer-text", "--badge-offer-soft", TEXT_CONTRAST),
+        ("--badge-danger-text", "--badge-danger-soft", TEXT_CONTRAST),
+        ("--badge-neutral-text", "--badge-neutral-soft", TEXT_CONTRAST),
+        ("--badge-primary-text", "--bg-surface", TEXT_CONTRAST),
+        ("--badge-success-text", "--bg-surface", TEXT_CONTRAST),
+        ("--badge-info-text", "--bg-surface", TEXT_CONTRAST),
+        ("--badge-offer-text", "--bg-surface", TEXT_CONTRAST),
+        ("--badge-danger-text", "--bg-surface", TEXT_CONTRAST),
+        ("--badge-neutral-text", "--bg-surface", TEXT_CONTRAST),
     ],
 )
 def test_theme_contrast_meets_wcag(
@@ -155,3 +193,29 @@ def test_no_pure_white_or_black_surfaces(css: str) -> None:
     assert LIGHT_THEME["--bg-base"] != "#FFFFFF"
     assert DARK_THEME["--bg-base"] != "#000000"
     assert DARK_THEME["--bg-surface"] != "#000000"
+
+
+def test_job_card_classes_are_styled(css: str) -> None:
+    """The card, its badge and the tracker all have rules in the stylesheet."""
+    for selector in (
+        ".ct-card",
+        ".ct-card__header",
+        ".ct-card__title",
+        ".ct-card__company",
+        ".ct-badge",
+        ".ct-badge--offer",
+        ".ct-tracker",
+        ".ct-tracker__dot",
+        ".ct-tracker__step.is-done",
+        ".ct-tracker__step.is-current",
+        ".ct-tracker__step.is-todo",
+        ".ct-note",
+    ):
+        assert selector in css, f"missing style for {selector}"
+
+
+def test_tracker_hides_its_labels_on_small_screens(css: str) -> None:
+    """The stage labels are dropped on narrow screens, the dots stay."""
+    assert "@media (max-width: 640px)" in css
+    mobile = css.split("@media (max-width: 640px)", 1)[1]
+    assert ".ct-tracker__label { display: none; }" in mobile

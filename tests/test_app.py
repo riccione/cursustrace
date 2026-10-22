@@ -134,7 +134,7 @@ def _profile_payload(
 
 async def test_title_renders(user: User) -> None:
     await user.open("/")
-    await user.should_see(constants.APP_TITLE)
+    await user.should_see(constants.APP_NAME)
 
 
 async def test_scan_saves_position(user: User) -> None:
@@ -960,9 +960,14 @@ async def test_flagged_positions_are_listed_first(user: User) -> None:
 
     ordered = attention_ui.attention_first(db.get_jobs())
     assert [job["title"] for job in ordered] == ["Stale Lead", "Fresh Lead"]
-    labels = {element.text for element in user.find(kind=ui.expansion).elements}
-    assert "Stale Lead — Acme" in labels
-    assert "Fresh Lead — Acme" in labels
+    titles = {
+        cast(ui.label, element).text for element in user.find(marker="job-card-title").elements
+    }
+    assert titles == {"Stale Lead", "Fresh Lead"}
+    companies = {
+        cast(ui.label, element).text for element in user.find(marker="job-card-company").elements
+    }
+    assert companies == {"Acme"}
 
 
 async def test_detail_shows_attention_reason(user: User) -> None:
@@ -1163,7 +1168,7 @@ async def test_search_results_are_paginated_without_sorting(user: User) -> None:
     sort_element = cast(ui.select, user.find(marker="sort-select").elements.pop())
 
     user.find("Search company").clear().type("Acme")
-    await user.should_see("[Unapplied]")
+    await user.should_see(marker="job-card-badge")
 
     assert not sort_element.visible
 
@@ -1351,7 +1356,7 @@ async def test_primary_tabs_show_position_counts(user: User) -> None:
     await user.open("/")
 
     tab = cast(ui.tab, user.find(marker="status-tab-unapplied").elements.pop())
-    assert tab.props["label"] == "⏳ Unapplied Positions (1)"
+    assert tab.props["label"] == "⏳ Unapplied (1)"
 
 
 async def test_clicking_a_primary_tab_leaves_the_secondary_view(user: User) -> None:
@@ -1418,7 +1423,11 @@ async def test_search_is_across_statuses(user: User) -> None:
     await asyncio.sleep(0.4)
 
     await user.should_see("Adapty")
-    await user.should_see("[Applied]")
+    await user.should_see(marker="job-card-badge")
+    badges = {
+        cast(ui.label, element).text for element in user.find(marker="job-card-badge").elements
+    }
+    assert badges == {"Applied"}
     await user.should_not_see("Paysend")
 
     user.find("Search company").clear()
@@ -1548,6 +1557,7 @@ async def test_statistics_status_pie(user: User) -> None:
         {"name": "Unapplied", "value": 1},
         {"name": "Applied", "value": 1},
         {"name": "Interview", "value": 0},
+        {"name": "Offer", "value": 0},
         {"name": "Rejected", "value": 1},
         {"name": "Outdated", "value": 0},
     ]
@@ -1569,6 +1579,7 @@ async def test_statistics_funnel(user: User) -> None:
         {"name": "Applied", "value": 2},
         {"name": "Response", "value": 1},
         {"name": "Interview", "value": 0},
+        {"name": "Offer", "value": 0},
     ]
 
 
@@ -2770,7 +2781,7 @@ async def test_sort_controls_hidden_during_search(user: User) -> None:
     await user.should_see(marker="sort-select")
 
     user.find("Search company").clear().type("Zeta")
-    await user.should_see("[Unapplied]")
+    await user.should_see(marker="job-card-badge")
     await user.should_not_see(marker="sort-select")
 
 

@@ -91,7 +91,7 @@ def discover(
 def _status_breakdown(counts: dict[str, int]) -> str:
     if not counts:
         return ""
-    order = ("unapplied", "applied", "interview", "rejected", "outdated")
+    order = db.JOB_STATUSES
     parts = [f"{counts[status]} {status}" for status in order if status in counts]
     return f" ({', '.join(parts)})"
 

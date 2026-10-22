@@ -2,46 +2,76 @@
 
 [![CI](https://github.com/riccione/cursustrace/actions/workflows/ci.yml/badge.svg)](https://github.com/riccione/cursustrace/actions/workflows/ci.yml)
 
-Track job applications by scanning a listing URL and saving its details to a local
-SQLite database.
+**Stop losing track of job applications. Scan a listing in seconds, follow every application through a visual pipeline, and let your own AI agent do the busywork — all from one local dashboard.**
 
-Curated job board lists by region live in [`job-sources/`](job-sources/).
+<!-- Add a dashboard screenshot here -->
 
-## Setup
+## Features
 
-Requires [uv](https://docs.astral.sh/uv/). Install dependencies:
+- **Smart scraping** — A four-step fallback chain (static HTML → board APIs → headless render) pulls the title, company, location, description and deadline out of a listing URL, even from JavaScript-heavy boards.
+- **Visual pipeline** — Tabbed stages `Unapplied` → `Applied` → `Interview` → `Offer`, with a linear progress tracker on every card.
+- **Smart alerts** — Positions that go quiet or approach a deadline are flagged automatically and rise to the top of their tab.
+- **CV management** — Keep several named CV profiles, tag each application with the one you sent, and export a formatted PDF.
+- **AI-agent ready** — A Model Context Protocol server exposes 13 tools, so agents like opencode can add, track and tidy positions for you.
+- **Local-first** — Everything lives in one SQLite file on your machine: no account, no cloud.
+
+## Quick start
+
+Requires [uv](https://docs.astral.sh/uv/).
 
 ```sh
 uv sync
-```
-
-PDF export uses [WeasyPrint](https://weasyprint.org/), which relies on the
-Pango, Cairo, and GDK-Pixbuf system libraries.
-
-## Run
-
-Launch the dashboard:
-
-```sh
 uv run cursustrace
 ```
 
-The [NiceGUI](https://nicegui.io/) server starts on
-[http://localhost:8080](http://localhost:8080). Use `cursustrace run` to pass
-options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
+Then the [NiceGUI](https://nicegui.io/) server starts on
+[http://localhost:8080](http://localhost:8080) — the dashboard is ready.
 
-## Dashboard
+`cursustrace run` takes the options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
+
+<details>
+<summary><b>System dependencies (needed only for PDF export)</b></summary>
+
+PDF export uses [WeasyPrint](https://weasyprint.org/), which relies on the Pango, Cairo, and GDK-Pixbuf system libraries. Everything else — scanning, the dashboard, the CLI and the MCP server — works without them.
+
+</details>
+
+## The Dashboard
+
+- **The Pipeline:** Positions move through tabbed stages: `Unapplied` → `Applied` → `Interview` → `Offer`. Rejected and Outdated roles are tucked away in a "More" menu to keep your view clean.
+- **Job Cards:** Every position is a distinct, modern card showing the job title, company, status badge, and a linear progress tracker.
+- **Smart Alerts:** The app automatically flags positions that need attention (e.g., 21 days without a response, or an upcoming deadline). Flagged positions rise to the top of their tab.
+- **Advanced Filtering:** A single row provides fuzzy company search, salary range filters, tag filtering, and sorting.
+- **CV Tagging:** Associate specific CV profiles with specific applications (saved per position) so you always know which resume you sent.
+- **Discover:** The `🔍 Discover` tab lets you search curated job boards, extract candidate links, and add them in bulk.
+
+<details>
+<summary><b>Dashboard in depth</b></summary>
+
+### The pipeline
 
 The pipeline is the main view: positions land in the `Unapplied` tab and move
-through `Applied`, `Interview`, `Rejected`, and `Outdated` by ticking the
-matching stage checkbox on a card. The tab strip shows the three active
-stages — `Unapplied`, `Applied` and `Interview` — each with the number of
-positions it holds; the archival `Rejected` and `Outdated` stages live behind
-the `More` menu next to the tabs. Adding a position is a secondary action
-behind the `➕ Add Job` button above the tabs: it opens a panel where you can
-paste one or more job listing URLs (one per line) and click
-`Scan & Save Positions`, or switch to `➕ Add Manually` to type the details
-yourself.
+through `Applied`, `Interview`, `Offer`, `Rejected`, and `Outdated` by ticking
+the matching stage checkbox on a card. The tab strip shows the four active
+stages — `Unapplied`, `Applied`, `Interview` and `Offer` — each with the number
+of positions it holds; the archival `Rejected` and `Outdated` stages live behind
+the `More` menu next to the tabs.
+
+### Adding positions
+
+Adding a position is a secondary action behind the `➕ Add Job` button above
+the tabs: it opens a panel where you can paste one or more job listing URLs
+(one per line) and click `Scan & Save Positions`, or switch to `➕ Add Manually`
+to type the details yourself.
+
+When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
+in the `➕ Add Job` panel to enter a position's URL, title, company, description,
+and an optional application deadline; the same fields can be edited later from
+the position's detail page. The add and edit forms always open on a clean slate:
+a new position starts empty, and an edit starts from the saved values, so a
+cancelled change never leaks into the next opening.
+
+### Discovering positions
 
 Prefer to start from a board rather than a specific URL? The `🔍 Discover` tab
 searches a job source for listing links and lets you pick which to add: enter a
@@ -50,11 +80,33 @@ an `Only live` filter), click `Discover`, then tick the candidates you want and
 press `Add selected`. Listings you already track appear with their status and
 cannot be re-added.
 
+Curated job board lists by region live in [`job-sources/`](job-sources/).
+
+### Filtering the list
+
 Narrowing the list takes one row: a `Search company` field next to a
 `Filters` button, which slides out a panel on the left holding the salary
 range, the tag filter, the sort order and the rows per page. The button
 carries a badge with the number of active filters, and the pagination sits
-below the list.
+below the list. The `Search company` box matches fuzzy company names across all
+pipeline stages at once, and each result carries a status badge naming its
+stage.
+
+### Job cards
+
+Every position is a card: a soft, bordered surface with generous padding that
+lifts off the page. The top line carries the job title, the company and a
+pill-shaped status badge; below it a linear tracker shows how far the
+application got — `Unapplied` → `Applied` → `Interview` → `Offer` — with the
+finished stages filled in, the current stage ringed, and the future ones left
+empty. A rejected or outdated position replaces the tracker with a single
+line (`❌ Application rejected after 14 days`) because the pipeline ended
+there. The tag, `CV:` and attention chips sit under the tracker, so they stay
+visible without opening the card, and clicking a tag chip only filters the
+list — it never opens the card. On narrow screens the tracker keeps its dots
+and drops the stage labels. Clicking the card opens the position details.
+
+### Position details
 
 Select `View full details` on a card to open the complete scraped description
 and metadata. The detail view has the same stage checkboxes, plus a
@@ -62,17 +114,8 @@ and metadata. The detail view has the same stage checkboxes, plus a
 which profile you applied with (saved per position), and that profile's
 name, email, phone, LinkedIn, and GitHub fields show below, each with an
 in-field copy button for pasting into application forms. The dashboard card
-displays the saved choice as a `CV:` chip. The `Search company` box matches
-fuzzy company names across all pipeline stages at once, and each result
-shows its status, e.g. `[Applied]`.
+displays the saved choice as a `CV:` chip.
 
-When scraping fails (or for a listing you track by hand), use `➕ Add Manually`
-in the `➕ Add Job` panel to enter a position's URL, title, company, description,
-and an optional application deadline; the same fields can be edited later from
-the position's detail page.
-The add and edit forms always open on a clean slate: a new position starts
-empty, and an edit starts from the saved values, so a cancelled change never
-leaks into the next opening.
 Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
 `validThrough` date or type it as an ISO date like `2026-12-31`.
@@ -80,6 +123,8 @@ Cards and the detail page show the deadline with a relative countdown (e.g.
 Each dashboard and detail page ends with a `↑ Go up` button that scrolls back
 to the top. Every page also carries a footer at the bottom of the page (below
 the content) showing the app name and version, e.g. `CursusTrace v0.1.0`.
+
+### Smart alerts
 
 The dashboard flags positions that need attention with a badge on the
 `⏳ Unapplied` and `✅ Applied` tabs, each counting the flagged positions of
@@ -104,6 +149,8 @@ next refresh parks it in the `Outdated` tab. Parking happens once per
 position: tick `Applied`, `Interview`, or `Rejected` and it stays back in the
 pipeline no matter how old its dates look.
 
+### CV profiles
+
 Use the `👤 Profile & CV Editor` tab to set your contact details and edit
 your CV in Markdown as four sections: Summary, Work History, Education, and
 Skills. A live preview combines them in export order. Your profile and CV are
@@ -118,15 +165,155 @@ profile` removes the selected one
 after you type `DELETE` to confirm. The selected profile persists across restarts, and PDF
 export always uses it.
 
+### Statistics
+
 The `📊 Statistics` tab shows how many positions you have in total and in each
-pipeline stage (unapplied, applied, interview, rejected, outdated), with charts
-for the status distribution, applications per month, and a response funnel from
-added to applied, responded, and interview.
+pipeline stage (unapplied, applied, interview, offer, rejected, outdated),
+with charts for the status distribution, applications per month, and a
+response funnel from added to applied, responded, interview, and offer.
+
+</details>
+
+## CLI Usage
+
+CursusTrace is fully scriptable via a powerful CLI. You can add, list, delete, export, and discover jobs without opening the UI.
+
+**[View the full CLI Documentation here](docs/CLI.md)**
+
+## Advanced Features
+
+### Scraping
+
+Scans extract a listing through a fallback chain; each step runs only while
+the description so far is too thin (under 600 characters, or just the page
+title repeated):
+
+1. Static HTML: trafilatura and page text plus the page's metadata,
+   including job descriptions embedded in inline scripts (Zoho Recruit and
+   similar boards hide theirs inside JavaScript-escaped strings).
+2. Known-board APIs: when the URL, or the page's canonical link,
+   points at a Greenhouse, Lever, or Ashby listing, its public JSON API
+   supplies the real title, company, location, description, and deadline.
+3. Browser render: with `render = "auto"` (the default), pages that
+   are still JavaScript shells are rendered once with
+   [lightpanda](https://lightpanda.io) and the final DOM is re-extracted.
+   Install `lightpanda` on your `PATH` or point `CURSUS_LIGHTPANDA` at
+   the binary; each render is capped at 20 seconds. Set
+   `render = "never"` (or `CURSUS_RENDER=never`) to skip this tier on
+   hosts where no browser may run.
+4. Headless Chrome/Chromium: if the lightpanda render still leaves too
+   little text, the page is rendered again in headless Chrome or
+   Chromium (`--dump-dom`), which handles sites whose JavaScript
+   lightpanda cannot execute. Put the binary on your `PATH` or point
+   `CURSUS_CHROMIUM` at it; the render waits up to 15 seconds and is
+   capped at 45 seconds, so expect roughly half a minute per page.
+
+If every step comes up empty the scan fails with a
+`JavaScript-rendered or blocked` error and the position is left for
+manual entry; partial junk is never stored. Render problems (missing
+binary, timeout) are logged at `log_level = "warning"` and simply fall
+through to that error.
+
+### MCP server
+
+CursusTrace ships a [Model Context Protocol](https://modelcontextprotocol.io)
+server so AI agents can drive the tracker over structured tool calls instead of
+shelling out to the CLI. Point your agent at it and it can list, scrape, add,
+tag, update and delete positions for you — every action goes through the same
+tools, so an agent never edits the database behind the app's back.
+
+```sh
+uv run cursustrace mcp   # stdio transport; blocks until the client disconnects
+```
+
+It exposes 13 tools: `list_positions`, `get_position`, `get_stats`,
+`list_tags`, `scrape_position`, `add_position`, `scan`, `discover`,
+`update_status`, `set_tags`, `delete_positions`, `rename_tag`, and
+`delete_tag`. Tool failures come back with `is_error` set and the real
+reason, adding never overwrites (known URLs report as duplicates), and
+`delete_positions` is preview-first: call it with `confirm=false` to see
+what matches, then repeat with `confirm=true` to delete. The database path
+is relative to the server's working directory, so the MCP client's cwd
+decides which tracker it talks to.
+
+Adds are applicability-gated for agents: `scrape_position` returns the
+scraped listing with `applicability.flags`, and `add_position`, `scan`
+and `discover(add=true)` answer `status=flagged` (or a `flagged` list)
+instead of ingesting when the location or description looks tied to a
+specific country or work authorization. Read the listing, then retry
+with `force=true` if it fits a Serbia/remote-EU applicant. Deadlines
+flow through the same way: `scrape_position` returns the listing's
+`deadline` (ISO date from `validThrough`), `add_position` accepts one
+via its `deadline` argument (scraped when omitted), and every stored
+position reports it back from `get_position` and `list_positions`.
+
+#### opencode
+
+This repository registers the server for [opencode](https://opencode.ai) in
+`opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cursustrace": {
+      "type": "local",
+      "command": ["uv", "run", "cursustrace", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Restart opencode after editing it; config is not hot-reloaded. Any other MCP
+client works the same way: point it at `uv run cursustrace mcp` over stdio.
+
+### Multi-user mode
+
+Off by default. Enable it with `multi_user = true` in `cursustrace.toml`,
+`CURSUS_MULTI_USER=1`, or `cursustrace run --multi-user`. The dashboard then
+requires a login on every page except `/login` and `/register`, and each
+account sees only its own positions, tags, CV profiles, and preferences.
+
+On the first multi-user start a default admin account is seeded:
+`admin@admin.dev` / `admin`. Sign in and change the password immediately from
+the header's **Change password** button — the seeded password is public.
+
+Registration is open: anyone who can reach `/register` can create an account.
+The server binds to `0.0.0.0` by default, so it listens on every network
+interface — keep it local with `host = "127.0.0.1"` in `cursustrace.toml`, or
+put your own authentication (VPN, reverse proxy with basic auth, …) in front of
+it before exposing it beyond localhost.
+
+What is isolated per account:
+
+- Positions (jobs), tags, CV profiles, and dashboard settings
+  (dark mode, notification toggles, selected profile).
+- History events follow their position, so they inherit the isolation.
+
+What is shared or global:
+
+- The danger-zone **Clear Database** button deletes *every* account's
+  positions — treat it as an operator tool.
+- The CLI (`cursustrace scan`, `stats`, `discover`, `add`, …) and the MCP
+  server operate on the whole database without a user context.
+
+On the first multi-user start, any pre-existing rows (positions, profiles,
+tags created before authentication existed) are assigned to the seeded admin
+account, so upgrading a single-user database loses nothing.
+
+Login sessions live in server-side files under `.nicegui/` and are keyed by a
+secret stored in `data/.storage-secret` (created automatically, permissions
+`0600`). Deleting that file signs everyone out; session cookies themselves are
+destroyed whenever the app restarts.
 
 ## Configuration
 
 Settings resolve in this order: command-line flags, then environment variables,
 then `cursustrace.toml`, then the built-in defaults.
+
+<details>
+<summary><b>Click to view full configuration options (TOML & Env Vars)</b></summary>
 
 - `cursustrace.toml` in the working directory (or a path via `--config`):
 
@@ -161,44 +348,17 @@ then `cursustrace.toml`, then the built-in defaults.
 - Group flag (all commands): `--log-level`, e.g.
   `cursustrace --log-level debug scan URL`.
 
+</details>
+
 `cv_style` / `--css` points at the PDF stylesheet used by the
 `📄 Export to PDF` button in the profile tab. On start the dashboard prints
 which source it resolved from: `Config: using config file cursustrace.toml`
 or `Config: no config file found, using hardcoded default values`.
 
-### Scraping
-
-Scans extract a listing through a fallback chain; each step runs only while
-the description so far is too thin (under 600 characters, or just the page
-title repeated):
-
-1. Static HTML: trafilatura and page text plus the page's metadata,
-   including job descriptions embedded in inline scripts (Zoho Recruit and
-   similar boards hide theirs inside JavaScript-escaped strings).
-2. Known-board APIs: when the URL, or the page's canonical link,
-   points at a Greenhouse, Lever, or Ashby listing, its public JSON API
-   supplies the real title, company, location, description, and deadline.
-3. Browser render: with `render = "auto"` (the default), pages that
-   are still JavaScript shells are rendered once with
-   [lightpanda](https://lightpanda.io) and the final DOM is re-extracted.
-   Install `lightpanda` on your `PATH` or point `CURSUS_LIGHTPANDA` at
-   the binary; each render is capped at 20 seconds. Set
-   `render = "never"` (or `CURSUS_RENDER=never`) to skip this tier on
-   hosts where no browser may run.
-4. Headless Chrome/Chromium: if the lightpanda render still leaves too
-   little text, the page is rendered again in headless Chrome or
-   Chromium (`--dump-dom`), which handles sites whose JavaScript
-   lightpanda cannot execute. Put the binary on your `PATH` or point
-   `CURSUS_CHROMIUM` at it; the render waits up to 15 seconds and is
-   capped at 45 seconds, so expect roughly half a minute per page.
-
-If every step comes up empty the scan fails with a
-`JavaScript-rendered or blocked` error and the position is left for
-manual entry; partial junk is never stored. Render problems (missing
-binary, timeout) are logged at `log_level = "warning"` and simply fall
-through to that error.
-
 ### Logging
+
+<details>
+<summary><b>Click to view the logging details</b></summary>
 
 Errors are written to a daily file under `logs/cursustrace-YYYY-MM-DD.log`
 (appended across runs). The default level is `error`; set `log_level`
@@ -206,7 +366,12 @@ Errors are written to a daily file under `logs/cursustrace-YYYY-MM-DD.log`
 `CURSUS_LOG_LEVEL`, or the group-level `--log-level` flag. Files older than
 `log_retention_days` (default `7`, `0` disables pruning) are deleted on startup.
 
+</details>
+
 ### Backups
+
+<details>
+<summary><b>Click to view the backup details</b></summary>
 
 Every dashboard start writes a consistent copy of the SQLite database into
 `backup_dir` (default `backups/`) as `cursustrace-YYYYMMDD-HHMMSS.db`, using
@@ -231,43 +396,7 @@ To restore a backup, stop the app, copy the chosen backup over
 `data/cursustrace.db`, delete leftover `data/cursustrace.db-wal` /
 `data/cursustrace.db-shm` files, then start the app again.
 
-## Multi-user mode
-
-Off by default. Enable it with `multi_user = true` in `cursustrace.toml`,
-`CURSUS_MULTI_USER=1`, or `cursustrace run --multi-user`. The dashboard then
-requires a login on every page except `/login` and `/register`, and each
-account sees only its own positions, tags, CV profiles, and preferences.
-
-On the first multi-user start a default admin account is seeded:
-`admin@admin.dev` / `admin`. Sign in and change the password immediately from
-the header's **Change password** button — the seeded password is public.
-
-Registration is open: anyone who can reach `/register` can create an account.
-The app binds to `127.0.0.1` by default, which is fine for a personal machine;
-if you expose it beyond localhost, put your own authentication (VPN, reverse
-proxy with basic auth, …) in front of it or keep registration in mind.
-
-What is isolated per account:
-
-- Positions (jobs), tags, CV profiles, and dashboard settings
-  (dark mode, notification toggles, selected profile).
-- History events follow their position, so they inherit the isolation.
-
-What is shared or global:
-
-- The danger-zone **Clear Database** button deletes *every* account's
-  positions — treat it as an operator tool.
-- The CLI (`cursustrace scan`, `stats`, `discover`, `add`, …) and the MCP
-  server operate on the whole database without a user context.
-
-On the first multi-user start, any pre-existing rows (positions, profiles,
-tags created before authentication existed) are assigned to the seeded admin
-account, so upgrading a single-user database loses nothing.
-
-Login sessions live in server-side files under `.nicegui/` and are keyed by a
-secret stored in `data/.storage-secret` (created automatically, permissions
-`0600`). Deleting that file signs everyone out; session cookies themselves are
-destroyed whenever the app restarts.
+</details>
 
 ## Customizing the CV PDF style
 
@@ -293,246 +422,14 @@ theme, so both themes stay in sync:
 | `--text-primary`, `--text-secondary` | body and muted text |
 | `--border-color` | dividers, card and row outlines |
 | `--primary`, `--primary-hover`, `--primary-text` | primary buttons, active tabs |
-| `--success`, `--warning`, `--danger`, `--info` | stage dots, badges and alerts |
+| `--success`, `--warning`, `--danger`, `--info`, `--offer` | stage dots, badges and alerts |
+| `--badge-*-text`, `--badge-*-soft` | status badge text and its background tint |
 
 Light and dark values are set in `:root` and `body.body--dark`; Quasar's own
 brand variables are remapped onto them, so components follow the palette
 automatically. `tests/test_design_system.py` checks that every token exists in
 both themes and that each color pair meets its WCAG contrast ratio, so a
 palette change that breaks accessibility fails the test suite.
-
-## Command-line usage
-
-The `cursustrace` command also offers headless subcommands for adding positions
-without the UI (duplicates are skipped, never overwritten). Pass `--json` for
-machine-readable output.
-
-URLs are deduplicated by a canonical form: tracking parameters (`utm_*`, `ref`,
-`gh_src`, board-specific noise) are ignored, while parameters that carry the
-posting id on some boards (`id`, `gh_jid`, `ashby_jid`, ...) are preserved and
-sorted. Two roles on the same board path therefore stay distinct even when only
-their query id differs.
-
-Add one position from explicit fields:
-
-```sh
-uv run cursustrace add --url https://example.com/job/1 \
-  --title "Backend Engineer" --company Acme --description "Build APIs" \
-  --location Remote --status applied --deadline 2026-12-31 --tag remote --json
-```
-
-Scrape and add one or more URLs (a repeatable `--tag` labels the whole batch):
-
-```sh
-uv run cursustrace scan https://example.com/job/1 https://example.com/job/2 --tag qa --json
-```
-
-Discover candidate listing links from a source page (URL or job-sources site
-name):
-
-```sh
-uv run cursustrace discover RemoteOK --json
-uv run cursustrace discover https://example.com/jobs --add --tag qa --json
-```
-
-Batch import a JSON array (structured items and/or URL-only items) from a file
-or stdin:
-
-```sh
-uv run cursustrace import jobs.json --json
-echo '[{"url": "https://example.com/job/1"}]' | uv run cursustrace import --json
-```
-
-List stored positions (a repeatable `--tag` filter matches any tag):
-
-```sh
-uv run cursustrace list --status applied --json
-uv run cursustrace list --tag remote --tag startup --json
-```
-
-List positions that need attention (a stale stage, or a deadline in the
-warning window). The filter composes with `--status`, `--tag`, and the rest,
-and text output appends the reasons. Parked `Outdated` positions never match;
-list those with `--status outdated`:
-
-```sh
-uv run cursustrace list --attention
-uv run cursustrace list --attention --status applied --json
-```
-
-Sort (newest, oldest, company, company_desc, status) and paginate:
-
-```sh
-uv run cursustrace list --sort company --limit 50 --json
-uv run cursustrace list --sort status --limit 50 --offset 50 --json
-```
-
-Export positions as import-compatible JSON (stdout by default) or CSV:
-
-```sh
-uv run cursustrace export
-uv run cursustrace export jobs.json
-uv run cursustrace export --format csv --status applied
-uv run cursustrace export --min-salary 60000 --salary-currency EUR
-uv run cursustrace export --tag remote --format csv
-```
-
-Manage tags (labels) for counts, creation, rename, and delete:
-
-```sh
-uv run cursustrace tags list --json
-uv run cursustrace tags add remote referral --json
-uv run cursustrace tags rename remote wfh
-uv run cursustrace tags rm wfh
-```
-
-Position counts per pipeline stage:
-
-```sh
-uv run cursustrace stats --json
-```
-
-Write a database backup (retention settings are documented under Backups):
-
-```sh
-uv run cursustrace backup --json
-uv run cursustrace backup --dir /mnt/backup --keep 30
-```
-
-Show the version:
-
-```sh
-uv run cursustrace -V
-```
-
-Delete positions by id, URL, a URL list file, or the list filters. The
-command previews matches and prompts for confirmation unless you pass
-`--yes` (`--json` requires `--yes`):
-
-```sh
-uv run cursustrace delete 42 43 --yes
-uv run cursustrace delete --url https://example.com/job/1 --yes
-uv run cursustrace delete --url-file urls.txt --yes --json
-uv run cursustrace delete --status rejected --tag spam --yes
-```
-
-Delete all job positions at once, or everything with `--all`. `--yes` skips
-the prompt:
-
-```sh
-uv run cursustrace clear --yes
-uv run cursustrace clear --all --yes
-```
-
-Each JSON item may be structured (`url`, `title`, `company`, `location`,
-`description`, `status`, `salary_*`, `deadline`, `tags`) or URL-only (the URL is
-scraped to fill the missing fields; see Scraping under Configuration for
-the extraction and fallback chain). Scraped positions resolve `location` from
-the page's Open Graph meta, then its JSON-LD `JobPosting` address, then a
-`📍Location:` line in the description, and `deadline` from the JSON-LD
-`validThrough` date. `export` writes that same shape, so
-`cursustrace export jobs.json` can be edited and fed back into `import`: status,
-stage comments, tags, and deadlines survive the round trip (unknown tags are
-created), timestamps are re-stamped on import. The CSV variant is a flat
-spreadsheet view with tags joined by `;`. `import` reads JSON only.
-
-### Discovering positions with an AI agent
-
-`discover` fetches one source page (a search or board page), extracts candidate
-listing links, and checks each against the database. It does no LLM calls
-itself; an AI agent (or you) does the reasoning on top of its JSON output:
-
-```sh
-# by site name from job-sources/ or by URL; --limit caps candidates (default 100)
-uv run cursustrace discover RemoteOK --json
-uv run cursustrace discover https://example.com/jobs --limit 50 --json
-
-# search a source for a keyword; sites with a Search template filter server-side
-uv run cursustrace discover RemoteOK --query qa --json
-uv run cursustrace discover https://example.com/jobs --query qa --json
-
-# skip named sources that are blocked/login/dead in job-sources/
-uv run cursustrace discover "Indeed RS" --only-live --json
-
-# or scrape and add every new link in one step (no agent needed)
-uv run cursustrace discover https://example.com/jobs --add --json
-```
-
-The JSON payload reports `source` (input, resolved URL, job-sources status),
-`extracted` / `new_count` / `known_count`, `known_by_status` (so already-applied
-positions are visible), and one `candidates` entry per link: `known: false`
-for new ones, plus `status`, `id`, `title` for known ones. With `--query` it
-adds `query` and `fetched_url`; a non-live source adds a `warning`. With `--add`
-it also returns `added`, `skipped`, `errors` and `similar`, and exits non-zero
-when any scrape failed; a failed fetch prints an `error` key. Candidates that
-are already in the database are skipped whatever their stage, so discovery never
-re-adds an applied position.
-
-Link extraction drops obvious page chrome (navigation, legal, blog, social
-links) before applying `--limit`, so the budget goes to real listings. `--query`
-substitutes the term into the site's `Search` template from `job-sources/`
-(server-side filtering) when one exists, and otherwise filters the extracted
-links client-side.
-
-A workflow you can paste to an AI agent:
-
-> Discover positions for me from `<source>`. Run
-> `cursustrace discover <source> --json`, review the candidates with
-> `known: false` and keep only the ones matching my profile, then run
-> `cursustrace scan <chosen urls> --json` and summarize what was added, what
-> was already tracked, and what you skipped and why.
-
-## MCP server
-
-CursusTrace ships a [Model Context Protocol](https://modelcontextprotocol.io)
-server so AI agents can drive the tracker over structured tool calls instead of
-shelling out to the CLI:
-
-```sh
-uv run cursustrace mcp   # stdio transport; blocks until the client disconnects
-```
-
-It exposes 13 tools: `list_positions`, `get_position`, `get_stats`,
-`list_tags`, `scrape_position`, `add_position`, `scan`, `discover`,
-`update_status`, `set_tags`, `delete_positions`, `rename_tag`, and
-`delete_tag`. Tool failures come back with `is_error` set and the real
-reason, adding never overwrites (known URLs report as duplicates), and
-`delete_positions` is preview-first: call it with `confirm=false` to see
-what matches, then repeat with `confirm=true` to delete. The database path
-is relative to the server's working directory, so the MCP client's cwd
-decides which tracker it talks to.
-
-Adds are applicability-gated for agents: `scrape_position` returns the
-scraped listing with `applicability.flags`, and `add_position`, `scan`
-and `discover(add=true)` answer `status=flagged` (or a `flagged` list)
-instead of ingesting when the location or description looks tied to a
-specific country or work authorization. Read the listing, then retry
-with `force=true` if it fits a Serbia/remote-EU applicant. Deadlines
-flow through the same way: `scrape_position` returns the listing's
-`deadline` (ISO date from `validThrough`), `add_position` accepts one
-via its `deadline` argument (scraped when omitted), and every stored
-position reports it back from `get_position` and `list_positions`.
-
-### opencode
-
-This repository registers the server for [opencode](https://opencode.ai) in
-`opencode.json`:
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "cursustrace": {
-      "type": "local",
-      "command": ["uv", "run", "cursustrace", "mcp"],
-      "enabled": true
-    }
-  }
-}
-```
-
-Restart opencode after editing it; config is not hot-reloaded. Any other MCP
-client works the same way: point it at `uv run cursustrace mcp` over stdio.
 
 ## Development
 

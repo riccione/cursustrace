@@ -156,6 +156,7 @@ def stats(as_json: bool) -> None:
     click.echo(f"Unapplied: {counts['unapplied']}")
     click.echo(f"Applied: {counts['applied']}")
     click.echo(f"Interview: {counts['interview']}")
+    click.echo(f"Offer: {counts['offer']}")
     click.echo(f"Rejected: {counts['rejected']}")
     click.echo(f"Outdated: {counts['outdated']}")
     if not summary:

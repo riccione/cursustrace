@@ -11,12 +11,21 @@ from cursustrace.web.constants import STATUS_CHECKBOXES
 from cursustrace.web.dialogs import _confirm_delete_dialog, _delete_job
 from cursustrace.web.session import current_user_id
 
+
+def _disabled_checkboxes(status: db.JobStatus) -> frozenset[db.JobStatus]:
+    """Return the checkboxes that cannot change while a position sits in ``status``."""
+    if status == "unapplied":
+        return frozenset()
+    if status in db.PIPELINE_STAGES:
+        index = db.PIPELINE_STAGES.index(status)
+        return frozenset(db.PIPELINE_STAGES[: index + 1])
+    if status == "rejected":
+        return frozenset(stage for stage in db.PIPELINE_STAGES if stage != "unapplied")
+    return frozenset({"outdated"})
+
+
 _DISABLED_CHECKBOXES: dict[db.JobStatus, frozenset[db.JobStatus]] = {
-    "unapplied": frozenset(),
-    "applied": frozenset({"applied"}),
-    "interview": frozenset({"applied", "interview"}),
-    "rejected": frozenset({"applied", "interview"}),
-    "outdated": frozenset({"outdated"}),
+    status: _disabled_checkboxes(status) for status in db.JOB_STATUSES
 }
 
 
@@ -26,6 +35,8 @@ def _checked_flags(job: db.Job) -> frozenset[db.JobStatus]:
         return frozenset({"applied"})
     if status == "interview":
         return frozenset({"applied", "interview"})
+    if status == "offer":
+        return frozenset({"applied", "interview", "offer"})
     if status == "rejected":
         flags: set[db.JobStatus] = {"applied", "rejected"}
         if job["date_interview"]:
@@ -43,6 +54,8 @@ def _stage_comment(job: db.Job, stage: db.JobStatus) -> str:
         return job["applied_comment"] or ""
     if stage == "interview":
         return job["interview_comment"] or ""
+    if stage == "offer":
+        return job["offer_comment"] or ""
     return job["rejected_comment"] or ""
 
 

@@ -11,6 +11,7 @@ body { font-size: 22px; }
 .nicegui-markdown table { max-width: 100%; }
 .nicegui-markdown table { display: block; overflow-x: auto; }
 .header-tabs { flex: 0 0 auto; min-width: 0; }
+.ct-stage-tabs .q-tabs__content { overflow-x: auto; scrollbar-width: thin; }
 .header-tabs .q-tabs__content { overflow-x: auto; scrollbar-width: thin; }
 @media (max-width: 999px) { .header-tabs { flex: 1 1 0%; } }
 
@@ -29,6 +30,20 @@ body { font-size: 22px; }
   --warning: #B45309;
   --danger: #DC2626;
   --info: #2563EB;
+  --offer: #6D28D9;
+  /* Badge pairs: a soft tint with text that clears WCAG AA on that tint. */
+  --badge-primary-text: #4F46E5;
+  --badge-primary-soft: #ECEBFD;
+  --badge-success-text: #047857;
+  --badge-success-soft: #E6F4EF;
+  --badge-info-text: #1D4ED8;
+  --badge-info-soft: #E7EEFD;
+  --badge-offer-text: #6D28D9;
+  --badge-offer-soft: #F1EBFE;
+  --badge-danger-text: #B91C1C;
+  --badge-danger-soft: #FCE9E9;
+  --badge-neutral-text: #525A61;
+  --badge-neutral-soft: #EDEFF1;
 }
 
 body.body--dark {
@@ -45,6 +60,19 @@ body.body--dark {
   --warning: #FBBF24;
   --danger: #F87171;
   --info: #60A5FA;
+  --offer: #C4B5FD;
+  --badge-primary-text: #A5A1FF;
+  --badge-primary-soft: #23214A;
+  --badge-success-text: #34D399;
+  --badge-success-soft: #12291D;
+  --badge-info-text: #93C5FD;
+  --badge-info-soft: #131F35;
+  --badge-offer-text: #C4B5FD;
+  --badge-offer-soft: #241F3D;
+  --badge-danger-text: #FCA5A5;
+  --badge-danger-soft: #2E1717;
+  --badge-neutral-text: #ADB5BD;
+  --badge-neutral-soft: #262A2E;
 }
 
 /* Quasar writes its brand colors inline on <body>, so remapping them needs
@@ -88,16 +116,197 @@ body {
   color: var(--text-primary);
   border: 1px solid var(--border-color);
 }
+/* Quasar paints the tab panels white; the page background must show through. */
+.q-tab-panels { background: transparent; }
 
 .ct-surface {
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: 12px;
 }
-.ct-row {
+
+/* Job card: the expansion itself is the card, the header slot holds the summary. */
+.ct-card {
+  overflow: hidden;
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.ct-card:hover {
+  border-color: var(--text-secondary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+body.body--dark .ct-card {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+body.body--dark .ct-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+}
+.ct-card .ct-card__header {
+  padding: 20px 24px;
+  gap: 16px;
+}
+.ct-card .nicegui-expansion-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 24px 20px;
+}
+.ct-card .q-expansion-item__toggle-icon {
+  color: var(--text-secondary);
+}
+.ct-card__title {
+  min-width: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-card__company {
+  min-width: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-card__ident .ct-badge { margin-left: auto; }
+.ct-card__sep {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+/* Status badge: a pill that names the current pipeline stage. */
+.ct-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--badge-neutral-soft);
+  color: var(--badge-neutral-text);
+}
+.ct-badge--unapplied {
+  background: var(--badge-primary-soft);
+  color: var(--badge-primary-text);
+}
+.ct-badge--applied {
+  background: var(--badge-success-soft);
+  color: var(--badge-success-text);
+}
+.ct-badge--interview {
+  background: var(--badge-info-soft);
+  color: var(--badge-info-text);
+}
+.ct-badge--offer {
+  background: var(--badge-offer-soft);
+  color: var(--badge-offer-text);
+}
+.ct-badge--rejected {
+  background: var(--badge-danger-soft);
+  color: var(--badge-danger-text);
+}
+
+/* Linear stage tracker: dots joined by a line, visible without expanding. */
+.ct-tracker {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  max-width: 420px;
+}
+.ct-tracker__step {
+  position: relative;
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ct-tracker__step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border-color);
+}
+.ct-tracker__step.is-done:not(:last-child)::after {
+  background: var(--success);
+}
+.ct-tracker__dot {
+  position: relative;
+  z-index: 1;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+  background: var(--bg-surface);
+}
+.ct-tracker__step.is-done .ct-tracker__dot {
+  background: var(--success);
+  border-color: var(--success);
+}
+.ct-tracker__step.is-todo .ct-tracker__dot {
+  background: var(--bg-surface);
+  border-color: var(--border-color);
+}
+.ct-tracker__step.is-current .ct-tracker__dot {
+  background: var(--bg-surface);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
+  animation: ct-pulse 2.4s ease-in-out infinite;
+}
+.ct-tracker__label {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  text-align: center;
+  white-space: nowrap;
+}
+.ct-tracker__step.is-current .ct-tracker__label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+@keyframes ct-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 8%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ct-tracker__step.is-current .ct-tracker__dot { animation: none; }
+}
+
+/* Terminal stages replace the tracker with one flat line. */
+.ct-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+.ct-note--rejected {
+  color: var(--badge-danger-text);
+}
+
+@media (max-width: 640px) {
+  .ct-card .ct-card__header { padding: 16px; }
+  .ct-card .nicegui-expansion-content { padding: 4px 16px 16px; }
+  .ct-tracker__label { display: none; }
+  /* Stack the identifier so the badge never squeezes the title out. */
+  .ct-card__ident { display: block; }
+  .ct-card__title { display: block; }
+  .ct-card__company { display: block; margin-top: 2px; }
+  .ct-card__sep { display: none; }
+  .ct-card__ident .ct-badge { margin-top: 6px; }
 }
 
 /* Stage dot: colour never carries the stage meaning on its own. */
@@ -114,5 +323,6 @@ body {
 .q-tab.ct-stage-unapplied .q-tab__label::before { background: var(--primary); }
 .q-tab.ct-stage-applied .q-tab__label::before { background: var(--success); }
 .q-tab.ct-stage-interview .q-tab__label::before { background: var(--info); }
+.q-tab.ct-stage-offer .q-tab__label::before { background: var(--offer); }
 .q-tab.ct-stage-rejected .q-tab__label::before { background: var(--danger); }
 .q-tab.ct-stage-outdated .q-tab__label::before { background: var(--text-secondary); }
