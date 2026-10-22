@@ -29,6 +29,7 @@ ADD_ARGS = [
 ]
 
 _CURSUS_ENV = (
+    "CURSUS_DB_PATH",
     "CURSUS_HOST",
     "CURSUS_PORT",
     "CURSUS_RELOAD",
@@ -42,7 +43,9 @@ _CURSUS_ENV = (
     "CURSUS_STALE_APPLIED_DAYS",
     "CURSUS_STALE_UNAPPLIED_DAYS",
     "CURSUS_DEADLINE_WARNING_DAYS",
+    "CURSUS_OUTDATED_AFTER_DAYS",
     "CURSUS_RENDER",
+    "CURSUS_MULTI_USER",
 )
 
 
@@ -53,6 +56,9 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CliRunner:
     monkeypatch.setattr(config, "LOG_DIR", tmp_path / "logs")
     for name in _CURSUS_ENV:
         monkeypatch.delenv(name, raising=False)
+    # The group applies the resolved db path to the storage global, so the
+    # resolver - not just the monkeypatch - must point at the temporary file.
+    monkeypatch.setenv("CURSUS_DB_PATH", str(tmp_path / "cursustrace.db"))
     return CliRunner()
 
 
@@ -1576,3 +1582,34 @@ def test_export_csv_joins_tags_with_semicolons(runner: CliRunner) -> None:
     rows = list(csv.DictReader(result.output.splitlines()))
     assert [row["company"] for row in rows] == ["Acme"]
     assert rows[0]["tags"] == "remote;startup"
+
+
+def test_db_flag_redirects_writes(runner: CliRunner, tmp_path: Path) -> None:
+    """--db keeps a demo run away from the database the fixture points at."""
+    personal = db.DEFAULT_DB_PATH
+    demo = tmp_path / "demo.db"
+
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "--db",
+            str(demo),
+            "add",
+            "--url",
+            "https://example.com/demo",
+            "--title",
+            "Demo role",
+            "--company",
+            "DemoCo",
+            "--description",
+            "Body",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    db.DEFAULT_DB_PATH = demo
+    assert [job["title"] for job in db.get_jobs()] == ["Demo role"]
+    db.DEFAULT_DB_PATH = personal
+    db.init_db()
+    assert db.get_jobs() == []

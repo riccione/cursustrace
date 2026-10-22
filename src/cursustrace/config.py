@@ -13,6 +13,7 @@ from cursustrace.errors import ConfigError
 CONFIG_FILE = Path("cursustrace.toml")
 CONFIG_TABLE = "cursustrace"
 
+ENV_DB_PATH = "CURSUS_DB_PATH"
 ENV_HOST = "CURSUS_HOST"
 ENV_PORT = "CURSUS_PORT"
 ENV_RELOAD = "CURSUS_RELOAD"
@@ -30,6 +31,7 @@ ENV_OUTDATED_AFTER_DAYS = "CURSUS_OUTDATED_AFTER_DAYS"
 ENV_RENDER = "CURSUS_RENDER"
 ENV_MULTI_USER = "CURSUS_MULTI_USER"
 
+DEFAULT_DB_PATH = Path("data/cursustrace.db")
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
 DEFAULT_CV_STYLE = Path("styles/cv.css")
@@ -56,6 +58,7 @@ _FALSE = frozenset({"0", "false", "no", "off"})
 class Settings:
     """Resolved runtime settings."""
 
+    db_path: Path = DEFAULT_DB_PATH
     host: str = DEFAULT_HOST
     port: int = DEFAULT_PORT
     reload: bool = False
@@ -77,6 +80,7 @@ class Settings:
 
 def load_settings(
     *,
+    db_path: str | Path | None = None,
     host: str | None = None,
     port: int | None = None,
     reload: bool | None = None,
@@ -101,6 +105,7 @@ def load_settings(
     values, config_file = _read_config(config_path)
 
     for key, env_name in (
+        ("db_path", ENV_DB_PATH),
         ("host", ENV_HOST),
         ("port", ENV_PORT),
         ("reload", ENV_RELOAD),
@@ -122,6 +127,8 @@ def load_settings(
         if raw is not None:
             values[key] = raw
 
+    if db_path is not None:
+        values["db_path"] = db_path
     if host is not None:
         values["host"] = host
     if port is not None:
@@ -156,6 +163,7 @@ def load_settings(
         values["multi_user"] = multi_user
 
     return Settings(
+        db_path=_as_db_path(values.get("db_path"), DEFAULT_DB_PATH),
         host=_as_str(values, "host", DEFAULT_HOST),
         port=_as_port(values.get("port", DEFAULT_PORT)),
         reload=_as_bool(values, "reload", False),
@@ -272,6 +280,18 @@ def _non_negative_int(key: str) -> Callable[[object], int]:
         return days
 
     return coerce
+
+
+def _as_db_path(value: object, default: Path) -> Path:
+    if value is None:
+        return default
+    if isinstance(value, Path):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped:
+            return Path(stripped)
+    raise ConfigError("'db_path' must be a non-empty string")
 
 
 def _as_backup_dir(value: object, default: Path) -> Path:

@@ -334,3 +334,28 @@ def test_multi_user_env_and_flag_override(config_file: Path) -> None:
 def test_invalid_multi_user_raises(config_file: Path) -> None:
     with pytest.raises(ConfigError, match="multi_user"):
         config.load_settings(env={"CURSUS_MULTI_USER": "maybe"})
+
+
+def test_db_path_defaults_to_the_personal_database(config_file: Path) -> None:
+    settings = config.load_settings(env={})
+
+    assert settings.db_path == Path("data/cursustrace.db")
+    assert settings.db_path == config.DEFAULT_DB_PATH
+
+
+def test_db_path_from_file_env_and_flag(config_file: Path) -> None:
+    config_file.write_text('[cursustrace]\ndb_path = "data/from-file.db"\n', encoding="utf-8")
+
+    assert config.load_settings(env={}).db_path == Path("data/from-file.db")
+    assert config.load_settings(env={"CURSUS_DB_PATH": "data/from-env.db"}).db_path == Path(
+        "data/from-env.db"
+    )
+    assert config.load_settings(
+        db_path="data/from-flag.db", env={"CURSUS_DB_PATH": "data/from-env.db"}
+    ).db_path == Path("data/from-flag.db")
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_blank_db_path_raises(config_file: Path, value: str) -> None:
+    with pytest.raises(ConfigError, match="db_path"):
+        config.load_settings(env={"CURSUS_DB_PATH": value})

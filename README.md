@@ -331,6 +331,7 @@ then `cursustrace.toml`, then the built-in defaults.
 
   ```toml
   [cursustrace]
+  db_path = "data/cursustrace.db"
   host = "127.0.0.1"
   port = 8090
   reload = false
@@ -349,7 +350,7 @@ then `cursustrace.toml`, then the built-in defaults.
   multi_user = false
   ```
 
-- Environment variables: `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
+- Environment variables: `CURSUS_DB_PATH`, `CURSUS_HOST`, `CURSUS_PORT`, `CURSUS_RELOAD`,
   `CURSUS_SHOW`, `CURSUS_CV_STYLE`, `CURSUS_LOG_LEVEL`, `CURSUS_LOG_RETENTION_DAYS`,
   `CURSUS_BACKUP_DIR`, `CURSUS_BACKUP_KEEP`, `CURSUS_BACKUP_ON_START`,
   `CURSUS_STALE_APPLIED_DAYS`, `CURSUS_STALE_UNAPPLIED_DAYS`,
@@ -357,8 +358,15 @@ then `cursustrace.toml`, then the built-in defaults.
   `CURSUS_MULTI_USER`.
 - `cursustrace run` flags: `--host`, `--port`, `--reload/--no-reload`,
   `--show/--no-show`, `--css PATH`, `--config PATH`, `--multi-user/--no-multi-user`.
+- Group flag (all commands): `--db PATH` picks the SQLite file, e.g.
+  `cursustrace --db data/demo.db list`. It applies to every command, the
+  dashboard and the MCP server.
 - Group flag (all commands): `--log-level`, e.g.
   `cursustrace --log-level debug scan URL`.
+
+`db_path` defaults to `data/cursustrace.db`. Point it elsewhere to experiment
+without touching your real tracker: the path is resolved once at startup and
+every part of the app uses it, so a demo run never reaches the personal file.
 
 </details>
 
@@ -462,7 +470,23 @@ uv run pre-commit run --all-files   # run the hooks across the repo
 Dependencies are pinned in `uv.lock`. To refresh them, run `uv lock --upgrade`,
 then `uv sync` and the checks above.
 
-The database lives at `data/cursustrace.db` and is created on first run.
+The database lives at `data/cursustrace.db` and is created on first run
+(`--db` / `CURSUS_DB_PATH` / `db_path` in the TOML point it elsewhere).
+
+### Demo data
+
+The dashboard and the screenshot tooling can run against a throwaway database:
+
+```sh
+# seed a fresh demo database (recreates data/demo.db, writes data/demo_manifest.json)
+uv run python scripts/seed_demo.py --db data/demo.db
+
+# run against it, keeping the startup backups out of the personal ones
+CURSUS_BACKUP_DIR=backups/demo uv run cursustrace --db data/demo.db
+```
+
+The seeder refuses to touch `data/cursustrace.db` unless `--force` is passed,
+and `data/` is git-ignored, so the demo file never reaches the repository.
 
 ## Contributing
 
