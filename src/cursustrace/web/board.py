@@ -129,7 +129,9 @@ def _render_card(
             _render_move_menu(job, current, refresh)
         ui.label(company).classes("ct-board-card__company")
         if reasons:
-            ui.chip(f"⚠ {most_urgent(reasons)}").props("dense color=warning").mark("attention-chip")
+            ui.chip(most_urgent(reasons), icon="warning").props("dense color=warning").mark(
+                "attention-chip"
+            )
         chips: list[tuple[str, str | None]] = [(name, None) for name in tags]
         if job["profile_name"]:
             chips.append((f"CV: {job['profile_name']}", "cv-used-chip"))
@@ -168,9 +170,9 @@ def _render_column(
             ui.label(STAGE_LABELS[status]).classes("ct-board__column-title")
             ui.label(str(len(jobs))).classes(f"ct-badge ct-badge--{status}")
             if attention:
-                ui.label(f"⚠ {attention}").classes("ct-board__column-attention").mark(
-                    f"board-attention-{status}"
-                )
+                with ui.row().classes("ct-board__column-attention items-center gap-1"):
+                    ui.icon("warning")
+                    ui.label(str(attention)).mark(f"board-attention-{status}")
         cards_box = ui.column().classes("ct-board__cards w-full gap-2")
 
     def render_cards() -> None:

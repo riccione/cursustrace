@@ -81,7 +81,9 @@ def _render_discover(refresh: Callable[[], None]) -> None:
         with results:
             warning = discovery.source_warning(result.source)
             if warning is not None:
-                ui.label(f"⚠️ {warning}").classes("text-warning")
+                with ui.row().classes("text-warning items-center gap-1"):
+                    ui.icon("warning")
+                    ui.label(warning)
             label = result.source.site or result.fetched_url or result.source.url
             ui.label(f"{label} · {result.new_count} new · {result.known_count} known").classes(
                 "font-bold"

@@ -151,7 +151,9 @@ def _render_card_chips(
         if job["profile_name"]:
             ui.chip(f"CV: {job['profile_name']}").mark("cv-used-chip")
         if reasons:
-            ui.chip(f"⚠ {most_urgent(reasons)}").props("color=warning").mark("attention-chip")
+            ui.chip(most_urgent(reasons), icon="warning").props("color=warning").mark(
+                "attention-chip"
+            )
 
 
 def _render_ident(title: str, company: str, status: db.JobStatus) -> None:

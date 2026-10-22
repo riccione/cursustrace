@@ -105,10 +105,11 @@ def _render_profile_editor() -> None:
                     .mark("profile-select")
                 )
                 selector.on_value_change(switch_profile)
-            ui.button("➕ Add Profile", on_click=open_add).mark("add-profile")
+            ui.button("Add Profile", icon="add", on_click=open_add).mark("add-profile")
             if selected["id"] is not None:
                 ui.button(
-                    "🗑 Delete Profile",
+                    "Delete Profile",
+                    icon="delete",
                     on_click=open_delete,
                 ).props("color=negative").mark("delete-profile")
 
@@ -256,7 +257,7 @@ def _render_profile_editor() -> None:
             )
             ui.notify("Profile and CV saved successfully!", type="positive")
 
-        ui.button("💾 Save Profile & CV", on_click=save).props("color=primary")
+        ui.button("Save Profile & CV", icon="save", on_click=save).props("color=primary")
 
         ui.separator()
 
@@ -273,7 +274,7 @@ def _render_profile_editor() -> None:
                 media_type="application/pdf",
             )
 
-        ui.button("📄 Export to PDF", on_click=export)
+        ui.button("Export to PDF", icon="picture_as_pdf", on_click=export)
 
     rerender_all()
 

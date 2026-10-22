@@ -422,9 +422,9 @@ def dashboard_page(request: Request) -> None:
 
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
         with ui.row().classes("w-full items-center gap-3"):
-            ui.button("➕ Add Job", on_click=add_job_dialog.open).props("color=primary").mark(
-                "add-job"
-            )
+            ui.button("Add Job", icon="add", on_click=add_job_dialog.open).props(
+                "color=primary"
+            ).mark("add-job")
             search_input = (
                 ui.input("Search company", placeholder="e.g. Adapty")
                 .props("clearable debounce=300")

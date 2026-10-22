@@ -132,7 +132,7 @@ Cards and the detail page show the deadline with a relative countdown (e.g.
 `2026-12-31 — in 5 days`) when one is set; scrape it from the listing's
 `validThrough` date or type it as an ISO date like `2026-12-31`.
 
-Each dashboard and detail page ends with a `↑ Go up` button that scrolls back
+Each dashboard and detail page ends with a `Go up` button that scrolls back
 to the top. Every page also carries a footer at the bottom of the page (below
 the content) showing the app name and version, e.g. `CursusTrace v0.1.0`.
 
@@ -169,7 +169,7 @@ Skills. A live preview combines them in export order. Your profile and CV are
 stored only in the SQLite database, and `Export to PDF` downloads a
 formatted document combining your contact header with the sections in that
 order. When you keep more than one CV (e.g. per role or seniority), a dropdown
-at the top of the tab switches between named profiles: its `+ Add Profile`
+at the top of the tab switches between named profiles: its `Add Profile`
 button creates a new one, copying your name and contact details from the profile
 you are on,
 and — via a checked-by-default checkbox — its Summary, Work History, Education

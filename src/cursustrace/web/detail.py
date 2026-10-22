@@ -37,14 +37,16 @@ def job_detail_page(job_id: int) -> None:
         def render_detail() -> None:
             job = db.get_job(job_id, user_id=current_user_id())
             with ui.row().classes("items-center gap-2"):
-                ui.button("← Back to list", on_click=lambda: ui.navigate.to("/"))
+                ui.button("Back to list", icon="arrow_back", on_click=lambda: ui.navigate.to("/"))
                 if job is not None:
                     edit_dialog = _job_form_dialog(
                         job,
                         lambda values: _update_job_fields(job["id"], values),
                         with_comments=True,
                     )
-                    ui.button("✏️ Edit", on_click=edit_dialog.open).props("flat color=primary")
+                    ui.button("Edit", icon="edit", on_click=edit_dialog.open).props(
+                        "flat color=primary"
+                    )
             if job is None:
                 ui.label("Position not found.").classes("text-warning")
                 return
@@ -68,9 +70,9 @@ def job_detail_page(job_id: int) -> None:
             ui.markdown(f"**Status:** {current.title()}")
             reasons = attention_reasons(job)
             if reasons:
-                ui.label(f"⚠ Needs attention: {'; '.join(reasons)}").classes("text-negative").mark(
-                    "attention-detail"
-                )
+                with ui.row().classes("text-negative items-center gap-1"):
+                    ui.icon("warning")
+                    ui.label(f"Needs attention: {'; '.join(reasons)}").mark("attention-detail")
             _render_status_controls(job, current, refresh_detail)
             detail_tags = db.job_tags(job["id"])
             if detail_tags:
@@ -117,7 +119,9 @@ def job_detail_page(job_id: int) -> None:
             delete_dialog = _confirm_delete_dialog(
                 job, lambda dialog: _delete_job_from_detail(dialog, job["id"])
             )
-            ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
+            ui.button("Delete", icon="delete", on_click=delete_dialog.open).props(
+                "flat color=negative"
+            ).mark(f"delete-button-{job['id']}")
 
         def refresh_detail() -> None:
             render_detail.refresh()

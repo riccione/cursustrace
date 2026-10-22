@@ -9,6 +9,17 @@ from cursustrace import db
 
 APP_NAME = "CursusTrace"
 APP_TITLE = "CursusTrace — Job Application Tracker"
+# Inline SVG (a clipboard on the brand indigo) so the browser tab icon is not an
+# emoji, which renders differently per OS.
+APP_FAVICON = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="7" fill="#4F46E5"/>'
+    '<rect x="9" y="10" width="14" height="15" rx="2" fill="#FFFFFF"/>'
+    '<rect x="12" y="7" width="8" height="4" rx="1.5" fill="#FFFFFF"/>'
+    '<path d="M12.5 16.5h7M12.5 20h5" stroke="#4F46E5" stroke-width="1.6" '
+    'stroke-linecap="round"/>'
+    "</svg>"
+)
 
 STAGE_ICONS: dict[db.JobStatus, str] = {
     "unapplied": "hourglass_empty",

@@ -598,7 +598,7 @@ async def test_delete_requires_confirmation(user: User) -> None:
     await _see_notice(user, "Saved 1")
 
     job_id = db.get_jobs()[0]["id"]
-    user.find("🗑️ Delete").click()
+    user.find(marker=f"delete-button-{job_id}").click()
     with user.scope(marker=f"delete-dialog-{job_id}") as scoped:
         dialog = cast(ui.dialog, scoped)
         await _wait_for(lambda: dialog.value is True)
@@ -614,7 +614,7 @@ async def test_delete_confirmed_removes_position(user: User) -> None:
     await _see_notice(user, "Saved 1")
 
     job_id = db.get_jobs()[0]["id"]
-    user.find("🗑️ Delete").click()
+    user.find(marker=f"delete-button-{job_id}").click()
     user.find(marker=f"delete-confirm-{job_id}").click()
 
     await _wait_for(lambda: db.get_jobs() == [])
@@ -625,7 +625,7 @@ async def test_delete_from_detail_returns_to_dashboard(user: User) -> None:
     job_id = _seed_job()
     await user.open(f"/job/{job_id}")
 
-    user.find("🗑️ Delete").click()
+    user.find(marker=f"delete-button-{job_id}").click()
     user.find(marker=f"delete-confirm-{job_id}").click()
 
     await user.should_see("Job URL", retries=20)
@@ -687,7 +687,7 @@ async def test_add_manually_dialog_restores_salary_defaults(user: User) -> None:
 async def test_edit_dialog_discards_cancelled_changes(user: User) -> None:
     job_id = _seed_job(title="Original Title")
     await user.open(f"/job/{job_id}")
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     await asyncio.sleep(0.1)
     with user.scope(marker="job-form"):
         user.find("Title").clear().type("Changed Title")
@@ -695,7 +695,7 @@ async def test_edit_dialog_discards_cancelled_changes(user: User) -> None:
         user.find("Cancel").click()
     await asyncio.sleep(0.2)
 
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     await asyncio.sleep(0.2)
     with user.scope(marker="job-form"):
         assert cast(ui.input, user.find("Title").elements.pop()).value == "Original Title"
@@ -916,7 +916,7 @@ async def test_card_shows_attention_chip(user: User) -> None:
 
     await user.open("/")
 
-    assert _attention_chip_text(user) == "⚠ no response in 25 days"
+    assert _attention_chip_text(user) == "no response in 25 days"
 
 
 async def test_card_hides_attention_chip_for_healthy_position(user: User) -> None:
@@ -942,7 +942,7 @@ async def test_attention_chip_prefers_the_deadline_reason(user: User) -> None:
 
     await user.open("/")
 
-    assert _attention_chip_text(user) == "⚠ deadline in 3 days"
+    assert _attention_chip_text(user) == "deadline in 3 days"
 
 
 async def test_flagged_positions_are_listed_first(user: User) -> None:
@@ -1218,7 +1218,7 @@ async def test_edit_job_from_detail(user: User) -> None:
     job_id = _seed_job()
     await user.open(f"/job/{job_id}")
 
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     with user.scope(marker="job-form"):
         user.find("Title").clear().type("Updated Title")
         user.find("Company").clear().type("UpdatedCo")
@@ -1243,7 +1243,7 @@ async def test_edit_form_updates_deadline(user: User) -> None:
     job_id = db.get_jobs()[0]["id"]
     await user.open(f"/job/{job_id}")
 
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     with user.scope(marker="job-form"):
         user.find("Deadline").clear().type("2027-01-15")
         await asyncio.sleep(0.1)
@@ -1265,7 +1265,7 @@ async def test_edit_form_clears_deadline(user: User) -> None:
     job_id = db.get_jobs()[0]["id"]
     await user.open(f"/job/{job_id}")
 
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     with user.scope(marker="job-form"):
         user.find("Deadline").clear()
         await asyncio.sleep(0.1)
@@ -1281,7 +1281,7 @@ async def test_edit_job_rejects_duplicate_url(user: User) -> None:
     target = db.get_jobs()[0]
 
     await user.open(f"/job/{target['id']}")
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     with user.scope(marker="job-form"):
         user.find("Job URL").clear().type("https://a.com/1")
         await asyncio.sleep(0.1)
@@ -1441,7 +1441,7 @@ async def test_card_comment_box_for_current_stage(user: User) -> None:
     await user.open("/")
 
     user.find("Applied comment").clear().type("Referred by a friend")
-    user.find("💾 Save comment").click()
+    user.find("Save comment").click()
 
     await _wait_for(lambda: db.get_jobs()[0]["applied_comment"] == "Referred by a friend")
     await user.should_see("Comment saved.")
@@ -1468,7 +1468,7 @@ async def test_edit_dialog_updates_comments(user: User) -> None:
     job_id = _seed_job()
     await user.open(f"/job/{job_id}")
 
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     with user.scope(marker="job-form"):
         user.find("Applied comment").clear().type("via referral")
         user.find("Interview comment").clear().type("great team")
@@ -1992,7 +1992,7 @@ async def test_details_back_button_returns_to_list(user: User) -> None:
     job_id = _seed_job()
     await user.open(f"/job/{job_id}")
 
-    user.find("← Back to list").click()
+    user.find("Back to list").click()
 
     await user.should_see("Job URL", retries=20)
 
@@ -2078,7 +2078,7 @@ async def test_profile_save_persists(user: User) -> None:
     user.find("Skills").clear().type("## Skills\n\n- Python")
     await asyncio.sleep(0.1)
 
-    user.find("💾 Save Profile & CV").click()
+    user.find("Save Profile & CV").click()
 
     await user.should_see("Profile and CV saved successfully!")
     profile = db.get_profile()
@@ -2118,7 +2118,7 @@ async def test_profile_export_button_renders(user: User) -> None:
     db.create_profile("Default")
     await user.open("/")
 
-    await user.should_see("📄 Export to PDF")
+    await user.should_see("Export to PDF")
 
 
 async def test_profile_export_downloads_pdf(user: User) -> None:
@@ -2126,7 +2126,7 @@ async def test_profile_export_downloads_pdf(user: User) -> None:
     db.save_profile(_profile_payload())
     await user.open("/")
 
-    user.find("📄 Export to PDF").click()
+    user.find("Export to PDF").click()
 
     response = await user.download.next()
     assert response.content.startswith(b"%PDF")
@@ -2217,7 +2217,7 @@ async def test_profile_empty_state_without_profiles(user: User) -> None:
 
     await user.should_see("No profiles yet. Add a profile to create your CV.")
     await user.should_not_see(marker="profile-select")
-    await user.should_not_see(content="💾 Save Profile & CV")
+    await user.should_not_see(content="Save Profile & CV")
 
 
 async def test_profile_dropdown_hidden_with_single_profile(user: User) -> None:
@@ -2226,7 +2226,7 @@ async def test_profile_dropdown_hidden_with_single_profile(user: User) -> None:
     await user.open("/")
 
     await user.should_not_see(marker="profile-select")
-    await user.should_see("💾 Save Profile & CV")
+    await user.should_see("Save Profile & CV")
 
 
 async def test_profile_dropdown_switches_between_profiles(user: User) -> None:
@@ -2249,7 +2249,7 @@ async def test_profile_dropdown_switches_between_profiles(user: User) -> None:
 
     user.find("Full Name").clear().type("Beta Edited")
     await asyncio.sleep(0.1)
-    user.find("💾 Save Profile & CV").click()
+    user.find("Save Profile & CV").click()
     await user.should_see("Profile and CV saved successfully!")
 
     assert db.get_profile(first)["full_name"] == "Alpha Person"
@@ -2419,7 +2419,7 @@ async def test_profile_export_uses_selected_profile(user: User) -> None:
 
     _profile_select(user).set_value(second)
     await asyncio.sleep(0.1)
-    user.find("📄 Export to PDF").click()
+    user.find("Export to PDF").click()
 
     response = await user.download.next()
     assert response.content.startswith(b"%PDF")
@@ -2688,7 +2688,7 @@ async def test_edit_form_replaces_tags(user: User) -> None:
     db.set_job_tags(job_id, ["remote"])
     await user.open(f"/job/{job_id}")
 
-    user.find("✏️ Edit").click()
+    user.find("Edit").click()
     with user.scope(marker="job-form"):
         cast(ui.select, user.find(marker="tags-field").elements.pop()).set_value(["referral"])
         await asyncio.sleep(0.1)

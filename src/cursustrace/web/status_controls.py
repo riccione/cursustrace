@@ -95,11 +95,13 @@ def _render_comment_box(job: db.Job, current: db.JobFlag) -> None:
         db.set_job_comment(job["id"], current, comment_input.value or "", user_id=current_user_id())
         ui.notify("Comment saved.", type="positive")
 
-    ui.button("💾 Save comment", on_click=save_comment).props("flat color=primary")
+    ui.button("Save comment", icon="save", on_click=save_comment).props("flat color=primary")
 
 
 def _render_delete_controls(job: db.Job, refresh: Callable[[], None]) -> None:
     delete_dialog = _confirm_delete_dialog(
         job, lambda dialog: _delete_job(dialog, job["id"], refresh)
     )
-    ui.button("🗑️ Delete", on_click=delete_dialog.open).props("flat color=negative")
+    ui.button("Delete", icon="delete", on_click=delete_dialog.open).props(
+        "flat color=negative"
+    ).mark(f"delete-button-{job['id']}")
