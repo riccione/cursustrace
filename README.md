@@ -39,6 +39,7 @@ PDF export uses [WeasyPrint](https://weasyprint.org/), which relies on the Pango
 ## The Dashboard
 
 - **The Pipeline:** Positions move through tabbed stages: `Unapplied` → `Applied` → `Interview` → `Offer`. Rejected and Outdated roles are tucked away in a "More" menu to keep your view clean.
+- **Board View:** Switch the list into a Kanban board and drag a card from one stage column to the next; the archived columns appear only when you ask for them.
 - **Job Cards:** Every position is a distinct, modern card showing the job title, company, status badge, and a linear progress tracker.
 - **Smart Alerts:** The app automatically flags positions that need attention (e.g., 21 days without a response, or an upcoming deadline). Flagged positions rise to the top of their tab.
 - **Advanced Filtering:** A single row provides fuzzy company search, salary range filters, tag filtering, and sorting.
@@ -91,6 +92,17 @@ carries a badge with the number of active filters, and the pagination sits
 below the list. The `Search company` box matches fuzzy company names across all
 pipeline stages at once, and each result carries a status badge naming its
 stage.
+
+### Board view
+
+The `Board` switch above the list turns the pipeline into columns:
+`Unapplied`, `Applied`, `Interview` and `Offer`, with `Rejected` and `Outdated`
+behind the `Archived` button so parked positions stay out of the way. Drag a card
+into another column to change its stage — the same change the stage checkboxes
+make, with the dates and the history entry. Every card also carries a small
+move menu, which is how you change a stage with a keyboard or on a touch screen,
+where dragging is not available. Columns scroll on their own, and a column
+holding more than 50 positions offers a `Show all` link.
 
 ### Job cards
 
