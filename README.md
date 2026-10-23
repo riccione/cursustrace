@@ -1,6 +1,7 @@
 # CursusTrace
 
 [![CI](https://github.com/riccione/cursustrace/actions/workflows/ci.yml/badge.svg)](https://github.com/riccione/cursustrace/actions/workflows/ci.yml)
+[![Docker Hub](https://img.shields.io/docker/v/ptolemy77/cursustrace?label=Docker%20Hub&logo=docker&logoColor=white)](https://hub.docker.com/r/ptolemy77/cursustrace)
 
 **Stop losing track of job applications. Scan a listing in seconds, follow every application through a visual pipeline, and let your own AI agent do the busywork — all from one local dashboard.**
 
@@ -17,14 +18,20 @@
 
 ## Quick Start (Docker)
 
-The quickest way to run CursusTrace: the image ships the Python runtime and the
+The quickest way to run CursusTrace: the published image ships the Python runtime and the
 WeasyPrint system libraries, so nothing else is needed on the host.
 
 ```sh
+docker compose pull
 docker compose up -d
 ```
 
 Then open [http://localhost:8080](http://localhost:8080) — the dashboard is ready.
+
+The image is published on Docker Hub as
+[`ptolemy77/cursustrace`](https://hub.docker.com/r/ptolemy77/cursustrace) for
+`linux/amd64` and `linux/arm64`. Edit the image tag in `docker-compose.yml` to pin a
+release (`0.2`) instead of tracking `latest`.
 
 Everything the app writes lives on the host, so it survives restarts and upgrades:
 
@@ -34,12 +41,31 @@ Everything the app writes lives on the host, so it survives restarts and upgrade
 | `./logs` | daily log files |
 | `./backups` | the startup and on-demand database backups |
 
-Upgrade with `docker compose build && docker compose up -d`; the volumes stay in
+Upgrade with `docker compose pull && docker compose up -d`; the volumes stay in
 place. To configure the app, create `cursustrace.toml` next to `docker-compose.yml`
 and uncomment the matching volume in the compose file.
 
 The bind mounts are owned by uid 1000 (the container's `appuser`). If your host
 user has a different uid, run `sudo chown -R 1000:1000 data logs backups` once.
+
+To run your own build instead of the published image, use
+`docker compose up -d --build`.
+
+<details>
+<summary><b>Run without cloning the repository</b></summary>
+
+```sh
+mkdir -p data logs backups
+docker run -d --name cursustrace --restart unless-stopped -p 8080:8080 \
+  -v "$PWD/data:/app/data" -v "$PWD/logs:/app/logs" -v "$PWD/backups:/app/backups" \
+  ptolemy77/cursustrace:latest
+```
+
+Create the directories first and make them writable by uid 1000, as described
+above. Stop and remove the container with `docker rm -f cursustrace`; the host
+directories keep your data.
+
+</details>
 
 ## Local Development / Running from Source
 
