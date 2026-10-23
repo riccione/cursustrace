@@ -1,0 +1,25 @@
+services:
+  cursustrace:
+    build: .
+    image: cursustrace:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # SQLite database, storage secret and everything else the app writes.
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+      # Optional: create cursustrace.toml next to this file before enabling it.
+      # Mounting a missing file would create a root-owned directory in its place.
+      # - ./cursustrace.toml:/app/cursustrace.toml:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

@@ -1,0 +1,25 @@
+# Version control and tooling
+.git
+.github
+.gitignore
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.pre-commit-config.yaml
+
+# Local state, mounted at runtime instead
+data
+logs
+backups
+cursustrace.toml
+
+# Not needed at runtime
+docs
+tests
+scripts
+screenshots
+
+# Only the README is needed: the build backend reads it
+*.md
+!README.md

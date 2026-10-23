@@ -15,7 +15,33 @@
 - **AI-agent ready** — A Model Context Protocol server exposes 13 tools, so agents like opencode can add, track and tidy positions for you.
 - **Local-first** — Everything lives in one SQLite file on your machine: no account, no cloud.
 
-## Quick start
+## Quick Start (Docker)
+
+The quickest way to run CursusTrace: the image ships the Python runtime and the
+WeasyPrint system libraries, so nothing else is needed on the host.
+
+```sh
+docker compose up -d
+```
+
+Then open [http://localhost:8080](http://localhost:8080) — the dashboard is ready.
+
+Everything the app writes lives on the host, so it survives restarts and upgrades:
+
+| Host path | Contents |
+|---|---|
+| `./data` | SQLite database and the multi-user storage secret |
+| `./logs` | daily log files |
+| `./backups` | the startup and on-demand database backups |
+
+Upgrade with `docker compose build && docker compose up -d`; the volumes stay in
+place. To configure the app, create `cursustrace.toml` next to `docker-compose.yml`
+and uncomment the matching volume in the compose file.
+
+The bind mounts are owned by uid 1000 (the container's `appuser`). If your host
+user has a different uid, run `sudo chown -R 1000:1000 data logs backups` once.
+
+## Local Development / Running from Source
 
 Requires [uv](https://docs.astral.sh/uv/).
 
@@ -32,7 +58,7 @@ Then the [NiceGUI](https://nicegui.io/) server starts on
 <details>
 <summary><b>System dependencies (needed only for PDF export)</b></summary>
 
-PDF export uses [WeasyPrint](https://weasyprint.org/), which relies on the Pango, Cairo, and GDK-Pixbuf system libraries. Everything else — scanning, the dashboard, the CLI and the MCP server — works without them.
+PDF export uses [WeasyPrint](https://weasyprint.org/), which relies on the Pango, Cairo, and GDK-Pixbuf system libraries. The Docker image already includes them; a source install needs the packages for your distribution. Everything else — scanning, the dashboard, the CLI and the MCP server — works without them.
 
 </details>
 
