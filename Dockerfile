@@ -54,13 +54,16 @@ RUN useradd --create-home --uid 1000 appuser \
     && mkdir -p /app/data /app/logs /app/backups \
     && chown -R appuser:appuser /app
 
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 755 /usr/local/bin/docker-entrypoint.sh
+
 ENV PATH="/app/.venv/bin:$PATH" \
     UV_NO_DEV=1 \
     UV_COMPILE_BYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-USER appuser
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/appuser
 
 EXPOSE 8080
 
-ENTRYPOINT ["uv", "run", "cursustrace", "run", "--host", "0.0.0.0", "--port", "8080"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["uv", "run", "cursustrace", "run", "--host", "0.0.0.0", "--port", "8080"]
