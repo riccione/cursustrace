@@ -84,6 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - *(release)* Add workflow to publish github release with source tarball
 - *(changelog)* Add git-cliff configuration
 - Add bump-my-version configuration to pyproject.toml
+- Generate CHANGELOG.md
 
 ### Refactoring
 
@@ -97,6 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - *(renderer)* Patch os.geteuid directly for strict mypy
 - *(web)* Enforce the color tokens and their contrast
+- *(cli)* Dynamically assert package version in version flag tests
 ## [0.1.0] - 2026-10-11
 
 ### Bug Fixes
