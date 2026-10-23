@@ -34,7 +34,7 @@ from cursustrace.logsetup import setup_logging
 )
 @click.pass_context
 def cli(ctx: click.Context, db_path: str | None, log_level: str | None) -> None:
-    """CursusTrace — job application tracker."""
+    """CursusTrace: job application tracker."""
     try:
         settings = load_settings(db_path=db_path, log_level=log_level)
     except ConfigError as exc:
