@@ -45,8 +45,10 @@ Upgrade with `docker compose pull && docker compose up -d`; the volumes stay in
 place. To configure the app, create `cursustrace.toml` next to `docker-compose.yml`
 and uncomment the matching volume in the compose file.
 
-The bind mounts are owned by uid 1000 (the container's `appuser`). If your host
-user has a different uid, run `sudo chown -R 1000:1000 data logs backups` once.
+On startup the container prepares `data`, `logs` and `backups`, so they can start
+empty. The files are owned by uid 1000 (the container's `appuser`); if your host
+user has a different uid and wants to manage them directly, run
+`sudo chown -R 1000:1000 data logs backups` once.
 
 To run your own build instead of the published image, use
 `docker compose up -d --build`.
@@ -55,15 +57,13 @@ To run your own build instead of the published image, use
 <summary><b>Run without cloning the repository</b></summary>
 
 ```sh
-mkdir -p data logs backups
 docker run -d --name cursustrace --restart unless-stopped -p 8080:8080 \
   -v "$PWD/data:/app/data" -v "$PWD/logs:/app/logs" -v "$PWD/backups:/app/backups" \
   ptolemy77/cursustrace:latest
 ```
 
-Create the directories first and make them writable by uid 1000, as described
-above. Stop and remove the container with `docker rm -f cursustrace`; the host
-directories keep your data.
+The container creates and prepares the directories on first start. Stop and remove
+the container with `docker rm -f cursustrace`; the host directories keep your data.
 
 </details>
 
