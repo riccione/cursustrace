@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.metadata
 import json
 import time
 from datetime import date, timedelta
@@ -1163,11 +1164,15 @@ def test_backup_dir_flag_beats_env_and_file(
 
 
 def test_version_flags(runner: CliRunner) -> None:
+    # Dynamically fetch the installed version of your package
+    expected_version = importlib.metadata.version("cursustrace")
+
     for flag in ("--version", "-V"):
         result = runner.invoke(cli_module.cli, [flag])
 
         assert result.exit_code == 0
-        assert "cursustrace 0.1.0" in result.output
+        assert "cursustrace" in result.output
+        assert expected_version in result.output
 
 
 def test_run_command_passes_settings(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
