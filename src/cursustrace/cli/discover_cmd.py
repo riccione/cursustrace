@@ -299,6 +299,8 @@ def _report_all(
         }
         if batch.query is not None:
             payload["query"] = batch.query
+        if batch.empty:
+            payload["empty"] = batch.empty
         if add_new:
             payload["added"] = added
             payload["skipped"] = skipped
@@ -316,6 +318,7 @@ def _report_all(
         f"Checked {batch.checked} boards · {batch.skipped_not_live} skipped (not live)"
         f" · {batch.extracted} links · {batch.new_count} new"
         f" · {batch.known_count} already in database"
+        + (f" · {batch.empty} without listings" if batch.empty else "")
     )
     if batch.truncated:
         click.echo(f"Stopped after {batch.new_count} new links.")
@@ -323,12 +326,14 @@ def _report_all(
         click.echo("Cancelled before every board was checked.")
     for candidate in batch.candidates:
         site = f" [{candidate['site']}]" if candidate.get("site") else ""
-        click.echo(f"  {candidate['url']}{site}")
+        title = candidate.get("title")
+        label = f"{title} — {candidate['url']}" if title else str(candidate["url"])
+        click.echo(f"  {label}{site}")
     if board_errors:
         click.echo(f"Failed boards ({len(board_errors)}):")
         for item in board_errors:
-            label = item["site"] or item["url"]
-            click.echo(f"  {label}: {item['error']}")
+            board_label = item["site"] or item["url"]
+            click.echo(f"  {board_label}: {item['error']}")
     if add_new:
         _report_summary(added, skipped, errors, False, similar)
     elif batch.new_count:
@@ -606,8 +611,12 @@ def _report_discovery(
         f"Extracted {len(result.candidates)} links · {result.new_count} new"
         f" · {result.known_count} already in database{breakdown}"
     )
-    for url in result.new_urls:
-        click.echo(f"  {url}")
+    for candidate in result.candidates:
+        if candidate.get("known"):
+            continue
+        title = candidate.get("title")
+        url = str(candidate["url"])
+        click.echo(f"  {title} — {url}" if title else f"  {url}")
     if add_new:
         _report_summary(added, skipped, errors, False, similar)
     elif result.new_count:
