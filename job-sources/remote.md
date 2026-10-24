@@ -21,7 +21,7 @@ Sources for fully remote roles. Remote filters on the global sites often surface
 
 | Site | URL | Type | Notes | Status |
 |------|-----|------|-------|--------|
-| Arc | https://arc.dev | remote | Remote developer marketplace with vetting | live |
+| Arc | https://arc.dev/remote-jobs | remote | Remote developer marketplace with vetting | live |
 | Dynamite Jobs | https://dynamitejobs.com | remote | Fully remote roles from vetted companies | live |
 | EU Remote Jobs | https://euremotejobs.com | remote | Remote roles hireable from Europe | blocked |
 | FlexJobs | https://www.flexjobs.com | remote | Paid, screened listing (no scams); remote and flexible | live |
@@ -33,7 +33,7 @@ Sources for fully remote roles. Remote filters on the global sites often surface
 | Nomad List | https://nomadlist.com | remote | Nomad-oriented; relocation and city data with job links | live |
 | Pangian | https://www.pangian.com | remote | Remote jobs with country-contracting guidance | live |
 | PowerToFly | https://www.powertofly.com | remote | Remote roles focused on women and underrepresented talent | live |
-| Remote.co | https://remote.co | remote | Curated remote roles plus remote-work guides | blocked |
+| Remote.co | https://remote.co/remote-jobs | remote | Curated remote roles plus remote-work guides | blocked |
 | RemoteOK | https://remoteok.com | remote | Board-wide JSON feed; tag-filtered remote roles | live | https://remoteok.com/remote-{query}-jobs |
 | Remotive | https://remotive.com | remote | Curated remote tech and non-tech roles | live | https://remotive.com/remote-jobs/{query} |
 | Remotli | https://remotli.ch | remote | Remote roles at Swiss companies, paid in CHF | live |
@@ -48,7 +48,7 @@ Sources for fully remote roles. Remote filters on the global sites often surface
 
 | Site | URL | Type | Notes | Status |
 |------|-----|------|-------|--------|
-| 4 Day Week | https://4dayweek.io | specialist | Reduced-hours roles, mostly remote | live |
+| 4 Day Week | https://4dayweek.io/jobs | specialist | Reduced-hours roles, mostly remote | live |
 | AI Jobs | https://www.ai-jobs.net | specialist | AI and ML roles only | live |
 | Built In Remote | https://builtin.com/remote | remote | Remote section of the Built In tech ecosystem | live |
 | CryptocurrencyJobs | https://cryptocurrencyjobs.co | specialist | Web3 and crypto, 100% remote | live |

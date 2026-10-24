@@ -1712,9 +1712,9 @@ async def test_footer_shows_app_name_and_version_on_detail(user: User) -> None:
 
 
 DISCOVER_HTML = (
-    '<a href="/jobs/known">known</a>'
-    '<a href="/jobs/new-1">new one</a>'
-    '<a href="/jobs/new-2">new two</a>'
+    '<a href="/jobs/known-1001">known</a>'
+    '<a href="/jobs/new-1002">new one</a>'
+    '<a href="/jobs/new-1003">new two</a>'
 )
 
 
@@ -1722,7 +1722,7 @@ async def test_discover_tab_lists_new_and_known(
     user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db.init_db()
-    db.add_job("https://board.example/jobs/known", "Known Job", "Acme", "Remote", "Body")
+    db.add_job("https://board.example/jobs/known-1001", "Known Job", "Acme", "Remote", "Body")
     monkeypatch.setattr(scraper, "fetch_html", lambda url: DISCOVER_HTML)
     await user.open("/")
 

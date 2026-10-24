@@ -27,7 +27,7 @@ Cross-border aggregators plus the country boards where most local postings actua
 
 | Site | URL | Type | Notes | Status |
 |------|-----|------|-------|--------|
-| Austria: Karriere.at | https://www.karriere.at | board | Major Austrian generalist board | live |
+| Austria: Karriere.at | https://www.karriere.at/jobs | board | Major Austrian generalist board | live |
 | Belgium: Actiris | https://www.actiris.be | government | Brussels public employment service | live |
 | Belgium: VDAB | https://www.vdab.be | government | Flanders public employment service | live |
 | Czechia: Jobs.cz | https://www.jobs.cz | board | Major Czech board | live |
