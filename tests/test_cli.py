@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from cursustrace import app, config, db, jsearch, logsetup, scraper
+from cursustrace import app, config, db, discovery, jsearch, logsetup, scraper
 from cursustrace import cli as cli_module
 from cursustrace.cli import discover_cmd
 from cursustrace.errors import ScrapeError
@@ -1724,7 +1724,7 @@ def test_discover_requires_exactly_one_source(runner: CliRunner) -> None:
     result = runner.invoke(cli_module.cli, ["discover", "--json"])
 
     assert result.exit_code == 2
-    assert "Pass a SOURCE or --jsearch QUERY" in result.output
+    assert "exactly one" in result.output
 
 
 def test_discover_rejects_source_and_jsearch(runner: CliRunner) -> None:
@@ -1756,3 +1756,122 @@ def test_discover_jsearch_rejects_limit(runner: CliRunner) -> None:
 
     assert result.exit_code == 2
     assert "--results" in result.output
+
+
+def _batch(*urls: str) -> discovery.DiscoveryBatch:
+    candidates = tuple({"url": url, "known": False, "site": "Example Board"} for url in urls)
+    return discovery.DiscoveryBatch(
+        source=discovery.SourceRef(
+            input="All known boards",
+            url="",
+            site="All known boards",
+            site_status=None,
+        ),
+        candidates=candidates,
+        new_urls=tuple(urls),
+        checked=2,
+        extracted=5,
+        skipped_not_live=1,
+        known_count=0,
+        errors=(),
+        truncated=False,
+    )
+
+
+def test_discover_all_json(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        discovery,
+        "discover_all",
+        lambda *args, **kwargs: _batch("https://a.example/jobs/1"),
+    )
+
+    result = runner.invoke(cli_module.cli, ["discover", "--all", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["source"] == {"kind": "all", "boards": 2, "skipped_not_live": 1}
+    assert payload["new_count"] == 1
+    assert payload["candidates"] == [{"url": "https://a.example/jobs/1", "site": "Example Board"}]
+    assert payload["board_errors"] == []
+
+
+def test_discover_all_add_ingests_new_positions(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        discovery,
+        "discover_all",
+        lambda *args, **kwargs: _batch("https://a.example/jobs/1"),
+    )
+    monkeypatch.setattr(scraper, "scrape_job", _varying_scrape)
+
+    result = runner.invoke(cli_module.cli, ["discover", "--all", "--add", "--tag", "sweep"])
+
+    assert result.exit_code == 0, result.output
+    jobs = db.get_jobs()
+    assert len(jobs) == 1
+    assert db.job_tags(jobs[0]["id"]) == ["sweep"]
+
+
+def test_discover_all_passes_limits_and_blocked(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_all(sources: object, **kwargs: object) -> discovery.DiscoveryBatch:
+        captured.update(kwargs)
+        return _batch()
+
+    monkeypatch.setattr(discovery, "discover_all", fake_all)
+
+    result = runner.invoke(
+        cli_module.cli,
+        [
+            "discover",
+            "--all",
+            "--per-board",
+            "4",
+            "--total",
+            "12",
+            "--include-blocked",
+            "--query",
+            "qa",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["per_board"] == 4
+    assert captured["total"] == 12
+    assert captured["only_live"] is False
+    assert captured["query"] == "qa"
+
+
+def test_discover_all_conflicts_with_source(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "https://board.example", "--all"])
+
+    assert result.exit_code == 2
+    assert "exactly one" in result.output
+
+
+def test_discover_all_rejects_limit(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "--all", "--limit", "20"])
+
+    assert result.exit_code == 2
+    assert "--per-board" in result.output
+
+
+def test_discover_board_rejects_all_options(runner: CliRunner) -> None:
+    result = runner.invoke(
+        cli_module.cli, ["discover", "https://board.example", "--per-board", "5"]
+    )
+
+    assert result.exit_code == 2
+    assert "--per-board" in result.output
+
+
+def test_discover_all_rejects_jsearch_options(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "--all", "--remote"])
+
+    assert result.exit_code == 2
+    assert "--remote applies only with --jsearch" in result.output

@@ -23,6 +23,12 @@ _JSEARCH_ONLY_OPTIONS = {
     "force": "--force",
 }
 
+_ALL_ONLY_OPTIONS = {
+    "per_board": "--per-board",
+    "total": "--total",
+    "include_blocked": "--include-blocked",
+}
+
 
 @cli.command()
 @click.argument("source_arg", metavar="[SOURCE]", required=False)
@@ -70,6 +76,31 @@ _JSEARCH_ONLY_OPTIONS = {
     help="JSearch results to fetch (one request per 10).",
 )
 @click.option("--force", is_flag=True, help="JSearch --add: include flagged results.")
+@click.option(
+    "--all",
+    "all_boards",
+    is_flag=True,
+    help="Search every board in job-sources/ and merge the results.",
+)
+@click.option(
+    "--per-board",
+    type=click.IntRange(1, 50),
+    default=discovery.BATCH_PER_BOARD,
+    show_default=True,
+    help="Maximum links to take from each board with --all.",
+)
+@click.option(
+    "--total",
+    type=click.IntRange(1, 1000),
+    default=discovery.BATCH_TOTAL,
+    show_default=True,
+    help="Stop after this many new links with --all.",
+)
+@click.option(
+    "--include-blocked",
+    is_flag=True,
+    help="Include boards marked blocked/login/dead with --all.",
+)
 @click.pass_context
 def discover(
     ctx: click.Context,
@@ -86,12 +117,35 @@ def discover(
     remote_only: bool,
     results: int,
     force: bool,
+    all_boards: bool,
+    per_board: int,
+    total: int,
+    include_blocked: bool,
 ) -> None:
-    """Discover links from a job source, or search JSearch with --jsearch."""
-    if jsearch_query is not None and source_arg is not None:
-        raise click.UsageError("Pass exactly one of SOURCE or --jsearch QUERY.")
-    if jsearch_query is None and source_arg is None:
-        raise click.UsageError("Pass a SOURCE or --jsearch QUERY.")
+    """Discover links from a job source, JSearch, or every known board."""
+    chosen = sum((source_arg is not None, jsearch_query is not None, all_boards))
+    if chosen != 1:
+        raise click.UsageError("Pass exactly one of SOURCE, --jsearch QUERY, or --all.")
+    if all_boards:
+        if ctx.get_parameter_source("limit") == click.core.ParameterSource.COMMANDLINE:
+            raise click.UsageError("--limit applies to board sources; use --per-board with --all.")
+        if ctx.get_parameter_source("results") == click.core.ParameterSource.COMMANDLINE:
+            raise click.UsageError("--results applies only with --jsearch.")
+        for name, option in _JSEARCH_ONLY_OPTIONS.items():
+            if name == "results":
+                continue
+            if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
+                raise click.UsageError(f"{option} applies only with --jsearch.")
+        _discover_all(
+            query,
+            as_json,
+            add_new,
+            tags,
+            per_board,
+            total,
+            include_blocked,
+        )
+        return
     if jsearch_query is not None:
         if query is not None:
             raise click.UsageError(
@@ -101,6 +155,9 @@ def discover(
             raise click.UsageError("--only-live applies to board sources only.")
         if ctx.get_parameter_source("limit") == click.core.ParameterSource.COMMANDLINE:
             raise click.UsageError("--limit applies to board sources; use --results instead.")
+        for name, option in _ALL_ONLY_OPTIONS.items():
+            if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
+                raise click.UsageError(f"{option} applies only with --all.")
         _discover_jsearch(
             ctx,
             jsearch_query,
@@ -115,10 +172,13 @@ def discover(
         )
         return
     if source_arg is None:
-        raise click.UsageError("Pass a SOURCE or --jsearch QUERY.")
+        raise click.UsageError("Pass a SOURCE, --jsearch QUERY, or --all.")
     for name, option in _JSEARCH_ONLY_OPTIONS.items():
         if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
             raise click.UsageError(f"{option} applies only with --jsearch.")
+    for name, option in _ALL_ONLY_OPTIONS.items():
+        if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
+            raise click.UsageError(f"{option} applies only with --all.")
 
     db.init_db()
     try:
@@ -157,6 +217,122 @@ def discover(
                 added += 1
                 similar.extend(cast("list[dict[str, object]]", ingest.get("similar", [])))
     _report_discovery(result, added, skipped, errors, as_json, similar, add_new)
+
+
+def _discover_all(
+    query: str | None,
+    as_json: bool,
+    add_new: bool,
+    tags: tuple[str, ...],
+    per_board: int,
+    total: int,
+    include_blocked: bool,
+) -> None:
+    db.init_db()
+    batch = discovery.discover_all(
+        discovery.list_sources(),
+        per_board=per_board,
+        total=total,
+        query=query,
+        only_live=not include_blocked,
+    )
+    added = skipped = 0
+    errors: list[dict[str, str]] = []
+    similar: list[dict[str, object]] = []
+    if add_new:
+        for url in batch.new_urls:
+            try:
+                job = scraper.scrape_job(url)
+            except ScrapeError as exc:
+                errors.append({"url": url, "error": str(exc)})
+                continue
+            ingest = _ingest(
+                url,
+                job["title"],
+                job["company"],
+                job["location"],
+                job["description"],
+                deadline=job["deadline"],
+                tags=tags,
+            )
+            if ingest["status"] == "duplicate":
+                skipped += 1
+            else:
+                added += 1
+                similar.extend(cast("list[dict[str, object]]", ingest.get("similar", [])))
+    _report_all(batch, added, skipped, errors, similar, as_json, add_new)
+
+
+def _report_all(
+    batch: discovery.DiscoveryBatch,
+    added: int,
+    skipped: int,
+    errors: list[dict[str, str]],
+    similar: list[dict[str, object]],
+    as_json: bool,
+    add_new: bool,
+) -> None:
+    board_errors = [
+        {"site": item.source.site, "url": item.source.url, "error": item.error}
+        for item in batch.errors
+    ]
+    if as_json:
+        for error in errors:
+            logger.error("Discovery ingest error (%s): %s", error["url"], error["error"])
+        for match in similar:
+            logger.info("Added position looks similar to '%s' (%s)", match["title"], match["url"])
+        payload: dict[str, object] = {
+            "source": {
+                "kind": "all",
+                "boards": batch.checked,
+                "skipped_not_live": batch.skipped_not_live,
+            },
+            "extracted": batch.extracted,
+            "new_count": batch.new_count,
+            "known_count": batch.known_count,
+            "truncated": batch.truncated,
+            "cancelled": batch.cancelled,
+            "candidates": [
+                {"url": str(item["url"]), "site": item.get("site")} for item in batch.candidates
+            ],
+            "board_errors": board_errors,
+        }
+        if batch.query is not None:
+            payload["query"] = batch.query
+        if add_new:
+            payload["added"] = added
+            payload["skipped"] = skipped
+            payload["errors"] = errors
+            if similar:
+                payload["similar"] = similar
+        click.echo(json_module.dumps(payload))
+        if errors:
+            raise click.exceptions.Exit(1)
+        return
+    click.echo("Source: all known boards")
+    if batch.query is not None:
+        click.echo(f"Query: {batch.query}")
+    click.echo(
+        f"Checked {batch.checked} boards · {batch.skipped_not_live} skipped (not live)"
+        f" · {batch.extracted} links · {batch.new_count} new"
+        f" · {batch.known_count} already in database"
+    )
+    if batch.truncated:
+        click.echo(f"Stopped after {batch.new_count} new links.")
+    if batch.cancelled:
+        click.echo("Cancelled before every board was checked.")
+    for candidate in batch.candidates:
+        site = f" [{candidate['site']}]" if candidate.get("site") else ""
+        click.echo(f"  {candidate['url']}{site}")
+    if board_errors:
+        click.echo(f"Failed boards ({len(board_errors)}):")
+        for item in board_errors:
+            label = item["site"] or item["url"]
+            click.echo(f"  {label}: {item['error']}")
+    if add_new:
+        _report_summary(added, skipped, errors, False, similar)
+    elif batch.new_count:
+        click.echo("Tip: add --add to store the new positions, or --json for the full list.")
 
 
 def _discover_jsearch(
