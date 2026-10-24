@@ -133,3 +133,34 @@ async def test_all_boards_add_selected_keeps_failed_links(
     assert user.find(marker="discover-candidate").elements
     remaining = cast(ui.checkbox, user.find(marker="discover-candidate").elements.pop())
     assert remaining.text == "https://a.example/jobs/1"
+
+
+async def test_all_boards_shows_candidate_titles(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        discovery,
+        "discover_all",
+        lambda *args, **kwargs: _batch("https://a.example/jobs/1", title="Senior QA Engineer"),
+    )
+    await user.open("/")
+
+    await _run_all(user)
+
+    box = cast(ui.checkbox, user.find(marker="discover-candidate").elements.pop())
+    assert box.text == "Senior QA Engineer"
+
+
+async def test_all_boards_reports_boards_without_listings(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        discovery,
+        "discover_all",
+        lambda *args, **kwargs: _batch("https://a.example/jobs/1", empty=2),
+    )
+    await user.open("/")
+
+    await _run_all(user)
+
+    await user.should_see("2 without listings")

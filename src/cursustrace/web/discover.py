@@ -141,18 +141,27 @@ def _render_discover(refresh: Callable[[], None]) -> None:
                 ui.label("No candidates found.").mark("discover-empty")
             for candidate in result.candidates:
                 url = str(candidate["url"])
+                title = str(candidate.get("title") or "")
                 if candidate.get("known"):
                     with ui.row().classes("w-full items-center gap-2"):
                         ui.icon("check_circle").classes("ct-text-secondary")
-                        ui.label(url).classes("text-caption ct-text-secondary truncate flex-1")
+                        with ui.column().classes("gap-0 flex-1 min-w-0"):
+                            ui.label(title or url).classes(
+                                "text-caption ct-text-secondary truncate"
+                            )
+                            if title:
+                                ui.label(url).classes("text-caption ct-text-secondary truncate")
                         ui.chip(str(candidate.get("status", ""))).props("dense color=grey")
                 else:
-                    box = (
-                        ui.checkbox(url, value=True)
-                        .classes("text-caption w-full")
-                        .mark("discover-candidate")
-                    )
-                    checkboxes[url] = box
+                    with ui.column().classes("w-full gap-0"):
+                        box = (
+                            ui.checkbox(title or url, value=True)
+                            .classes("text-caption w-full")
+                            .mark("discover-candidate")
+                        )
+                        checkboxes[url] = box
+                        if title:
+                            ui.label(url).classes("text-caption ct-text-secondary truncate")
         add_button.enabled = bool(checkboxes)
 
     def render_batch(batch: discovery.DiscoveryBatch) -> None:
@@ -168,6 +177,8 @@ def _render_discover(refresh: Callable[[], None]) -> None:
             )
             if batch.skipped_not_live:
                 summary += f" · {batch.skipped_not_live} not live"
+            if batch.empty:
+                summary += f" · {batch.empty} without listings"
             if batch.errors:
                 summary += f" · {len(batch.errors)} failed"
             if batch.truncated:
@@ -181,13 +192,17 @@ def _render_discover(refresh: Callable[[], None]) -> None:
                 ui.label("No new positions found.").mark("discover-empty")
             for candidate in batch.candidates:
                 url = str(candidate["url"])
+                title = str(candidate.get("title") or "")
                 with ui.row().classes("w-full items-center gap-2"):
-                    box = (
-                        ui.checkbox(url, value=True)
-                        .classes("text-caption w-full")
-                        .mark("discover-candidate")
-                    )
-                    checkboxes[url] = box
+                    with ui.column().classes("gap-0 flex-1 min-w-0"):
+                        box = (
+                            ui.checkbox(title or url, value=True)
+                            .classes("text-caption w-full")
+                            .mark("discover-candidate")
+                        )
+                        checkboxes[url] = box
+                        if title:
+                            ui.label(url).classes("text-caption ct-text-secondary truncate")
                     site = str(candidate.get("site") or "")
                     if site:
                         ui.chip(site).props("dense color=grey").mark("discover-site")
