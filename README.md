@@ -135,6 +135,13 @@ an `Only live` filter), click `Discover`, then tick the candidates you want and
 press `Add selected`. Listings you already track appear with their status and
 cannot be re-added.
 
+Choose `All known boards` in the same dropdown to sweep every live board in one
+go: the app fetches each board (one request per board), merges the results,
+drops links you already track, and stops after 300 new positions. `Limit`
+becomes the per-board cap. Only the boards that declare a `Search` template
+filter keywords server-side; elsewhere the query filters the links extracted
+from the board page.
+
 ![The Discover tab with source, query and only-live controls](docs/screenshots/12-discover.webp)
 
 #### JSearch (experimental)

@@ -184,6 +184,26 @@ A workflow you can paste to an AI agent:
 > `cursustrace scan <chosen urls> --json` and summarize what was added, what
 > was already tracked, and what you skipped and why.
 
+### Sweeping every known board
+
+`--all` fetches every live board in `job-sources/` (one request per board, six at
+a time), merges the results, and drops links that are already tracked:
+
+```sh
+uv run cursustrace discover --all --json
+uv run cursustrace discover --all -q "python" --per-board 10 --total 300 --json
+uv run cursustrace discover --all --include-blocked --add --tag sweep
+```
+
+`--per-board` caps the links taken from each board, `--total` stops the sweep
+once that many new links are found, and `--include-blocked` adds boards marked
+blocked/login/dead. The JSON payload reports `source.boards` /
+`source.skipped_not_live`, `extracted`, `new_count`, `known_count`, `truncated`,
+`cancelled`, `candidates[{url,site}]` and `board_errors[]`; with `--add` it adds
+`added`, `skipped`, `errors` and `similar`. Only boards with a `Search` template
+filter the query server-side; elsewhere the term filters the links extracted
+from the board page.
+
 ### Searching JSearch
 
 `--jsearch` queries [JSearch](https://www.openwebninja.com/api/jsearch) instead of
