@@ -29,7 +29,7 @@ Boards and aggregators for finding a job in the United States. Federal public-se
 
 | Site | URL | Type | Notes | Status |
 |------|-----|------|-------|--------|
-| Built In | https://builtin.com | board | US tech ecosystem boards, one site per metro market | live |
+| Built In | https://builtin.com/jobs | board | US tech ecosystem boards, one site per metro market | live |
 | Dice | https://www.dice.com | board | US tech-specific (IT, engineering, data) | live |
 | Levels.fyi Jobs | https://www.levels.fyi/jobs | specialist | Tech compensation-first listings | live |
 | Otta | https://otta.com | board | Curated startup roles; now part of Welcome to the Jungle | live |
@@ -43,8 +43,8 @@ Boards and aggregators for finding a job in the United States. Federal public-se
 
 | Site | URL | Type | Notes | Status |
 |------|-----|------|-------|--------|
-| 4 Day Week | https://4dayweek.io | specialist | Reduced-hours roles only | live |
-| ClearanceJobs | https://www.clearancejobs.com | specialist | US roles requiring security clearances | live |
+| 4 Day Week | https://4dayweek.io/jobs | specialist | Reduced-hours roles only | live |
+| ClearanceJobs | https://www.clearancejobs.com/jobs | specialist | US roles requiring security clearances | live |
 | CoolWorks | https://www.coolworks.com | specialist | Seasonal, outdoor and park jobs | live |
 | HigherEdJobs | https://www.higheredjobs.com | specialist | US colleges and universities | live |
 | Idealist | https://www.idealist.org | specialist | US nonprofit and NGO roles | live |
