@@ -2945,3 +2945,31 @@ async def test_filters_badge_shows_active_count(user: User) -> None:
 
     cast(ui.number, user.find("Min salary").elements.pop()).set_value(None)
     await _wait_for(lambda: _filters_badge_text(user) == "")
+
+
+async def test_search_toolbar_only_visible_on_dashboard(user: User) -> None:
+    await user.open("/")
+
+    await user.should_see(marker="search-toolbar")
+
+    for label in ("Statistics", "Profile & CV Editor", "Discover"):
+        user.find(label).click()
+        await asyncio.sleep(0.1)
+        await user.should_not_see(marker="search-toolbar")
+
+    user.find("Dashboard").click()
+    await asyncio.sleep(0.1)
+    await user.should_see(marker="search-toolbar")
+
+
+async def test_filters_drawer_closes_when_leaving_dashboard(user: User) -> None:
+    await user.open("/")
+
+    user.find(marker="filters-button").click()
+    await user.should_see(marker="tag-filter")
+
+    user.find("Statistics").click()
+    await asyncio.sleep(0.1)
+
+    drawer = cast(ui.left_drawer, user.find(marker="filters-drawer").elements.pop())
+    assert drawer.value is False

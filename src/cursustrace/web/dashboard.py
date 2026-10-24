@@ -377,6 +377,11 @@ def dashboard_page(request: Request) -> None:
             .mark("page-size")
         )
 
+    dashboard_name = str(dashboard_tab.props["name"])
+    main_tabs.on_value_change(
+        lambda event: filters_drawer.set_value(False) if event.value != dashboard_name else None
+    )
+
     def active_filter_count() -> int:
         """Number of filters narrowing the list (salary and tags)."""
         return (
@@ -421,57 +426,69 @@ def dashboard_page(request: Request) -> None:
     add_job_dialog = _add_job_dialog(refresh, add_dialog)
 
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
-        with ui.row().classes("w-full items-center gap-3"):
-            ui.button("Add Job", icon="add", on_click=add_job_dialog.open).props(
-                "color=primary"
-            ).mark("add-job")
-            search_input = (
-                ui.input("Search company", placeholder="e.g. Adapty")
-                .props("clearable debounce=300")
-                .classes("flex-1 min-w-0")
-            )
-            with ui.row().classes("items-center gap-1").mark("view-switch"):
-                list_view_button = (
-                    ui.button("List", on_click=lambda: set_view("list"))
-                    .props("dense")
-                    .mark("view-list")
-                )
-                board_view_button = (
-                    ui.button("Board", on_click=lambda: set_view("board"))
-                    .props("dense")
-                    .mark("view-board")
-                )
-            filters_button = (
-                ui.button("Filters", icon="tune")
-                .props("flat")
-                .classes("ct-ghost-btn")
-                .mark("filters-button")
-            )
-            with filters_button:
-                filters_badge = ui.badge("").props("color=negative")
-                filters_badge.set_visibility(False)
-                filters_badge.mark("filters-badge")
-
-            def on_search(event: events.ValueChangeEventArguments[str | None]) -> None:
-                nonlocal query
-                query = event.value or ""
-                pages.clear()
-                refresh()
-
-            search_input.on_value_change(on_search)
-            filters_button.on_click(lambda: filters_drawer.toggle())
-
-            def apply_tag_filter(name: str) -> None:
-                nonlocal query
-                if query:
-                    query = ""
-                    search_input.value = ""
-                filters_drawer.set_value(True)
-                if tag_filter_select is not None:
-                    tag_filter_select.set_value([name])
-
         with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
             with ui.tab_panel(dashboard_tab):
+                with (
+                    ui.row()
+                    .classes("w-full items-center gap-3")
+                    .mark("search-toolbar") as search_toolbar
+                ):
+                    ui.button("Add Job", icon="add", on_click=add_job_dialog.open).props(
+                        "color=primary"
+                    ).mark("add-job")
+                    search_input = (
+                        ui.input("Search company", placeholder="e.g. Adapty")
+                        .props("clearable debounce=300")
+                        .classes("flex-1 min-w-0")
+                    )
+                    with ui.row().classes("items-center gap-1").mark("view-switch"):
+                        list_view_button = (
+                            ui.button("List", on_click=lambda: set_view("list"))
+                            .props("dense")
+                            .mark("view-list")
+                        )
+                        board_view_button = (
+                            ui.button("Board", on_click=lambda: set_view("board"))
+                            .props("dense")
+                            .mark("view-board")
+                        )
+                    filters_button = (
+                        ui.button("Filters", icon="tune")
+                        .props("flat")
+                        .classes("ct-ghost-btn")
+                        .mark("filters-button")
+                    )
+                    with filters_button:
+                        filters_badge = ui.badge("").props("color=negative")
+                        filters_badge.set_visibility(False)
+                        filters_badge.mark("filters-badge")
+
+                    def on_search(event: events.ValueChangeEventArguments[str | None]) -> None:
+                        nonlocal query
+                        query = event.value or ""
+                        pages.clear()
+                        refresh()
+
+                    search_input.on_value_change(on_search)
+                    filters_button.on_click(lambda: filters_drawer.toggle())
+
+                    def apply_tag_filter(name: str) -> None:
+                        nonlocal query
+                        if query:
+                            query = ""
+                            search_input.value = ""
+                        filters_drawer.set_value(True)
+                        if tag_filter_select is not None:
+                            tag_filter_select.set_value([name])
+
+                def on_main_tab_change(value: object) -> None:
+                    on_dashboard = value == dashboard_name
+                    search_toolbar.set_visibility(on_dashboard)
+                    if not on_dashboard:
+                        filters_drawer.set_value(False)
+
+                main_tabs.on_value_change(lambda event: on_main_tab_change(event.value))
+
                 with ui.row().classes("w-full items-center gap-2"):
                     with ui.tabs().classes("flex-1 min-w-0 ct-stage-tabs") as status_tabs:
                         for status, label, _message in STATUS_TABS:
