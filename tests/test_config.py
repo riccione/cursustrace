@@ -359,3 +359,33 @@ def test_db_path_from_file_env_and_flag(config_file: Path) -> None:
 def test_blank_db_path_raises(config_file: Path, value: str) -> None:
     with pytest.raises(ConfigError, match="db_path"):
         config.load_settings(env={"CURSUS_DB_PATH": value})
+
+
+def test_jsearch_key_from_file_env_and_flag(config_file: Path) -> None:
+    config_file.write_text('[cursustrace]\njsearch_api_key = "file-key"\n', encoding="utf-8")
+
+    assert config.load_settings(env={}).jsearch_api_key == "file-key"
+    assert (
+        config.load_settings(env={config.ENV_JSEARCH_API_KEY: "env-key"}).jsearch_api_key
+        == "env-key"
+    )
+    assert config.load_settings(env={}, jsearch_api_key="flag-key").jsearch_api_key == "flag-key"
+
+
+def test_blank_jsearch_key_is_none(config_file: Path) -> None:
+    config_file.write_text('[cursustrace]\njsearch_api_key = "  "\n', encoding="utf-8")
+
+    assert config.load_settings(env={}).jsearch_api_key is None
+
+
+def test_invalid_jsearch_key_raises(config_file: Path) -> None:
+    config_file.write_text("[cursustrace]\njsearch_api_key = 5\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        config.load_settings(env={})
+
+
+def test_jsearch_key_is_hidden_from_repr() -> None:
+    settings = config.Settings(jsearch_api_key="super-secret")
+
+    assert "super-secret" not in repr(settings)
