@@ -5,6 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+    # Optional: JSearch API key for the experimental search in Discover.
+    # environment:
+    #   CURSUS_JSEARCH_API_KEY: ""
     volumes:
       # SQLite database, storage secret and everything else the app writes.
       - ./data:/app/data

@@ -20,6 +20,9 @@ logs/
 # Local database
 data/
 
+# Local config (may hold the JSearch API key)
+cursustrace.toml
+
 # Personal data kept only in SQLite
 data/cv.md
 

@@ -11,6 +11,10 @@ class ScrapeError(CursustraceError):
     """Raised when a job listing cannot be fetched or parsed."""
 
 
+class JSearchError(CursustraceError):
+    """Raised when the JSearch API is unconfigured, unreachable, or rejects a request."""
+
+
 class PdfExportError(CursustraceError):
     """Raised when a Markdown CV cannot be rendered to PDF."""
 

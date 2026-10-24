@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tomllib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from cursustrace.errors import ConfigError
@@ -30,6 +30,7 @@ ENV_DEADLINE_WARNING_DAYS = "CURSUS_DEADLINE_WARNING_DAYS"
 ENV_OUTDATED_AFTER_DAYS = "CURSUS_OUTDATED_AFTER_DAYS"
 ENV_RENDER = "CURSUS_RENDER"
 ENV_MULTI_USER = "CURSUS_MULTI_USER"
+ENV_JSEARCH_API_KEY = "CURSUS_JSEARCH_API_KEY"
 
 DEFAULT_DB_PATH = Path("data/cursustrace.db")
 DEFAULT_HOST = "0.0.0.0"
@@ -75,6 +76,7 @@ class Settings:
     outdated_after_days: int = DEFAULT_OUTDATED_AFTER_DAYS
     render: str = DEFAULT_RENDER
     multi_user: bool = DEFAULT_MULTI_USER
+    jsearch_api_key: str | None = field(default=None, repr=False)
     config_file: Path | None = None
 
 
@@ -97,6 +99,7 @@ def load_settings(
     outdated_after_days: int | str | None = None,
     render: str | None = None,
     multi_user: bool | None = None,
+    jsearch_api_key: str | None = None,
     config_path: str | Path | None = None,
     env: Mapping[str, str] | None = None,
 ) -> Settings:
@@ -122,6 +125,7 @@ def load_settings(
         ("outdated_after_days", ENV_OUTDATED_AFTER_DAYS),
         ("render", ENV_RENDER),
         ("multi_user", ENV_MULTI_USER),
+        ("jsearch_api_key", ENV_JSEARCH_API_KEY),
     ):
         raw = environ.get(env_name)
         if raw is not None:
@@ -161,6 +165,8 @@ def load_settings(
         values["render"] = render
     if multi_user is not None:
         values["multi_user"] = multi_user
+    if jsearch_api_key is not None:
+        values["jsearch_api_key"] = jsearch_api_key
 
     return Settings(
         db_path=_as_db_path(values.get("db_path"), DEFAULT_DB_PATH),
@@ -190,6 +196,7 @@ def load_settings(
         ),
         render=_as_render(values, "render", DEFAULT_RENDER),
         multi_user=_as_bool(values, "multi_user", DEFAULT_MULTI_USER),
+        jsearch_api_key=_as_optional_str(values, "jsearch_api_key"),
         config_file=config_file,
     )
 
@@ -217,6 +224,18 @@ def _as_str(values: dict[str, object], key: str, default: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"'{key}' must be a non-empty string")
     return value
+
+
+def _as_optional_str(values: dict[str, object], key: str) -> str | None:
+    if key not in values:
+        return None
+    value = values[key]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ConfigError(f"'{key}' must be a string")
+    stripped = value.strip()
+    return stripped or None
 
 
 def _as_port(value: object) -> int:

@@ -8,18 +8,26 @@ from typing import cast
 
 import click
 
-from cursustrace import db, discovery, scraper
+from cursustrace import config, db, discovery, jsearch, scraper
 from cursustrace.cli.common import _ingest, _report_summary
 from cursustrace.cli.group import cli
-from cursustrace.errors import ScrapeError
+from cursustrace.errors import JSearchError, ScrapeError
 
 logger = logging.getLogger(__name__)
 
+_JSEARCH_ONLY_OPTIONS = {
+    "results": "--results",
+    "country": "--country",
+    "date_posted": "--date-posted",
+    "remote_only": "--remote",
+    "force": "--force",
+}
+
 
 @cli.command()
-@click.argument("source_arg", metavar="SOURCE")
+@click.argument("source_arg", metavar="[SOURCE]", required=False)
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON summary.")
-@click.option("--add", "add_new", is_flag=True, help="Scrape and add every new position found.")
+@click.option("--add", "add_new", is_flag=True, help="Add every new position found.")
 @click.option(
     "--tag",
     "tags",
@@ -39,16 +47,79 @@ logger = logging.getLogger(__name__)
     is_flag=True,
     help="Skip named sources that are not currently live in job-sources/.",
 )
+@click.option(
+    "--jsearch",
+    "jsearch_query",
+    metavar="QUERY",
+    default=None,
+    help="Search JSearch instead of a job source.",
+)
+@click.option("--country", default=None, help="JSearch country code, e.g. rs (default: us).")
+@click.option(
+    "--date-posted",
+    type=click.Choice(jsearch.DATE_POSTED_OPTIONS),
+    default=None,
+    help="JSearch posting-age filter.",
+)
+@click.option("--remote", "remote_only", is_flag=True, help="JSearch: remote jobs only.")
+@click.option(
+    "--results",
+    type=click.IntRange(1, 50),
+    default=10,
+    show_default=True,
+    help="JSearch results to fetch (one request per 10).",
+)
+@click.option("--force", is_flag=True, help="JSearch --add: include flagged results.")
+@click.pass_context
 def discover(
-    source_arg: str,
+    ctx: click.Context,
+    source_arg: str | None,
     as_json: bool,
     add_new: bool,
     tags: tuple[str, ...],
     limit: int,
     query: str | None,
     only_live: bool,
+    jsearch_query: str | None,
+    country: str | None,
+    date_posted: str | None,
+    remote_only: bool,
+    results: int,
+    force: bool,
 ) -> None:
-    """Discover position links from a job source (URL or job-sources site name)."""
+    """Discover links from a job source, or search JSearch with --jsearch."""
+    if jsearch_query is not None and source_arg is not None:
+        raise click.UsageError("Pass exactly one of SOURCE or --jsearch QUERY.")
+    if jsearch_query is None and source_arg is None:
+        raise click.UsageError("Pass a SOURCE or --jsearch QUERY.")
+    if jsearch_query is not None:
+        if query is not None:
+            raise click.UsageError(
+                "--query is for board sources; pass the term to --jsearch instead."
+            )
+        if only_live:
+            raise click.UsageError("--only-live applies to board sources only.")
+        if ctx.get_parameter_source("limit") == click.core.ParameterSource.COMMANDLINE:
+            raise click.UsageError("--limit applies to board sources; use --results instead.")
+        _discover_jsearch(
+            ctx,
+            jsearch_query,
+            as_json,
+            add_new,
+            tags,
+            country,
+            date_posted,
+            remote_only,
+            results,
+            force,
+        )
+        return
+    if source_arg is None:
+        raise click.UsageError("Pass a SOURCE or --jsearch QUERY.")
+    for name, option in _JSEARCH_ONLY_OPTIONS.items():
+        if ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE:
+            raise click.UsageError(f"{option} applies only with --jsearch.")
+
     db.init_db()
     try:
         source = discovery.resolve_source(source_arg)
@@ -86,6 +157,210 @@ def discover(
                 added += 1
                 similar.extend(cast("list[dict[str, object]]", ingest.get("similar", [])))
     _report_discovery(result, added, skipped, errors, as_json, similar, add_new)
+
+
+def _discover_jsearch(
+    ctx: click.Context,
+    query: str,
+    as_json: bool,
+    add_new: bool,
+    tags: tuple[str, ...],
+    country: str | None,
+    date_posted: str | None,
+    remote_only: bool,
+    results: int,
+    force: bool,
+) -> None:
+    db.init_db()
+    settings = cast("config.Settings | None", ctx.obj)
+    resolved = jsearch.api_key(settings)
+    if resolved is None:
+        raise click.ClickException(
+            "No JSearch API key configured. Set CURSUS_JSEARCH_API_KEY, add "
+            "jsearch_api_key to cursustrace.toml, or save one in the Discover tab."
+        )
+    key, _source = resolved
+    try:
+        page = jsearch.search_many(
+            query,
+            api_key=key,
+            total=results,
+            country=country,
+            date_posted=date_posted,
+            remote_only=remote_only,
+        )
+    except JSearchError as exc:
+        if as_json:
+            click.echo(
+                json_module.dumps(
+                    {"source": {"kind": "jsearch", "query": query}, "error": str(exc)}
+                )
+            )
+            raise click.exceptions.Exit(1)
+        raise click.ClickException(str(exc)) from exc
+
+    new, tracked = jsearch.partition(page.jobs)
+    flagged = tuple(job for job in new if job.flags)
+    addable = new if force else tuple(job for job in new if not job.flags)
+    added = skipped = 0
+    similar: list[dict[str, object]] = []
+    if add_new:
+        for job in addable:
+            outcome = _ingest(
+                job.url,
+                job.title,
+                job.company,
+                job.location,
+                job.description,
+                salary_min=job.salary_min,
+                salary_max=job.salary_max,
+                salary_currency=job.salary_currency,
+                salary_period=job.salary_period,
+                salary_note=job.salary_note,
+                deadline=job.deadline,
+                tags=tags,
+            )
+            if outcome["status"] == "duplicate":
+                skipped += 1
+            else:
+                added += 1
+                similar.extend(cast("list[dict[str, object]]", outcome.get("similar", [])))
+    _report_jsearch(
+        query,
+        country,
+        date_posted,
+        remote_only,
+        page,
+        new,
+        tracked,
+        flagged,
+        added,
+        skipped,
+        similar,
+        as_json,
+        add_new,
+        force,
+    )
+
+
+def _jsearch_payload(job: jsearch.JSearchJob) -> dict[str, object]:
+    return {
+        "url": job.url,
+        "title": job.title,
+        "company": job.company,
+        "location": job.location,
+        "salary_min": job.salary_min,
+        "salary_max": job.salary_max,
+        "salary_currency": job.salary_currency,
+        "salary_period": job.salary_period,
+        "posted_at": job.posted_at,
+        "publisher": job.publisher,
+        "flags": list(job.flags),
+    }
+
+
+def _jsearch_line(job: jsearch.JSearchJob) -> str:
+    title = job.title or "(untitled)"
+    company = job.company or "?"
+    location = f" ({job.location})" if job.location else ""
+    return f"{title} — {company}{location}"
+
+
+def _jsearch_candidates(
+    page: jsearch.JSearchPage,
+    new: tuple[jsearch.JSearchJob, ...],
+    tracked: tuple[jsearch.KnownJob, ...],
+) -> list[dict[str, object]]:
+    new_urls = {job.url for job in new}
+    known = {item.job.url: item for item in tracked}
+    candidates: list[dict[str, object]] = []
+    for job in page.jobs:
+        if job.url in new_urls:
+            candidates.append({**_jsearch_payload(job), "known": False})
+        elif job.url in known:
+            item = known[job.url]
+            candidates.append(
+                {
+                    **_jsearch_payload(job),
+                    "known": True,
+                    "id": item.id,
+                    "status": item.status,
+                }
+            )
+    return candidates
+
+
+def _report_jsearch(
+    query: str,
+    country: str | None,
+    date_posted: str | None,
+    remote_only: bool,
+    page: jsearch.JSearchPage,
+    new: tuple[jsearch.JSearchJob, ...],
+    tracked: tuple[jsearch.KnownJob, ...],
+    flagged: tuple[jsearch.JSearchJob, ...],
+    added: int,
+    skipped: int,
+    similar: list[dict[str, object]],
+    as_json: bool,
+    add_new: bool,
+    force: bool,
+) -> None:
+    used = jsearch.requests_this_month()
+    if as_json:
+        for match in similar:
+            logger.info("Added position looks similar to '%s' (%s)", match["title"], match["url"])
+        payload: dict[str, object] = {
+            "source": {
+                "kind": "jsearch",
+                "query": query,
+                "country": country,
+                "date_posted": date_posted,
+                "remote": remote_only,
+            },
+            "requests": page.requests,
+            "usage": {
+                "used": used,
+                "limit": jsearch.MONTHLY_LIMIT,
+                "month": jsearch.month_key(),
+            },
+            "extracted": len(page.jobs),
+            "new_count": len(new),
+            "known_count": len(tracked),
+            "flagged_count": len(flagged),
+            "candidates": _jsearch_candidates(page, new, tracked),
+        }
+        if add_new:
+            payload["added"] = added
+            payload["skipped"] = skipped
+            payload["errors"] = []
+            payload["flagged"] = [_jsearch_payload(job) for job in flagged]
+            if similar:
+                payload["similar"] = similar
+        click.echo(json_module.dumps(payload))
+        return
+    click.echo(f"Source: JSearch · query '{query}'")
+    filters = [
+        f"country {country}" if country else "",
+        f"posted {date_posted}" if date_posted and date_posted != "all" else "",
+        "remote only" if remote_only else "",
+    ]
+    active = [item for item in filters if item]
+    if active:
+        click.echo(f"Filters: {', '.join(active)}")
+    click.echo(f"Requests: {page.requests} · {used}/{jsearch.MONTHLY_LIMIT} used this month")
+    click.echo(f"Extracted {len(page.jobs)} · {len(new)} new · {len(tracked)} already in database")
+    for job in new:
+        click.echo(f"  {_jsearch_line(job)}")
+        click.echo(f"    {job.url}")
+    if flagged and not force:
+        click.echo(f"Flagged ({len(flagged)}) — pass --force to add:")
+        for job in flagged:
+            click.echo(f"  {_jsearch_line(job)} — {'; '.join(job.flags)}")
+    if add_new:
+        _report_summary(added, skipped, [], False, similar)
+    elif new:
+        click.echo("Tip: add --add to store the new positions, or --json for the full list.")
 
 
 def _status_breakdown(counts: dict[str, int]) -> str:

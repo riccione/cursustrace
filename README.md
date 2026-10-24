@@ -137,6 +137,20 @@ cannot be re-added.
 
 ![The Discover tab with source, query and only-live controls](docs/screenshots/12-discover.webp)
 
+#### JSearch (experimental)
+
+The Discover tab also has a `JSearch search` panel backed by
+[JSearch](https://www.openwebninja.com/api/jsearch). It returns full job postings
+(title, company, location, description, salary) that are stored directly, without
+scraping the listing. The free plan allows 200 requests per month; the panel
+shows how many this installation has used.
+
+Save the key from the panel — it is written to `data/.jsearch-key`, readable only
+by your user — or set it outside the app with `CURSUS_JSEARCH_API_KEY`, or
+`jsearch_api_key = "..."` under `[cursustrace]` in `cursustrace.toml`. Positions
+already in the database are hidden behind `Show known`, and results flagged as
+outside Serbia/remote-EU start unchecked so you can review them first.
+
 Curated job board lists by region live in [`job-sources/`](job-sources/).
 
 ### Filtering the list

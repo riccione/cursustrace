@@ -10,6 +10,7 @@ from nicegui.run import io_bound
 
 from cursustrace import discovery
 from cursustrace.errors import ScrapeError
+from cursustrace.web.jsearch_ui import _render_jsearch
 from cursustrace.web.scan import run_scan
 from cursustrace.web.session import current_user_id
 
@@ -161,3 +162,6 @@ def _render_discover(refresh: Callable[[], None]) -> None:
     run_button.on_click(run_discover)
     add_button.on_click(add_selected)
     clear_button.on_click(clear)
+
+    ui.separator()
+    _render_jsearch(refresh)
