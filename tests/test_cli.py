@@ -1876,3 +1876,31 @@ def test_discover_all_rejects_jsearch_options(runner: CliRunner) -> None:
 
     assert result.exit_code == 2
     assert "--remote applies only with --jsearch" in result.output
+
+
+def test_discover_jsearch_normalises_country(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_many(*args: object, **kwargs: object) -> jsearch.JSearchPage:
+        captured.update(kwargs)
+        return _jsearch_page()
+
+    monkeypatch.setattr(jsearch, "api_key", lambda settings=None: ("key", "environment"))
+    monkeypatch.setattr(jsearch, "search_many", fake_many)
+
+    result = runner.invoke(
+        cli_module.cli,
+        ["discover", "--jsearch", "python", "--country", "RS", "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["country"] == "rs"
+
+
+def test_discover_jsearch_rejects_unknown_country(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python", "--country", "xx"])
+
+    assert result.exit_code == 2
+    assert "unknown country code" in result.output

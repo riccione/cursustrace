@@ -30,6 +30,15 @@ _ALL_ONLY_OPTIONS = {
 }
 
 
+def _country_code(_ctx: click.Context, _param: click.Parameter, value: str | None) -> str | None:
+    if value is None:
+        return None
+    code = value.strip().lower()
+    if code not in jsearch.country_options():
+        raise click.BadParameter(f"unknown country code '{value}'")
+    return code
+
+
 @cli.command()
 @click.argument("source_arg", metavar="[SOURCE]", required=False)
 @click.option("--json", "as_json", is_flag=True, help="Print a JSON summary.")
@@ -60,7 +69,12 @@ _ALL_ONLY_OPTIONS = {
     default=None,
     help="Search JSearch instead of a job source.",
 )
-@click.option("--country", default=None, help="JSearch country code, e.g. rs (default: us).")
+@click.option(
+    "--country",
+    callback=_country_code,
+    default=None,
+    help="JSearch country code, e.g. rs (default: us).",
+)
 @click.option(
     "--date-posted",
     type=click.Choice(jsearch.DATE_POSTED_OPTIONS),
