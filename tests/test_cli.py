@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from cursustrace import app, config, db, logsetup, scraper
+from cursustrace import app, config, db, jsearch, logsetup, scraper
 from cursustrace import cli as cli_module
 from cursustrace.cli import discover_cmd
 from cursustrace.errors import ScrapeError
@@ -1618,3 +1618,141 @@ def test_db_flag_redirects_writes(runner: CliRunner, tmp_path: Path) -> None:
     db.DEFAULT_DB_PATH = personal
     db.init_db()
     assert db.get_jobs() == []
+
+
+def _jsearch_page(
+    url: str = "https://jobs.example.com/1", flags: tuple[str, ...] = ()
+) -> jsearch.JSearchPage:
+    return jsearch.JSearchPage(
+        jobs=(
+            jsearch.JSearchJob(
+                url=url,
+                title="Senior Python Engineer",
+                company="Acme",
+                location="Belgrade, Serbia",
+                description="Build things.",
+                flags=flags,
+            ),
+        ),
+        cursor=None,
+        requests=1,
+    )
+
+
+def test_discover_jsearch_json(runner: CliRunner, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(jsearch, "api_key", lambda settings=None: ("key", "environment"))
+    monkeypatch.setattr(jsearch, "search_many", lambda *a, **k: _jsearch_page())
+
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["source"]["kind"] == "jsearch"
+    assert payload["source"]["query"] == "python"
+    assert payload["requests"] == 1
+    assert payload["new_count"] == 1
+    assert payload["known_count"] == 0
+    assert payload["candidates"][0]["url"] == "https://jobs.example.com/1"
+    assert payload["usage"]["limit"] == jsearch.MONTHLY_LIMIT
+
+
+def test_discover_jsearch_add_ingests_without_scraping(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jsearch, "api_key", lambda settings=None: ("key", "environment"))
+    monkeypatch.setattr(jsearch, "search_many", lambda *a, **k: _jsearch_page())
+    monkeypatch.setattr(scraper, "scrape_job", lambda url: pytest.fail("should not scrape"))
+
+    result = runner.invoke(
+        cli_module.cli, ["discover", "--jsearch", "python", "--add", "--tag", "jsearch"]
+    )
+
+    assert result.exit_code == 0, result.output
+    jobs = db.get_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]["title"] == "Senior Python Engineer"
+    assert db.job_tags(jobs[0]["id"]) == ["jsearch"]
+
+
+def test_discover_jsearch_skips_flagged_without_force(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jsearch, "api_key", lambda settings=None: ("key", "environment"))
+    monkeypatch.setattr(
+        jsearch,
+        "search_many",
+        lambda *a, **k: _jsearch_page(flags=("location mentions 'Berlin'",)),
+    )
+
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python", "--add", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["added"] == 0
+    assert payload["flagged_count"] == 1
+    assert db.get_jobs() == []
+
+
+def test_discover_jsearch_force_adds_flagged(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jsearch, "api_key", lambda settings=None: ("key", "environment"))
+    monkeypatch.setattr(
+        jsearch,
+        "search_many",
+        lambda *a, **k: _jsearch_page(flags=("location mentions 'Berlin'",)),
+    )
+
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python", "--add", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert len(db.get_jobs()) == 1
+
+
+def test_discover_jsearch_requires_a_key(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jsearch, "api_key", lambda settings=None: None)
+
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python"])
+
+    assert result.exit_code != 0
+    assert "No JSearch API key" in result.output
+
+
+def test_discover_requires_exactly_one_source(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "--json"])
+
+    assert result.exit_code == 2
+    assert "Pass a SOURCE or --jsearch QUERY" in result.output
+
+
+def test_discover_rejects_source_and_jsearch(runner: CliRunner) -> None:
+    result = runner.invoke(
+        cli_module.cli, ["discover", "https://board.example", "--jsearch", "python"]
+    )
+
+    assert result.exit_code == 2
+    assert "exactly one" in result.output
+
+
+def test_discover_jsearch_rejects_board_options(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python", "--query", "python"])
+    assert result.exit_code == 2
+
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python", "--only-live"])
+    assert result.exit_code == 2
+
+
+def test_discover_board_rejects_jsearch_options(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "https://board.example", "--results", "20"])
+
+    assert result.exit_code == 2
+    assert "--results applies only with --jsearch" in result.output
+
+
+def test_discover_jsearch_rejects_limit(runner: CliRunner) -> None:
+    result = runner.invoke(cli_module.cli, ["discover", "--jsearch", "python", "--limit", "20"])
+
+    assert result.exit_code == 2
+    assert "--results" in result.output
