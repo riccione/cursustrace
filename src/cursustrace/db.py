@@ -1509,6 +1509,14 @@ def get_user(user_id: int) -> UserRow | None:
     return cast(UserRow, dict(row)) if row is not None else None
 
 
+def is_admin(user_id: int | None) -> bool:
+    """Return True for administrators; single-user mode (no owner) counts as admin."""
+    if user_id is None:
+        return True
+    user = get_user(user_id)
+    return bool(user["is_admin"]) if user is not None else False
+
+
 def set_user_password(user_id: int, password_hash: str) -> bool:
     """Replace an account's password hash; False when the id is unknown."""
     with closing(get_connection()) as conn:
