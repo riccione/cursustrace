@@ -170,11 +170,13 @@ when any scrape failed; a failed fetch prints an `error` key. Candidates that
 are already in the database are skipped whatever their stage, so discovery never
 re-adds an applied position.
 
-Link extraction drops obvious page chrome (navigation, legal, blog, social
-links) before applying `--limit`, so the budget goes to real listings. `--query`
-substitutes the term into the site's `Search` template from `job-sources/`
-(server-side filtering) when one exists, and otherwise filters the extracted
-links client-side.
+Link extraction ranks job-detail links (posting ids, `/job/`-style paths, real
+titles) above navigation and category pages before applying `--limit`; for a
+board whose homepage only carries marketing links it follows one listings page
+(`/jobs`, `/remote-jobs`, `/careers`, ...). Candidates include the anchor `title`.
+`--query` substitutes the term into the site's `Search` template from
+`job-sources/` (server-side filtering) when one exists, and otherwise filters the
+extracted links by URL or anchor text.
 
 A workflow you can paste to an AI agent:
 
@@ -198,8 +200,9 @@ uv run cursustrace discover --all --include-blocked --add --tag sweep
 `--per-board` caps the links taken from each board, `--total` stops the sweep
 once that many new links are found, and `--include-blocked` adds boards marked
 blocked/login/dead. The JSON payload reports `source.boards` /
-`source.skipped_not_live`, `extracted`, `new_count`, `known_count`, `truncated`,
-`cancelled`, `candidates[{url,site}]` and `board_errors[]`; with `--add` it adds
+`source.skipped_not_live`, `extracted`, `new_count`, `known_count`, `empty`,
+`truncated`, `cancelled`, `candidates[{url,site,title}]` and `board_errors[]`;
+with `--add` it adds
 `added`, `skipped`, `errors` and `similar`. Only boards with a `Search` template
 filter the query server-side; elsewhere the term filters the links extracted
 from the board page.
