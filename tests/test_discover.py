@@ -240,3 +240,177 @@ def test_discover_scopes_known_set_to_user(monkeypatch: pytest.MonkeyPatch) -> N
     assert first.known_count == 1
     assert second.known_count == 0
     assert second.new_count == first.new_count + 1
+
+
+def _live(site: str, url: str) -> discovery.SourceRef:
+    return discovery.SourceRef(input=site, url=url, site=site, site_status="live")
+
+
+def test_discover_all_merges_and_dedupes(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+
+    def fake_fetch(url: str) -> str:
+        host = url.split("//", 1)[1]
+        return (
+            '<a href="https://shared.example/jobs/1">Shared</a>'
+            f'<a href="https://{host}/jobs/2">Local</a>'
+        )
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+
+    batch = discovery.discover_all(
+        [_live("A", "https://a.example"), _live("B", "https://b.example")]
+    )
+
+    assert batch.checked == 2
+    assert set(batch.new_urls) == {
+        "https://shared.example/jobs/1",
+        "https://a.example/jobs/2",
+        "https://b.example/jobs/2",
+    }
+    assert batch.new_count == 3
+    assert all(candidate["site"] in {"A", "B"} for candidate in batch.candidates)
+
+
+def test_discover_all_drops_known_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    db.add_job("https://a.example/jobs/1", "Known", "Acme", None, "Body")
+
+    def fake_fetch(url: str) -> str:
+        host = url.split("//", 1)[1]
+        return f'<a href="https://{host}/jobs/1">Known</a><a href="https://{host}/jobs/2">New</a>'
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+
+    batch = discovery.discover_all([_live("A", "https://a.example")])
+
+    assert batch.known_count == 1
+    assert batch.new_urls == ("https://a.example/jobs/2",)
+    assert all(not candidate["known"] for candidate in batch.candidates)
+
+
+def test_discover_all_only_live_skips_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    fetched: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        fetched.append(url)
+        return SAMPLE_HTML
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+    blocked = discovery.SourceRef(
+        input="B", url="https://b.example", site="B", site_status="blocked"
+    )
+
+    batch = discovery.discover_all([_live("A", "https://a.example"), blocked])
+
+    assert batch.checked == 1
+    assert batch.skipped_not_live == 1
+    assert fetched == ["https://a.example"]
+
+
+def test_discover_all_collects_board_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+
+    def fake_fetch(url: str) -> str:
+        if "b.example" in url:
+            raise ScrapeError("Unable to fetch page: 403")
+        return SAMPLE_HTML
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+
+    batch = discovery.discover_all(
+        [_live("A", "https://a.example"), _live("B", "https://b.example")]
+    )
+
+    assert batch.checked == 2
+    assert len(batch.errors) == 1
+    assert batch.errors[0].source.site == "B"
+    assert "403" in batch.errors[0].error
+
+
+def test_discover_all_honours_per_board_and_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+
+    def fake_fetch(url: str) -> str:
+        host = url.split("//", 1)[1]
+        return "".join(
+            f'<a href="https://{host}/jobs/{index}">Job {index}</a>' for index in range(5)
+        )
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+    sources = [_live("A", "https://a.example"), _live("B", "https://b.example")]
+
+    per_board = discovery.discover_all(sources, per_board=2, total=100)
+    assert per_board.new_count == 4
+
+    capped = discovery.discover_all(sources, per_board=2, total=3)
+    assert capped.new_count == 3
+    assert capped.truncated is True
+
+
+def test_discover_all_shares_one_known_index(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    calls = {"count": 0}
+    original = db.get_jobs
+
+    def counting_get_jobs(status: str | None = None, *, user_id: int | None = None) -> list:
+        calls["count"] += 1
+        return original(status, user_id=user_id)
+
+    monkeypatch.setattr(db, "get_jobs", counting_get_jobs)
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: SAMPLE_HTML)
+
+    discovery.discover_all([_live("A", "https://a.example"), _live("B", "https://b.example")])
+
+    assert calls["count"] == 1
+
+
+def test_discover_all_reports_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    seen: list[tuple[int, int, str]] = []
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: SAMPLE_HTML)
+
+    discovery.discover_all(
+        [_live("A", "https://a.example"), _live("B", "https://b.example")],
+        progress=lambda done, total, site: seen.append((done, total, site)),
+    )
+
+    assert [done for done, _, _ in seen] == [1, 2]
+    assert all(total == 2 for _, total, _ in seen)
+
+
+def test_discover_all_can_be_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    state = {"cancel": False}
+
+    def progress(done: int, total: int, site: str) -> None:
+        state["cancel"] = True
+
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: SAMPLE_HTML)
+
+    batch = discovery.discover_all(
+        [_live("A", "https://a.example"), _live("B", "https://b.example")],
+        progress=progress,
+        cancelled=lambda: state["cancel"],
+    )
+
+    assert batch.cancelled is True
+    assert batch.checked == 1
+
+
+def test_discover_all_filters_by_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+
+    def fake_fetch(url: str) -> str:
+        host = url.split("//", 1)[1]
+        return (
+            '<a href="https://shared.example/jobs/1">Shared</a>'
+            f'<a href="https://{host}/jobs/2">Local</a>'
+        )
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+
+    batch = discovery.discover_all([_live("A", "https://a.example")], query="shared")
+
+    assert batch.new_urls == ("https://shared.example/jobs/1",)

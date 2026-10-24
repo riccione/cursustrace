@@ -7,6 +7,9 @@ are relevant is left to the caller (an AI agent or a human).
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote_plus, urljoin, urlparse
@@ -22,6 +25,12 @@ JOB_SOURCES_DIR = Path(__file__).resolve().parents[2] / "job-sources"
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 1000
 NON_LIVE_STATUSES = frozenset({"blocked", "login", "dead"})
+ALL_SOURCES = "*"
+BATCH_PER_BOARD = 10
+BATCH_TOTAL = 300
+BATCH_WORKERS = 6
+
+logger = logging.getLogger(__name__)
 _HEADER = ("Site", "URL", "Type", "Notes", "Status")
 _HEADER_SEARCH = _HEADER + ("Search",)
 _SEARCH_PLACEHOLDER = "{query}"
@@ -235,38 +244,15 @@ def _substitute_query(source: SourceRef, query: str) -> str:
     return template.replace(_SEARCH_PLACEHOLDER, quote_plus(query.strip()))
 
 
-def discover(
-    source: SourceRef,
-    *,
-    limit: int = DEFAULT_LIMIT,
-    query: str | None = None,
-    only_live: bool = False,
-    user_id: int | None = None,
-) -> DiscoveryResult:
-    """Fetch the source page and classify its candidate links against the DB.
+def _known_index(user_id: int | None) -> dict[str, db.Job]:
+    """Map canonical URLs to the tracked jobs of one owner."""
+    return {clean_url(job["job_url"]): job for job in db.get_jobs(user_id=user_id)}
 
-    When ``query`` is set and the source declares a search template, the term is
-    substituted into that URL so the board filters server-side; otherwise the
-    term filters the extracted links client-side. ``only_live`` refuses to fetch
-    named sources whose job-sources status is blocked/login/dead. ``user_id``
-    scopes the "known" set to one account's positions.
-    """
-    if only_live and source.site is not None and source.site_status != "live":
-        raise ScrapeError(f"Source '{source.site}' is {source.site_status}; skipped (only_live).")
-    term = query.strip() if query else None
-    fetched_url = source.url
-    client_term: str | None = None
-    if term:
-        if source.search_url is not None:
-            fetched_url = _substitute_query(source, term)
-        else:
-            client_term = term
-    html = scraper.fetch_html(fetched_url)
-    index = {clean_url(job["job_url"]): job for job in db.get_jobs(user_id=user_id)}
-    urls = extract_links(html, fetched_url, MAX_LIMIT if client_term else limit)
-    if client_term:
-        needle = client_term.casefold()
-        urls = [url for url in urls if needle in url.casefold()][:limit]
+
+def _classify(
+    urls: list[str], index: Mapping[str, db.Job]
+) -> tuple[list[dict[str, object]], list[str], dict[str, int]]:
+    """Split URLs into candidates, new URLs, and known status counts."""
     candidates: list[dict[str, object]] = []
     new_urls: list[str] = []
     status_counts: dict[str, int] = {}
@@ -287,6 +273,31 @@ def discover(
                 "title": job["title"],
             }
         )
+    return candidates, new_urls, status_counts
+
+
+def _discover_page(
+    source: SourceRef,
+    *,
+    limit: int,
+    query: str | None,
+    index: Mapping[str, db.Job],
+) -> DiscoveryResult:
+    """Fetch one source and classify its links against a prebuilt index."""
+    term = query.strip() if query else None
+    fetched_url = source.url
+    client_term: str | None = None
+    if term:
+        if source.search_url is not None:
+            fetched_url = _substitute_query(source, term)
+        else:
+            client_term = term
+    html = scraper.fetch_html(fetched_url)
+    urls = extract_links(html, fetched_url, MAX_LIMIT if client_term else limit)
+    if client_term:
+        needle = client_term.casefold()
+        urls = [url for url in urls if needle in url.casefold()][:limit]
+    candidates, new_urls, status_counts = _classify(urls, index)
     return DiscoveryResult(
         source=source,
         candidates=tuple(candidates),
@@ -294,6 +305,149 @@ def discover(
         status_counts=status_counts,
         query=term,
         fetched_url=fetched_url,
+    )
+
+
+def discover(
+    source: SourceRef,
+    *,
+    limit: int = DEFAULT_LIMIT,
+    query: str | None = None,
+    only_live: bool = False,
+    user_id: int | None = None,
+) -> DiscoveryResult:
+    """Fetch the source page and classify its candidate links against the DB.
+
+    When ``query`` is set and the source declares a search template, the term is
+    substituted into that URL so the board filters server-side; otherwise the
+    term filters the extracted links client-side. ``only_live`` refuses to fetch
+    named sources whose job-sources status is blocked/login/dead. ``user_id``
+    scopes the "known" set to one account's positions.
+    """
+    if only_live and source.site is not None and source.site_status != "live":
+        raise ScrapeError(f"Source '{source.site}' is {source.site_status}; skipped (only_live).")
+    return _discover_page(source, limit=limit, query=query, index=_known_index(user_id))
+
+
+@dataclass(frozen=True)
+class BoardError:
+    """A board that could not be fetched during batch discovery."""
+
+    source: SourceRef
+    error: str
+
+
+@dataclass(frozen=True)
+class DiscoveryBatch:
+    """New candidates merged across several boards, deduplicated by URL."""
+
+    source: SourceRef
+    candidates: tuple[dict[str, object], ...]
+    new_urls: tuple[str, ...]
+    checked: int
+    extracted: int
+    skipped_not_live: int
+    known_count: int
+    errors: tuple[BoardError, ...]
+    truncated: bool
+    cancelled: bool = False
+    query: str | None = None
+
+    @property
+    def new_count(self) -> int:
+        return len(self.new_urls)
+
+
+def discover_all(
+    sources: list[SourceRef] | tuple[SourceRef, ...],
+    *,
+    per_board: int = BATCH_PER_BOARD,
+    total: int = BATCH_TOTAL,
+    query: str | None = None,
+    only_live: bool = True,
+    user_id: int | None = None,
+    workers: int = BATCH_WORKERS,
+    progress: Callable[[int, int, str], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> DiscoveryBatch:
+    """Fetch many boards concurrently and merge their new links.
+
+    Known links are dropped from the output but counted; duplicates across
+    boards keep their first occurrence. Fetching stops once ``total`` new links
+    are found or ``cancelled`` returns True. Per-board failures are collected
+    instead of aborting the batch.
+    """
+    selected = [source for source in sources if not only_live or source.site_status == "live"]
+    skipped_not_live = len(sources) - len(selected)
+    index = _known_index(user_id)
+    candidates: list[dict[str, object]] = []
+    new_urls: list[str] = []
+    seen_urls: set[str] = set()
+    known_urls: set[str] = set()
+    errors: list[BoardError] = []
+    status_counts: dict[str, int] = {}
+    checked = extracted = known_count = 0
+    truncated = False
+    was_cancelled = False
+    if selected:
+        pool = ThreadPoolExecutor(max_workers=max(1, min(workers, len(selected))))
+        futures = {
+            pool.submit(_discover_page, source, limit=per_board, query=query, index=index): source
+            for source in selected
+        }
+        try:
+            for future in as_completed(futures):
+                source = futures[future]
+                if cancelled is not None and cancelled():
+                    was_cancelled = True
+                    break
+                checked += 1
+                try:
+                    page = future.result()
+                except ScrapeError as exc:
+                    errors.append(BoardError(source=source, error=str(exc)))
+                except Exception as exc:
+                    logger.exception("Board discovery failed for %s", source.url)
+                    errors.append(BoardError(source=source, error=str(exc)))
+                else:
+                    extracted += len(page.candidates)
+                    for status, count in page.status_counts.items():
+                        status_counts[status] = status_counts.get(status, 0) + count
+                    for candidate in page.candidates:
+                        canonical = clean_url(str(candidate["url"]))
+                        if candidate.get("known"):
+                            if canonical not in known_urls:
+                                known_urls.add(canonical)
+                                known_count += 1
+                            continue
+                        if canonical in seen_urls:
+                            continue
+                        seen_urls.add(canonical)
+                        candidates.append(
+                            {"url": candidate["url"], "known": False, "site": source.site}
+                        )
+                        new_urls.append(str(candidate["url"]))
+                if progress is not None:
+                    progress(checked, len(selected), source.site or source.url)
+                if len(new_urls) >= total:
+                    truncated = True
+                    break
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+    return DiscoveryBatch(
+        source=SourceRef(
+            input="All known boards", url="", site="All known boards", site_status=None
+        ),
+        candidates=tuple(candidates[:total]),
+        new_urls=tuple(new_urls[:total]),
+        checked=checked,
+        extracted=extracted,
+        skipped_not_live=skipped_not_live,
+        known_count=known_count,
+        errors=tuple(errors),
+        truncated=truncated,
+        cancelled=was_cancelled,
+        query=query.strip() if query else None,
     )
 
 
