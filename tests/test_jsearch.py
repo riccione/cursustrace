@@ -309,3 +309,15 @@ def test_record_request_increments_monthly_counter() -> None:
 
     assert jsearch.record_request() == 200
     assert jsearch.requests_this_month() == 200
+
+
+def test_country_options_cover_common_markets() -> None:
+    options = jsearch.country_options()
+
+    assert jsearch.DEFAULT_COUNTRY in options
+    assert next(iter(options)) == "rs"
+    for code in ("rs", "us", "de"):
+        assert code in options
+        assert code.upper() in options[code]
+    assert all(len(code) == 2 and code.islower() for code in options)
+    assert not {"eu", "ez", "un"} & set(options)
