@@ -152,7 +152,8 @@ The Discover tab also has a `JSearch search` panel backed by
 [JSearch](https://www.openwebninja.com/api/jsearch). It returns full job postings
 (title, company, location, description, salary) that are stored directly, without
 scraping the listing. The free plan allows 200 requests per month; the panel
-shows how many this installation has used.
+shows how many this installation has used. Pick a country from the searchable
+dropdown (default: United States) before running the search.
 
 Save the key from the panel — it is written to `data/.jsearch-key`, readable only
 by your user — or set it outside the app with `CURSUS_JSEARCH_API_KEY`, or
