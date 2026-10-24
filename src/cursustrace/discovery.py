@@ -8,6 +8,7 @@ are relevant is left to the caller (an AI agent or a human).
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -104,6 +105,76 @@ _SOCIAL_HOSTS = frozenset(
     }
 )
 
+_DETAIL_SEGMENTS = frozenset(
+    {
+        "j",
+        "job",
+        "jobs",
+        "job-detail",
+        "job-details",
+        "position",
+        "positions",
+        "vacancy",
+        "vacancies",
+        "opening",
+        "openings",
+        "offer",
+        "offers",
+        "career",
+        "careers",
+        "posting",
+        "postings",
+        "listing",
+        "listings",
+        "stellenangebot",
+        "stellenangebote",
+        "posao",
+        "poslovi",
+        "oglas",
+        "konkurs",
+        "p",
+    }
+)
+_JOB_ROOTS = frozenset({"jobs", "job", "careers", "career"})
+_FACET_SEGMENTS = frozenset(
+    {
+        "remote",
+        "hybrid",
+        "onsite",
+        "locations",
+        "location",
+        "companies",
+        "company",
+        "categories",
+        "category",
+        "tags",
+        "topics",
+        "tools",
+        "salaries",
+        "salary",
+    }
+)
+_FACET_INTERIOR = _FACET_SEGMENTS - {"companies", "company"}
+_CATEGORY_LAST = frozenset(
+    {"jobs", "job", "careers", "career", "remote-jobs", "search", "salary", "salaries"}
+)
+_CATEGORY_TAIL_RE = re.compile(
+    r"(?:^|/)(?:[^/]*-jobs?|jobs-with-[^/]*|job-with-[^/]*)$", re.IGNORECASE
+)
+_LISTING_ROOT_RE = re.compile(
+    r"^/(?:jobs?|careers?|remote-jobs?|search|stellenangebote?|vacanc(?:y|ies)"
+    r"|positions?|openings?|poslovi|posao)(?:/|$)",
+    re.IGNORECASE,
+)
+_LISTING_TEXT_RE = re.compile(
+    r"\b(jobs?|careers?|vacanc(?:y|ies)|positions?|openings?|search)\b", re.IGNORECASE
+)
+_ACTION_TEXT_RE = re.compile(
+    r"\b(post|submit|hire|pricing|login|sign\s?in|register)\b", re.IGNORECASE
+)
+_MIN_DETAIL_SCORE = 4
+_MIN_LINKS_BEFORE_FOLLOW = 2
+
 
 @dataclass(frozen=True)
 class SourceRef:
@@ -114,6 +185,15 @@ class SourceRef:
     site: str | None
     site_status: str | None
     search_url: str | None = None
+
+
+@dataclass(frozen=True)
+class LinkEntry:
+    """A candidate link with its anchor text and detail score."""
+
+    url: str
+    title: str | None
+    score: int
 
 
 @dataclass(frozen=True)
@@ -176,10 +256,6 @@ def source_warning(source: SourceRef) -> str | None:
     return None
 
 
-def _strip_ext(segment: str) -> str:
-    return segment.split(".", 1)[0].casefold()
-
-
 def _is_social(host: str, path: str) -> bool:
     bare = host.removeprefix("www.")
     if bare in _SOCIAL_HOSTS:
@@ -187,53 +263,157 @@ def _is_social(host: str, path: str) -> bool:
     return bare.endswith("linkedin.com") and path.startswith("/company")
 
 
-def _is_probable_listing(url: str) -> bool:
-    """Drop obvious page chrome (nav, legal, social) so the limit counts listings."""
+def _score_candidate(url: str, text: str) -> int:
+    """Score how likely a link is a job detail rather than navigation.
+
+    A negative score means the link is page chrome and should be dropped.
+    """
     parsed = urlparse(url)
-    path = parsed.path
-    if _is_social(parsed.netloc.lower(), path):
-        return False
-    segments = [segment for segment in path.split("/") if segment]
+    segments = [segment.casefold() for segment in parsed.path.split("/") if segment]
     if not segments:
-        return False
-    last = segments[-1].casefold()
+        return -1
+    last = segments[-1]
+    if segments[0] in _NON_LISTING_SEGMENTS or last in _NON_LISTING_SEGMENTS:
+        return -1
     if last.endswith((".rss", ".xml")):
-        return False
-    if len(segments) == 1 and _strip_ext(last) in _NON_LISTING_SEGMENTS:
-        return False
-    return _strip_ext(segments[0]) not in _NON_LISTING_SEGMENTS
+        return -1
+    parts = re.split(r"[-_]", last)
+    id_tail = last.isdigit() or (
+        len(parts) >= 2
+        and (
+            (parts[-1].isdigit() and len(parts[-1]) >= 3)
+            or (
+                6 <= len(parts[-1]) <= 24
+                and parts[-1].islower()
+                and any(char.isdigit() for char in parts[-1])
+            )
+        )
+    )
+    marker = any(segment in _DETAIL_SEGMENTS for segment in segments[:-1])
+    category = bool(_CATEGORY_TAIL_RE.search(parsed.path))
+    if (
+        len(segments) == 2
+        and segments[0] in _JOB_ROOTS
+        and (
+            segments[1] in _FACET_SEGMENTS or (not id_tail and len(last) <= 12 and "-" not in last)
+        )
+    ):
+        category = True
+    if len(segments) == 3 and segments[0] in _JOB_ROOTS and segments[1] in _FACET_SEGMENTS:
+        category = True
+    if last in _CATEGORY_LAST:
+        category = True
+    if not id_tail and any(segment in _FACET_INTERIOR for segment in segments[1:-1]):
+        category = True
+    if category:
+        return -1
+    title_like = (
+        len(text) >= 18 and len(text.split()) >= 3 and not text.casefold().endswith(("jobs", "job"))
+    )
+    score = 0
+    if id_tail:
+        score += 4
+    if marker:
+        score += 2
+    if title_like:
+        score += 2
+    if len(segments) >= 3:
+        score += 1
+    return score
 
 
-def extract_links(html: str, base_url: str, limit: int = DEFAULT_LIMIT) -> list[str]:
-    """Extract candidate listing links from a page in document order.
+def extract_link_entries(
+    html: str, base_url: str, limit: int = DEFAULT_LIMIT, *, query: str | None = None
+) -> list[LinkEntry]:
+    """Return the most job-like links, ranked by detail likelihood.
 
-    Resolves relative hrefs, keeps query strings (boards often need them),
-    drops fragments, non-http schemes, self links and homepage links, and
-    deduplicates by canonical URL up to ``limit`` links.
+    Resolves relative hrefs, keeps query strings, drops fragments, non-http
+    schemes, social and page-chrome links, and deduplicates by canonical URL.
+    ``query`` keeps links whose URL or anchor text contains the term.
     """
     soup = BeautifulSoup(html, "html.parser")
     base_canonical = clean_url(base_url)
-    seen: set[str] = set()
-    links: list[str] = []
+    needle = query.strip().casefold() if query else None
+    entries: dict[str, LinkEntry] = {}
+    order: list[str] = []
     for anchor in soup.find_all("a", href=True):
         href = str(anchor["href"]).strip()
         if not href or href.lower().startswith(_NON_PAGE_SCHEMES):
             continue
         resolved = urljoin(base_url, href).split("#", 1)[0]
-        if urlparse(resolved).scheme not in ("http", "https"):
+        parsed = urlparse(resolved)
+        if parsed.scheme not in ("http", "https"):
             continue
-        if not _is_probable_listing(resolved):
+        if _is_social(parsed.netloc.lower(), parsed.path):
             continue
         canonical = clean_url(resolved)
-        if canonical in seen or canonical == base_canonical:
+        if canonical == base_canonical or not urlparse(canonical).path:
             continue
-        if not urlparse(canonical).path:
+        text = " ".join(anchor.get_text(" ", strip=True).split()) or None
+        if (
+            needle is not None
+            and needle not in resolved.casefold()
+            and (text is None or needle not in text.casefold())
+        ):
             continue
-        seen.add(canonical)
-        links.append(resolved)
-        if len(links) >= limit:
-            break
-    return links
+        score = _score_candidate(resolved, text or "")
+        if score < _MIN_DETAIL_SCORE:
+            continue
+        entry = LinkEntry(url=resolved, title=text, score=score)
+        current = entries.get(canonical)
+        if current is None:
+            entries[canonical] = entry
+            order.append(canonical)
+        elif score > current.score:
+            entries[canonical] = entry
+    ranked = sorted(order, key=lambda canonical: -entries[canonical].score)
+    return [entries[canonical] for canonical in ranked[:limit]]
+
+
+def extract_links(
+    html: str, base_url: str, limit: int = DEFAULT_LIMIT, *, query: str | None = None
+) -> list[str]:
+    """Return the URLs of the highest-ranked candidate links."""
+    return [entry.url for entry in extract_link_entries(html, base_url, limit, query=query)]
+
+
+def _pick_listing_page(html: str, base_url: str, query: str | None) -> str | None:
+    """Pick a same-site listings page to follow when a homepage has no job links."""
+    soup = BeautifulSoup(html, "html.parser")
+    base_host = urlparse(base_url).netloc.lower().removeprefix("www.")
+    needle = query.strip().casefold() if query else None
+    best: tuple[int, str] | None = None
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor["href"]).strip()
+        if not href or href.lower().startswith(_NON_PAGE_SCHEMES):
+            continue
+        resolved = urljoin(base_url, href).split("#", 1)[0]
+        parsed = urlparse(resolved)
+        if parsed.scheme not in ("http", "https"):
+            continue
+        if parsed.netloc.lower().removeprefix("www.") != base_host:
+            continue
+        segments = [segment.casefold() for segment in parsed.path.split("/") if segment]
+        if not segments:
+            continue
+        text = " ".join(anchor.get_text(" ", strip=True).split())
+        path_match = bool(_LISTING_ROOT_RE.search(parsed.path))
+        if not path_match and (not _LISTING_TEXT_RE.search(text) or _ACTION_TEXT_RE.search(text)):
+            continue
+        if any(segment in _NON_LISTING_SEGMENTS for segment in segments):
+            continue
+        if _score_candidate(resolved, text) >= _MIN_DETAIL_SCORE:
+            continue
+        score = 4 if path_match else 0
+        if needle is not None and (needle in resolved.casefold() or needle in text.casefold()):
+            score += 3
+        if len(segments) == 1:
+            score += 2
+        elif len(segments) == 2:
+            score += 1
+        if best is None or score > best[0]:
+            best = (score, resolved)
+    return best[1] if best is not None and best[0] > 0 else None
 
 
 def _substitute_query(source: SourceRef, query: str) -> str:
@@ -293,11 +473,27 @@ def _discover_page(
         else:
             client_term = term
     html = scraper.fetch_html(fetched_url)
-    urls = extract_links(html, fetched_url, MAX_LIMIT if client_term else limit)
-    if client_term:
-        needle = client_term.casefold()
-        urls = [url for url in urls if needle in url.casefold()][:limit]
+    entries = extract_link_entries(html, fetched_url, limit, query=client_term)
+    if (
+        len(entries) < _MIN_LINKS_BEFORE_FOLLOW
+        and source.site is not None
+        and source.search_url is None
+    ):
+        listing_url = _pick_listing_page(html, fetched_url, term)
+        if listing_url is not None and clean_url(listing_url) != clean_url(fetched_url):
+            try:
+                listing_html = scraper.fetch_html(listing_url)
+            except ScrapeError:
+                listing_html = None
+            if listing_html is not None:
+                fetched_url = listing_url
+                entries = extract_link_entries(listing_html, listing_url, limit, query=client_term)
+    urls = [entry.url for entry in entries]
     candidates, new_urls, status_counts = _classify(urls, index)
+    titles = {entry.url: entry.title for entry in entries}
+    for candidate in candidates:
+        if not candidate.get("known"):
+            candidate["title"] = titles.get(str(candidate["url"]))
     return DiscoveryResult(
         source=source,
         candidates=tuple(candidates),
@@ -348,6 +544,7 @@ class DiscoveryBatch:
     extracted: int
     skipped_not_live: int
     known_count: int
+    empty: int
     errors: tuple[BoardError, ...]
     truncated: bool
     cancelled: bool = False
@@ -386,7 +583,7 @@ def discover_all(
     known_urls: set[str] = set()
     errors: list[BoardError] = []
     status_counts: dict[str, int] = {}
-    checked = extracted = known_count = 0
+    checked = extracted = known_count = empty = 0
     truncated = False
     was_cancelled = False
     if selected:
@@ -411,6 +608,8 @@ def discover_all(
                     errors.append(BoardError(source=source, error=str(exc)))
                 else:
                     extracted += len(page.candidates)
+                    if not page.candidates:
+                        empty += 1
                     for status, count in page.status_counts.items():
                         status_counts[status] = status_counts.get(status, 0) + count
                     for candidate in page.candidates:
@@ -424,7 +623,12 @@ def discover_all(
                             continue
                         seen_urls.add(canonical)
                         candidates.append(
-                            {"url": candidate["url"], "known": False, "site": source.site}
+                            {
+                                "url": candidate["url"],
+                                "known": False,
+                                "site": source.site,
+                                "title": candidate.get("title"),
+                            }
                         )
                         new_urls.append(str(candidate["url"]))
                 if progress is not None:
@@ -444,6 +648,7 @@ def discover_all(
         extracted=extracted,
         skipped_not_live=skipped_not_live,
         known_count=known_count,
+        empty=empty,
         errors=tuple(errors),
         truncated=truncated,
         cancelled=was_cancelled,

@@ -17,8 +17,12 @@ def _batch(
     *urls: str,
     known_count: int = 0,
     errors: tuple[discovery.BoardError, ...] = (),
+    title: str | None = None,
+    empty: int = 0,
 ) -> discovery.DiscoveryBatch:
-    candidates = tuple({"url": url, "known": False, "site": "Example Board"} for url in urls)
+    candidates = tuple(
+        {"url": url, "known": False, "site": "Example Board", "title": title} for url in urls
+    )
     return discovery.DiscoveryBatch(
         source=discovery.SourceRef(
             input="All known boards",
@@ -32,6 +36,7 @@ def _batch(
         extracted=8,
         skipped_not_live=1,
         known_count=known_count,
+        empty=empty,
         errors=errors,
         truncated=False,
     )

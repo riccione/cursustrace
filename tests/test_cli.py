@@ -219,7 +219,7 @@ def test_discover_json_lists_new_and_known(
             "id": job_id,
             "title": "Engineer",
         },
-        {"url": "https://board.example/jobs/222?ref=x", "known": False},
+        {"url": "https://board.example/jobs/222?ref=x", "known": False, "title": "two"},
     ]
     assert "added" not in payload
 
@@ -1773,6 +1773,7 @@ def _batch(*urls: str) -> discovery.DiscoveryBatch:
         extracted=5,
         skipped_not_live=1,
         known_count=0,
+        empty=0,
         errors=(),
         truncated=False,
     )

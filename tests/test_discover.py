@@ -34,10 +34,10 @@ SAMPLE_HTML = """
 """
 
 EXPECTED_LINKS = [
+    "https://linkedin.com/jobs/view/999",
     "https://remoteok.com/jobs/123",
     "https://remoteok.com/jobs/456?ref=x",
     "https://remoteok.com/jobs/789",
-    "https://linkedin.com/jobs/view/999",
 ]
 
 
@@ -112,13 +112,18 @@ def test_discover_splits_known_and_new(monkeypatch: pytest.MonkeyPatch) -> None:
     result = discovery.discover(discovery.resolve_source("https://remoteok.com"), limit=10)
 
     assert result.new_urls == (
+        "https://linkedin.com/jobs/view/999",
         "https://remoteok.com/jobs/456?ref=x",
         "https://remoteok.com/jobs/789",
-        "https://linkedin.com/jobs/view/999",
     )
     assert result.new_count == 3
     assert result.known_count == 1
     assert list(result.candidates) == [
+        {
+            "url": "https://linkedin.com/jobs/view/999",
+            "known": False,
+            "title": "LinkedIn job",
+        },
         {
             "url": "https://remoteok.com/jobs/123",
             "known": True,
@@ -126,9 +131,8 @@ def test_discover_splits_known_and_new(monkeypatch: pytest.MonkeyPatch) -> None:
             "id": job_id,
             "title": "Engineer",
         },
-        {"url": "https://remoteok.com/jobs/456?ref=x", "known": False},
-        {"url": "https://remoteok.com/jobs/789", "known": False},
-        {"url": "https://linkedin.com/jobs/view/999", "known": False},
+        {"url": "https://remoteok.com/jobs/456?ref=x", "known": False, "title": "Other"},
+        {"url": "https://remoteok.com/jobs/789", "known": False, "title": "Relative"},
     ]
     assert result.status_counts == {"applied": 1}
 
@@ -139,7 +143,7 @@ def test_discover_honours_limit(monkeypatch: pytest.MonkeyPatch) -> None:
 
     result = discovery.discover(discovery.resolve_source("https://remoteok.com"), limit=1)
 
-    assert result.new_urls == ("https://remoteok.com/jobs/123",)
+    assert result.new_urls == ("https://linkedin.com/jobs/view/999",)
 
 
 def test_discover_propagates_fetch_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -414,3 +418,142 @@ def test_discover_all_filters_by_query(monkeypatch: pytest.MonkeyPatch) -> None:
     batch = discovery.discover_all([_live("A", "https://a.example")], query="shared")
 
     assert batch.new_urls == ("https://shared.example/jobs/1",)
+
+
+RANKING_HTML = """
+<a href="/about">About</a>
+<a href="/jobs-with-salary">Jobs with salary</a>
+<a href="/jobs/locations/berlin">Berlin</a>
+<a href="/jobs/companies/acme">Acme</a>
+<a href="/jobs/qa">QA</a>
+<a href="/hire-developers/qa">QA engineers</a>
+<a href="/remote-jobs">Remote jobs</a>
+<a href="/jobs/companies/acme/senior-qa-engineer-berlin-433385">Senior QA Engineer</a>
+"""
+
+FOLLOW_HOME_HTML = """
+<a href="/about">About</a>
+<a href="/remote-jobs">Remote jobs</a>
+"""
+
+FOLLOW_LISTING_HTML = """
+<a href="/remote-jobs/j/acme-senior-qa-engineer-pszakv5wm7">Senior QA Engineer</a>
+<a href="/remote-jobs/j/acme-staff-engineer-ptp8lc4kuu">Staff Engineer</a>
+"""
+
+
+def test_extract_links_ranks_job_details_above_navigation() -> None:
+    entries = discovery.extract_link_entries(RANKING_HTML, "https://board.example")
+
+    assert [entry.url for entry in entries] == [
+        "https://board.example/jobs/companies/acme/senior-qa-engineer-berlin-433385"
+    ]
+    assert entries[0].title == "Senior QA Engineer"
+    assert entries[0].score == 9
+
+
+def test_extract_links_matches_query_in_anchor_text() -> None:
+    html = '<a href="https://board.example/careers/123456">Senior QA Engineer</a>'
+
+    assert discovery.extract_links(html, "https://board.example", query="qa") == [
+        "https://board.example/careers/123456"
+    ]
+    assert discovery.extract_links(html, "https://board.example", query="rust") == []
+
+
+def test_discover_follows_a_listings_page_for_named_boards(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.init_db()
+    fetched: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        fetched.append(url)
+        return FOLLOW_HOME_HTML if url == "https://arc.example" else FOLLOW_LISTING_HTML
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+    source = discovery.SourceRef(
+        input="Arc", url="https://arc.example", site="Arc", site_status="live"
+    )
+
+    result = discovery.discover(source)
+
+    assert fetched == ["https://arc.example", "https://arc.example/remote-jobs"]
+    assert result.fetched_url == "https://arc.example/remote-jobs"
+    assert [candidate["url"] for candidate in result.candidates] == [
+        "https://arc.example/remote-jobs/j/acme-senior-qa-engineer-pszakv5wm7",
+        "https://arc.example/remote-jobs/j/acme-staff-engineer-ptp8lc4kuu",
+    ]
+    assert result.candidates[0]["title"] == "Senior QA Engineer"
+
+
+def test_discover_does_not_follow_listings_for_raw_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.init_db()
+    fetched: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        fetched.append(url)
+        return FOLLOW_HOME_HTML
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+    source = discovery.SourceRef(
+        input="https://arc.example", url="https://arc.example", site=None, site_status=None
+    )
+
+    result = discovery.discover(source)
+
+    assert fetched == ["https://arc.example"]
+    assert result.candidates == ()
+
+
+def test_discover_skips_follow_when_details_are_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.init_db()
+    fetched: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        fetched.append(url)
+        return FOLLOW_LISTING_HTML + '<a href="/jobs">Jobs</a>'
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+    source = discovery.SourceRef(
+        input="Arc", url="https://arc.example", site="Arc", site_status="live"
+    )
+
+    discovery.discover(source)
+
+    assert fetched == ["https://arc.example"]
+
+
+def test_discover_keeps_first_pass_when_follow_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db.init_db()
+
+    def fake_fetch(url: str) -> str:
+        if url.endswith("/jobs"):
+            raise ScrapeError("403 Forbidden")
+        return '<a href="/jobs">Jobs</a>'
+
+    monkeypatch.setattr(scraper, "fetch_html", fake_fetch)
+    source = discovery.SourceRef(
+        input="Arc", url="https://arc.example", site="Arc", site_status="live"
+    )
+
+    result = discovery.discover(source)
+
+    assert result.candidates == ()
+    assert result.fetched_url == "https://arc.example"
+
+
+def test_discover_all_counts_empty_boards(monkeypatch: pytest.MonkeyPatch) -> None:
+    db.init_db()
+    monkeypatch.setattr(scraper, "fetch_html", lambda url: '<a href="/about">About</a>')
+
+    batch = discovery.discover_all([_live("A", "https://a.example")])
+
+    assert batch.empty == 1
+    assert batch.checked == 1
