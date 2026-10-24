@@ -184,6 +184,29 @@ A workflow you can paste to an AI agent:
 > `cursustrace scan <chosen urls> --json` and summarize what was added, what
 > was already tracked, and what you skipped and why.
 
+### Searching JSearch
+
+`--jsearch` queries [JSearch](https://www.openwebninja.com/api/jsearch) instead of
+a board page. The key comes from `CURSUS_JSEARCH_API_KEY`, `jsearch_api_key` in
+`cursustrace.toml`, or the key saved in the Discover tab.
+
+```sh
+# one page (10 results); --results fetches more pages, one request per 10
+uv run cursustrace discover --jsearch "python developer in Belgrade" --json
+uv run cursustrace discover --jsearch "qa engineer" --country rs \
+  --date-posted week --remote --results 30 --json
+
+# add the new positions directly, without scraping
+uv run cursustrace discover --jsearch "python developer" --add --tag jsearch
+```
+
+The JSON payload adds `requests`, `usage` (`used`, `limit`, `month`),
+`new_count` / `known_count`, `flagged_count`, and per-candidate `title`,
+`company`, `location` and `flags`. Positions flagged as outside Serbia/remote-EU
+are listed but skipped by `--add` unless `--force` is passed. The free plan allows
+200 requests per month; `usage.used` counts only the requests made through
+CursusTrace.
+
 ---
 
 [← Back to the README](../README.md)
