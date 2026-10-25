@@ -140,3 +140,28 @@ async def test_jsearch_shows_monthly_usage(user: User, monkeypatch: pytest.Monke
 
     label = cast(ui.label, user.find(marker="jsearch-usage").elements.pop())
     assert "12 / 200" in label.text
+
+
+async def test_jsearch_country_select_passes_the_code(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_search(*args: object, **kwargs: object) -> jsearch.JSearchPage:
+        captured.update(kwargs)
+        return _page(_job())
+
+    monkeypatch.setattr(jsearch, "api_key", lambda settings=None: ("key", "environment"))
+    monkeypatch.setattr(jsearch, "search", fake_search)
+
+    await user.open("/")
+    await _open_panel(user)
+    country = cast(ui.select, user.find(marker="jsearch-country").elements.pop())
+    assert country.value == jsearch.DEFAULT_COUNTRY
+
+    country.set_value("de")
+    user.find(marker="jsearch-query").type("python")
+    user.find(marker="jsearch-run").click()
+    await asyncio.sleep(0.3)
+
+    assert captured["country"] == "de"

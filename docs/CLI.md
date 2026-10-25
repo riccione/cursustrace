@@ -211,7 +211,9 @@ from the board page.
 
 `--jsearch` queries [JSearch](https://www.openwebninja.com/api/jsearch) instead of
 a board page. The key comes from `CURSUS_JSEARCH_API_KEY`, `jsearch_api_key` in
-`cursustrace.toml`, or the key saved in the Discover tab.
+`cursustrace.toml`, or the key saved in the Discover tab. `--country` takes an
+ISO 3166-1 alpha-2 code (case-insensitive, validated) and defaults to the US when
+omitted, matching the searchable dropdown in the Discover panel.
 
 ```sh
 # one page (10 results); --results fetches more pages, one request per 10

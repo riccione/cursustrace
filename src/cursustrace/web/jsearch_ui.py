@@ -129,7 +129,14 @@ def _render_jsearch(refresh: Callable[[], None]) -> None:
                 .mark("jsearch-query")
             )
             country_input = (
-                ui.input("Country", placeholder="us").classes("w-24").mark("jsearch-country")
+                ui.select(
+                    jsearch.country_options(),
+                    value=jsearch.DEFAULT_COUNTRY,
+                    label="Country",
+                    with_input=True,
+                )
+                .classes("w-56")
+                .mark("jsearch-country")
             )
             date_select = (
                 ui.select(
@@ -225,7 +232,7 @@ def _render_jsearch(refresh: Callable[[], None]) -> None:
                     jsearch.search,
                     term,
                     api_key=resolved[0],
-                    country=(country_input.value or "").strip() or None,
+                    country=country_input.value or None,
                     date_posted=date_select.value,
                     remote_only=bool(remote_switch.value),
                 )
@@ -257,7 +264,7 @@ def _render_jsearch(refresh: Callable[[], None]) -> None:
                     jsearch.search,
                     (query_input.value or "").strip(),
                     api_key=resolved[0],
-                    country=(country_input.value or "").strip() or None,
+                    country=country_input.value or None,
                     date_posted=date_select.value,
                     remote_only=bool(remote_switch.value),
                     cursor=cursor,

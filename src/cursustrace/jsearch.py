@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from babel import Locale
 
 from cursustrace import config, db
 from cursustrace.applicability import check_applicability
@@ -24,6 +26,24 @@ KEY_FILENAME = ".jsearch-key"
 USAGE_KEY_PREFIX = "jsearch_requests"
 DATE_POSTED_OPTIONS = ("all", "today", "3days", "week", "month")
 SALARY_PERIODS = {"YEAR": "year", "MONTH": "month"}
+DEFAULT_COUNTRY = "us"
+_NON_COUNTRY_CODES = frozenset({"EU", "EZ", "UN"})
+
+
+@lru_cache(maxsize=1)
+def country_options() -> dict[str, str]:
+    """Return lowercase ISO country codes mapped to searchable labels."""
+    territories = Locale.parse("en").territories
+    options = {
+        code.lower(): f"{name} ({code})"
+        for code, name in territories.items()
+        if len(code) == 2 and code.isalpha() and code not in _NON_COUNTRY_CODES
+    }
+    ordered: dict[str, str] = {}
+    if "rs" in options:
+        ordered["rs"] = options.pop("rs")
+    ordered.update(sorted(options.items(), key=lambda item: item[1]))
+    return ordered
 
 
 @dataclass(frozen=True)
