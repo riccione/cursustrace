@@ -153,7 +153,9 @@ The Discover tab also has a `JSearch search` panel backed by
 (title, company, location, description, salary) that are stored directly, without
 scraping the listing. The free plan allows 200 requests per month; the panel
 shows how many this installation has used. Pick a country from the searchable
-dropdown (default: United States) before running the search.
+dropdown (default: United States) before running the search. Results are paged
+10 at a time: `Prev` / `Next` move between pages, going back is free, and each
+new page costs one JSearch request.
 
 Save the key from the panel — it is written to `data/.jsearch-key`, readable only
 by your user — or set it outside the app with `CURSUS_JSEARCH_API_KEY`, or
