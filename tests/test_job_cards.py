@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import time
+from datetime import datetime, timedelta
 from typing import cast
 
 from nicegui import ui
@@ -20,7 +20,7 @@ def _seed_job(title: str = "Role", company: str = "Acme") -> int:
 
 
 def _stamp(days_ago: int = 0) -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - days_ago * 86400))
+    return (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 async def _show_secondary_stage(user: User, status: str) -> None:
