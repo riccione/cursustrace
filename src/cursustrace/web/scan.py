@@ -121,6 +121,7 @@ async def _handle_scan(
     refresh: Callable[[], None],
     status_label: ui.label,
     button: ui.button,
+    dialog: ui.dialog,
 ) -> None:
     urls = _parse_urls(urls_input.value)
     if not urls:
@@ -129,6 +130,8 @@ async def _handle_scan(
 
     failed_urls = await run_scan(urls, refresh, status_label, button)
     urls_input.value = "\n".join(failed_urls) if failed_urls else ""
+    if not failed_urls:
+        dialog.close()
 
 
 def _add_job_dialog(refresh: Callable[[], None], add_dialog: ui.dialog) -> ui.dialog:
@@ -163,7 +166,9 @@ def _add_job_dialog(refresh: Callable[[], None], add_dialog: ui.dialog) -> ui.di
         with ui.row().classes("w-full items-center gap-3"):
             scan_button = ui.button("Scan & Save Positions")
             status_label = ui.label()
-        scan_button.on_click(lambda: _handle_scan(urls_input, refresh, status_label, scan_button))
+        scan_button.on_click(
+            lambda: _handle_scan(urls_input, refresh, status_label, scan_button, dialog)
+        )
         ui.separator()
         ui.button("Add Manually", icon="edit_note", on_click=open_manual).props(
             "outline color=primary"
