@@ -258,6 +258,26 @@ async def test_add_job_panel_scans_a_position(user: User) -> None:
     await _see_notice(user, "Saved 1")
 
 
+async def test_scan_success_closes_the_panel(user: User) -> None:
+    await user.open("/")
+    await _scan(user)
+    await _see_notice(user, "Saved 1")
+
+    dialog = cast(ui.dialog, user.find(marker="add-job-dialog").elements.pop())
+    assert dialog.value is False
+
+
+async def test_scan_all_duplicates_closes_the_panel(user: User) -> None:
+    db.init_db()
+    db.add_job(JOB_URL, "Senior Engineer", "Acme", "Remote", "Body")
+    await user.open("/")
+    await _scan(user)
+    await _see_notice(user, "Duplicates 1")
+
+    dialog = cast(ui.dialog, user.find(marker="add-job-dialog").elements.pop())
+    assert dialog.value is False
+
+
 async def test_add_job_panel_opens_manual_entry(user: User) -> None:
     await user.open("/")
     await _open_add_job(user)
@@ -338,6 +358,7 @@ async def test_scan_multiple_reports_mixed_outcomes(
     await _scan(user, "https://example.com/jobs/1")
     await _see_notice(user, "Saved 1")
 
+    await _open_add_job(user)
     user.find(marker="scan-urls").clear().type(
         "https://example.com/jobs/2\nhttps://example.com/jobs/1\nhttps://example.com/jobs/bad"
     )
@@ -384,6 +405,9 @@ async def test_scan_keeps_failed_urls(user: User, monkeypatch: pytest.MonkeyPatc
 
     await _wait_for(lambda: len(db.get_jobs()) == 1)
     await _wait_for(lambda: _scan_input(user).value == "https://example.com/jobs/bad")
+
+    dialog = cast(ui.dialog, user.find(marker="add-job-dialog").elements.pop())
+    assert dialog.value is True
 
 
 def test_parse_urls_splits_and_dedupes() -> None:
