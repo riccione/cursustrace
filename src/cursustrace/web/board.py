@@ -8,7 +8,7 @@ from functools import partial
 from nicegui import events, ui
 
 from cursustrace import db
-from cursustrace.web.attention_ui import attention_reasons, most_urgent
+from cursustrace.web.attention_ui import AttentionRules, attention_reasons, most_urgent
 from cursustrace.web.constants import STATUS_NAMES
 from cursustrace.web.session import current_user_id
 
@@ -112,12 +112,13 @@ def _render_card(
     refresh: Callable[[], None],
     tags: list[str],
     on_tag_click: Callable[[str], None] | None,
+    attention_rules: AttentionRules | None = None,
 ) -> None:
     """Render one compact board card."""
     current = db.job_status(job)
     title = job["title"] or "Untitled position"
     company = job["company"] or "Unknown company"
-    reasons = attention_reasons(job)
+    reasons = attention_reasons(job, attention_rules)
     card = ui.element("div").classes("ct-board-card w-full").mark(f"board-card-{job['id']}")
     card.props("draggable=true")
     card.on("dragstart", js_handler=_DRAG_START_JS.replace("__JOB_ID__", str(job["id"])))
@@ -157,6 +158,7 @@ def _render_column(
     on_tag_click: Callable[[str], None] | None,
     is_expanded: Callable[[], bool],
     mark_expanded: Callable[[db.JobStatus], None],
+    attention_rules: AttentionRules | None = None,
 ) -> None:
     """Render one droppable stage column with its cards."""
     column = ui.column().classes("ct-board__column").mark(f"board-column-{status}")
@@ -164,7 +166,7 @@ def _render_column(
     column.on("dragleave", js_handler=_DRAG_LEAVE_JS)
     column.on("dragover", js_handler=_DRAG_OVER_JS)
     column.on("drop", _drop_handler(status, refresh), js_handler=_DROP_JS)
-    attention = sum(1 for job in jobs if attention_reasons(job))
+    attention = sum(1 for job in jobs if attention_reasons(job, attention_rules))
     with column:
         with ui.row().classes("ct-board__column-head w-full items-center gap-2"):
             ui.label(STAGE_LABELS[status]).classes("ct-board__column-title")
@@ -186,6 +188,7 @@ def _render_column(
                     refresh=refresh,
                     tags=grouped_tags.get(job["id"], []),
                     on_tag_click=on_tag_click,
+                    attention_rules=attention_rules,
                 )
             if len(jobs) > len(shown):
 
@@ -215,6 +218,7 @@ def render_board(
     on_tag_click: Callable[[str], None] | None,
     toggle_archive: Callable[[], None],
     mark_expanded: Callable[[db.JobStatus], None],
+    attention_rules: AttentionRules | None = None,
 ) -> None:
     """Render the board: the active stage columns plus the archived ones on demand."""
     archived_count = sum(len(jobs_by_status.get(status, [])) for status in archived)

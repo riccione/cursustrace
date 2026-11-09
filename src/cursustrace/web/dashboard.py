@@ -8,7 +8,13 @@ from nicegui import events, ui
 from starlette.requests import Request
 
 from cursustrace import db, salary
-from cursustrace.web.attention_ui import _park_stale_positions, attention_counts, attention_first
+from cursustrace.web.attention_ui import (
+    AttentionRules,
+    _park_stale_positions,
+    attention_counts,
+    attention_first,
+    current_rules,
+)
 from cursustrace.web.board import render_board
 from cursustrace.web.constants import (
     APP_TITLE,
@@ -79,13 +85,32 @@ def dashboard_page(request: Request) -> None:
     )
     tag_filter: list[str] = [canonical_tag] if canonical_tag else []
 
-    def active_context() -> str:
+    jobs_by_status: dict[db.JobStatus, list[db.Job]] = {}
+    search_results: list[db.Job] = []
+    attention_rules: AttentionRules | None = None
+    dirty: set[str] = {"search", "board", *db.JOB_STATUSES}
+    stats_dirty = True
+    main_section = SECTION_SLUGS["dashboard"]
+
+    def visible_context() -> str:
+        if view_mode == "board":
+            return "board"
         if query:
             return "search"
         if more_status is not None:
             return more_status
         value = status_tabs.value if status_tabs is not None else None
         return value if isinstance(value, str) else "unapplied"
+
+    def page_meta(jobs: list[db.Job], context: str) -> tuple[int, int, int]:
+        total = len(jobs)
+        if page_size > 0:
+            page_count = max((total + page_size - 1) // page_size, 1)
+            page = min(pages.get(context, 1), page_count)
+            pages[context] = page
+        else:
+            page_count, page = 1, 1
+        return page_count, page, total
 
     def render_page(
         container: ui.column,
@@ -99,27 +124,23 @@ def dashboard_page(request: Request) -> None:
             if not jobs:
                 ui.label(empty_message)
                 return (1, 1, 0)
-            jobs = attention_first(jobs)
+            jobs = attention_first(jobs, attention_rules)
+            page_count, page, total = page_meta(jobs, context)
             if page_size > 0:
-                page_count = (len(jobs) + page_size - 1) // page_size
-                page = min(pages.get(context, 1), page_count)
-                pages[context] = page
                 start = (page - 1) * page_size
                 page_jobs = jobs[start : start + page_size]
             else:
-                page_count, page, page_jobs = 1, 1, jobs
-            if page_jobs:
-                grouped = db.tags_for_jobs([entry["id"] for entry in page_jobs])
-            else:
-                grouped = {}
+                page_jobs = jobs
+            grouped = db.tags_for_jobs([entry["id"] for entry in page_jobs]) if page_jobs else {}
             for job in page_jobs:
                 _render_job_card(
                     job,
-                    refresh,
+                    refresh_data,
                     tags=grouped.get(job["id"], []),
                     on_tag_click=apply_tag_filter,
+                    attention_rules=attention_rules,
                 )
-        return (page_count, page, len(jobs))
+        return (page_count, page, total)
 
     def select_secondary(status: db.JobStatus) -> None:
         """Show a stage that lives behind the More menu."""
@@ -127,47 +148,117 @@ def dashboard_page(request: Request) -> None:
         more_status = status
         if more_menu is not None:
             more_menu.close()
-        refresh()
+        render_view()
 
     def show_primary() -> None:
         """Return to the primary stage tabs."""
         nonlocal more_status
         more_status = None
-        refresh()
+        render_view()
 
     def set_view(mode: str) -> None:
         """Switch between the tabbed list and the board."""
         nonlocal view_mode
         view_mode = mode
-        refresh()
+        render_view()
 
     def toggle_archive() -> None:
         """Show or hide the archived columns on the board."""
         nonlocal archived_open
         archived_open = not archived_open
-        refresh()
+        dirty.add("board")
+        render_view()
 
     def on_primary_tab_click() -> None:
         """Leave the secondary view when a primary tab is clicked."""
         nonlocal more_status
         if more_status is None:
-            # A normal tab switch; the value change handler refreshes the list.
             return
         more_status = None
-        refresh()
+        render_view()
 
-    def refresh() -> None:
+    def update_badges() -> None:
+        counts = attention_counts(attention_rules)
+        for status, badge in attention_badges.items():
+            count = counts.get(status, 0)
+            badge.set_text(str(count))
+            badge.props["title"] = f"{count} need attention"
+            badge.set_visibility(count > 0)
+
+    def load_data() -> bool:
+        """Reload the cached jobs, counts and badges; return False when tags changed."""
+        nonlocal attention_rules, stats_dirty
         _park_stale_positions()
+        attention_rules = current_rules()
         if tag_filter_select is not None:
             names = db.list_tags(user_id=current_user_id())
             tag_filter_select.options = names
             current = [str(name) for name in tag_filter_select.value or []]
             kept = [name for name in current if name in names]
             if kept != current:
-                # Pruning fires update_tag_filter, which re-enters refresh() to render.
+                # Pruning fires update_tag_filter, which re-enters load_data.
                 tag_filter_select.set_value(kept)
-                return
+                return False
             tag_filter_select.update()
+        stage_counts = db.job_counts(user_id=current_user_id())
+        for status, tab in status_tab_elements.items():
+            tab.props["label"] = f"{_stage_label(status)} ({stage_counts.get(status, 0)})"
+        jobs_by_status.clear()
+        for status, _label, _empty in STATUS_TABS:
+            jobs = salary.filter_by_salary(
+                db.search_jobs(query, status=status, user_id=current_user_id()),
+                min_annual=salary_min,
+                max_annual=salary_max,
+                currency=salary_currency or None,
+            )
+            jobs = db.filter_by_tags(jobs, tag_filter)
+            jobs_by_status[status] = db.sort_jobs(jobs, sort_order)
+        search_results.clear()
+        if query:
+            search_results.extend(db.search_jobs(query, user_id=current_user_id()))
+        update_badges()
+        dirty.update(db.JOB_STATUSES)
+        dirty.update({"search", "board"})
+        stats_dirty = True
+        return True
+
+    def render_stats_if_needed() -> None:
+        nonlocal stats_dirty
+        if stats_container is None or not stats_dirty:
+            return
+        if main_section != SECTION_SLUGS["statistics"]:
+            return
+        stats_container.clear()
+        with stats_container:
+            _render_statistics(dark.value is True)
+        stats_dirty = False
+
+    rendered_context: str | None = None
+
+    def clear_rendered_view() -> None:
+        nonlocal rendered_context
+        if rendered_context is None:
+            return
+        if rendered_context == "search":
+            if results_container is not None:
+                results_container.clear()
+        elif rendered_context == "board":
+            if board_container is not None:
+                board_container.clear()
+        else:
+            container = containers.get(cast("db.JobStatus", rendered_context))
+            if container is not None:
+                container.clear()
+        dirty.add(rendered_context)
+        rendered_context = None
+
+    def render_view() -> None:
+        """Show the active view, rendering only its container when stale."""
+        nonlocal rendered_context
+        if main_section != SECTION_SLUGS["dashboard"]:
+            clear_rendered_view()
+            render_stats_if_needed()
+            return
         searching = bool(query)
         board = view_mode == "board"
         show_panels = not searching and not board and more_status is None
@@ -190,49 +281,29 @@ def dashboard_page(request: Request) -> None:
                     button.classes(add="ct-view-switch__active")
                 else:
                     button.classes(remove="ct-view-switch__active")
-        stage_counts = db.job_counts(user_id=current_user_id())
-        for status, tab in status_tab_elements.items():
-            tab.props["label"] = f"{_stage_label(status)} ({stage_counts.get(status, 0)})"
         active = active_filter_count()
         if filters_badge is not None:
             filters_badge.set_text(str(active))
             filters_badge.set_visibility(active > 0)
         if sort_select is not None:
             sort_select.set_visibility(not searching)
-        for status, _label, _empty in STATUS_TABS:
-            container = containers.get(status)
-            if container is not None:
-                container.clear()
+        context = visible_context()
+        if rendered_context is not None and rendered_context != context:
+            clear_rendered_view()
         if results_container is not None:
-            results_container.clear()
-            results_container.set_visibility(searching and not board)
-        context = "search" if searching else active_context()
-        page_count, page, total = 1, 1, 0
-        if searching and not board and results_container is not None:
-            page_count, page, total = render_page(
-                results_container,
-                db.search_jobs(query, user_id=current_user_id()),
-                f'No positions match "{query}".',
-                "search",
-            )
-        if not searching or board:
-            jobs_by_status: dict[db.JobStatus, list[db.Job]] = {}
-            for status, _label, empty_message in STATUS_TABS:
-                jobs = salary.filter_by_salary(
-                    db.search_jobs(query, status=status, user_id=current_user_id()),
-                    min_annual=salary_min,
-                    max_annual=salary_max,
-                    currency=salary_currency or None,
+            results_container.set_visibility(context == "search")
+        empty_messages = {status: message for status, _label, message in STATUS_TABS}
+        if context == "search":
+            if results_container is not None and "search" in dirty:
+                render_page(
+                    results_container,
+                    search_results,
+                    f'No positions match "{query}".',
+                    "search",
                 )
-                jobs = db.filter_by_tags(jobs, tag_filter)
-                jobs_by_status[status] = db.sort_jobs(jobs, sort_order)
-                container = containers.get(status)
-                if container is None or board:
-                    continue
-                rendered = render_page(container, jobs_by_status[status], empty_message, status)
-                if status == context:
-                    page_count, page, total = rendered
-            if board and board_container is not None:
+                dirty.discard("search")
+        elif context == "board":
+            if board_container is not None and "board" in dirty:
                 render_board(
                     board_container,
                     jobs_by_status,
@@ -240,36 +311,56 @@ def dashboard_page(request: Request) -> None:
                     archived=SECONDARY_STATUSES,
                     archived_open=archived_open,
                     is_expanded=lambda status: status in expanded_columns,
-                    empty_messages={status: message for status, _label, message in STATUS_TABS},
-                    refresh=refresh,
+                    empty_messages=empty_messages,
+                    refresh=refresh_data,
                     on_tag_click=apply_tag_filter,
                     toggle_archive=toggle_archive,
                     mark_expanded=expanded_columns.add,
+                    attention_rules=attention_rules,
                 )
+                dirty.discard("board")
+        else:
+            status_context = cast("db.JobStatus", context)
+            container = containers.get(status_context)
+            if container is not None and context in dirty:
+                render_page(
+                    container,
+                    jobs_by_status.get(status_context, []),
+                    empty_messages.get(status_context, ""),
+                    context,
+                )
+                dirty.discard(context)
+        rendered_context = context
         if pagination is not None and page_label is not None:
-            pagination.max = max(page_count, 1)
-            pagination.set_visibility(not board and page_size > 0 and total > 0 and page_count > 1)
-            if pagination.value != page:
-                pagination.value = page
-            page_label.set_visibility(total > 0)
-            if page_size <= 0:
-                page_label.set_text(f"Showing all {total}")
+            if context == "board":
+                pagination.set_visibility(False)
+                page_label.set_visibility(False)
             else:
-                first = (page - 1) * page_size + 1
-                last = min(page * page_size, total)
-                page_label.set_text(f"Showing {first}-{last} of {total}")
-        if stats_container is not None:
-            stats_container.clear()
-            with stats_container:
-                _render_statistics(dark.value is True)
-        counts = attention_counts()
-        for status, badge in attention_badges.items():
-            count = counts.get(status, 0)
-            badge.set_text(str(count))
-            badge.props["title"] = f"{count} need attention"
-            badge.set_visibility(count > 0)
+                jobs = (
+                    search_results
+                    if context == "search"
+                    else jobs_by_status.get(cast("db.JobStatus", context), [])
+                )
+                page_count, page, total = page_meta(jobs, context)
+                pagination.max = max(page_count, 1)
+                pagination.set_visibility(page_size > 0 and total > 0 and page_count > 1)
+                if pagination.value != page:
+                    pagination.value = page
+                page_label.set_visibility(total > 0)
+                if page_size <= 0:
+                    page_label.set_text(f"Showing all {total}")
+                else:
+                    first = (page - 1) * page_size + 1
+                    last = min(page * page_size, total)
+                    page_label.set_text(f"Showing {first}-{last} of {total}")
+        render_stats_if_needed()
 
-    main_tabs = app_header(refresh, dark)
+    def refresh_data() -> None:
+        """Reload data and render only the active view."""
+        if load_data():
+            render_view()
+
+    main_tabs = app_header(refresh_data, dark)
     assert main_tabs is not None
 
     with ui.left_drawer(value=False).props("width=360") as filters_drawer:
@@ -288,7 +379,7 @@ def dashboard_page(request: Request) -> None:
             salary_min = int(min_filter.value) if min_filter.value is not None else None
             salary_max = int(max_filter.value) if max_filter.value is not None else None
             pages.clear()
-            refresh()
+            refresh_data()
 
         currency_filter.on_value_change(lambda _: update_salary_filter())
         min_filter.on_value_change(lambda _: update_salary_filter())
@@ -316,7 +407,7 @@ def dashboard_page(request: Request) -> None:
                 return
             tag_filter = new
             pages.clear()
-            refresh()
+            refresh_data()
 
         tag_filter_select.on_value_change(lambda _: update_tag_filter())
 
@@ -368,31 +459,32 @@ def dashboard_page(request: Request) -> None:
         nonlocal sort_order
         sort_order = cast("db.JobSort", event.value or "newest")
         pages.clear()
-        refresh()
+        refresh_data()
 
     def update_page_size(event: events.ValueChangeEventArguments[int | None]) -> None:
         nonlocal page_size
         if event.value is not None:
             page_size = int(event.value)
         pages.clear()
-        refresh()
+        refresh_data()
 
     def on_page_change(event: events.ValueChangeEventArguments[int | None]) -> None:
-        context = active_context()
+        context = visible_context()
         page = event.value or 1
         if pages.get(context, 1) == page:
             return
         pages[context] = page
-        refresh()
+        dirty.add(context)
+        render_view()
 
     sort_select.on_value_change(update_sort)
     page_size_select.on_value_change(update_page_size)
 
     add_dialog = _job_form_dialog(
         None,
-        lambda values: _add_job_manually(values, refresh),
+        lambda values: _add_job_manually(values, refresh_data),
     )
-    add_job_dialog = _add_job_dialog(refresh, add_dialog)
+    add_job_dialog = _add_job_dialog(refresh_data, add_dialog)
 
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
         with ui.tab_panels(main_tabs, value=SECTION_SLUGS["dashboard"]).classes("w-full"):
@@ -436,7 +528,7 @@ def dashboard_page(request: Request) -> None:
                         nonlocal query
                         query = event.value or ""
                         pages.clear()
-                        refresh()
+                        refresh_data()
 
                     search_input.on_value_change(on_search)
                     filters_button.on_click(lambda: filters_drawer.toggle())
@@ -451,10 +543,16 @@ def dashboard_page(request: Request) -> None:
                             tag_filter_select.set_value([name])
 
                 def on_main_tab_change(value: object) -> None:
-                    on_dashboard = value == dashboard_name
+                    nonlocal main_section
+                    main_section = value if isinstance(value, str) else SECTION_SLUGS["dashboard"]
+                    on_dashboard = main_section == SECTION_SLUGS["dashboard"]
                     search_toolbar.set_visibility(on_dashboard)
                     if not on_dashboard:
                         filters_drawer.set_value(False)
+                        clear_rendered_view()
+                        render_stats_if_needed()
+                    else:
+                        render_view()
 
                 main_tabs.on_value_change(lambda event: on_main_tab_change(event.value))
 
@@ -531,7 +629,7 @@ def dashboard_page(request: Request) -> None:
             with ui.tab_panel(SECTION_SLUGS["profile"]):
                 _render_profile_editor()
             with ui.tab_panel(SECTION_SLUGS["discover"]):
-                _render_discover(refresh)
+                _render_discover(refresh_data)
 
         requested_tab = (request.query_params.get("tab") or "").strip().lower()
         tab_name = SECTION_SLUGS.get(requested_tab)
@@ -542,4 +640,4 @@ def dashboard_page(request: Request) -> None:
 
     app_footer()
 
-    refresh()
+    refresh_data()

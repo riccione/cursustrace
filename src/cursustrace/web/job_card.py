@@ -9,7 +9,7 @@ from datetime import date, datetime
 from nicegui import ui
 
 from cursustrace import db, salary
-from cursustrace.web.attention_ui import attention_reasons, most_urgent
+from cursustrace.web.attention_ui import AttentionRules, attention_reasons, most_urgent
 from cursustrace.web.constants import STATUS_NAMES
 from cursustrace.web.status_controls import (
     _render_comment_box,
@@ -134,9 +134,10 @@ def _render_card_chips(
     job: db.Job,
     tag_names: list[str],
     on_tag_click: Callable[[str], None] | None,
+    attention_rules: AttentionRules | None = None,
 ) -> None:
     """Render the tag, CV and attention chips that stay visible on the card."""
-    reasons = attention_reasons(job)
+    reasons = attention_reasons(job, attention_rules)
     if not tag_names and not job["profile_name"] and not reasons:
         return
     with ui.row().classes("ct-card__chips items-center gap-1 flex-wrap").mark("job-tags"):
@@ -171,6 +172,7 @@ def _render_job_card(
     *,
     tags: list[str] | None = None,
     on_tag_click: Callable[[str], None] | None = None,
+    attention_rules: AttentionRules | None = None,
 ) -> None:
     title = job["title"] or "Untitled position"
     company = job["company"] or "Unknown company"
@@ -184,7 +186,7 @@ def _render_job_card(
     ):
         _render_ident(title, company, current)
         _render_tracker(job, current)
-        _render_card_chips(job, tag_names, on_tag_click)
+        _render_card_chips(job, tag_names, on_tag_click, attention_rules)
     with expansion:
         ui.markdown(f"**Location:** {job['location']}")
         ui.markdown(f"**Added:** {job['date_added']}")

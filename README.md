@@ -81,6 +81,20 @@ Then the [NiceGUI](https://nicegui.io/) server starts on
 
 `cursustrace run` takes the options explicitly, e.g. `uv run cursustrace run --host 127.0.0.1 --port 8090`.
 
+#### Benchmarking the UI
+
+`scripts/benchmark.mjs` measures dashboard interactions with Playwright against a
+running server:
+
+```sh
+uv run python scripts/seed_demo.py --db data/demo.db
+CURSUS_BACKUP_DIR=backups/demo uv run cursustrace --db data/demo.db run --port 8090
+NODE_PATH="$(npm root -g)/@playwright/test/node_modules" node scripts/benchmark.mjs
+```
+
+It reports the time, DOM growth and WebSocket traffic for tab switches, view
+changes, search and sorting; pass `--json` for machine-readable output.
+
 <details>
 <summary><b>System dependencies (needed only for PDF export)</b></summary>
 

@@ -22,6 +22,7 @@ from cursustrace.version import app_version
 from cursustrace.web import (
     attention_ui,
     constants,
+    dashboard,
     job_card,
     scan,
     state,
@@ -472,6 +473,7 @@ async def test_interview_replaces_applied(user: User) -> None:
     user.find(kind=ui.checkbox, content="Applied").click()
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
 
+    user.find(marker="status-tab-applied").click()
     user.find(kind=ui.checkbox, content="Interview").click()
     await _wait_for(lambda: db.get_jobs()[0]["interview"] == 1)
 
@@ -522,6 +524,7 @@ async def test_checkbox_states_applied(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "applied")
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
 
     assert _checkbox(user, "Applied").enabled is False
     assert _checkbox(user, "Applied").value is True
@@ -533,6 +536,7 @@ async def test_checkbox_states_interview(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "interview")
     await user.open("/")
+    user.find(marker="status-tab-interview").click()
 
     assert _checkbox(user, "Applied").enabled is False
     assert _checkbox(user, "Applied").value is True
@@ -939,6 +943,7 @@ async def test_card_shows_attention_chip(user: User) -> None:
     _seed_stale_applied_job(25)
 
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
 
     assert _attention_chip_text(user) == "no response in 25 days"
 
@@ -965,6 +970,7 @@ async def test_attention_chip_prefers_the_deadline_reason(user: User) -> None:
         )
 
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
 
     assert _attention_chip_text(user) == "deadline in 3 days"
 
@@ -981,6 +987,7 @@ async def test_flagged_positions_are_listed_first(user: User) -> None:
     db.set_job_status(fresh, "applied")
 
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
 
     ordered = attention_ui.attention_first(db.get_jobs())
     assert [job["title"] for job in ordered] == ["Stale Lead", "Fresh Lead"]
@@ -1005,6 +1012,7 @@ async def test_detail_shows_attention_reason(user: User) -> None:
 async def test_attention_toggle_hides_the_card_chip(user: User) -> None:
     _seed_stale_applied_job(25)
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
     assert _attention_chip_text(user) != ""
 
     user.find(marker="settings-button").click()
@@ -1108,6 +1116,7 @@ async def test_manual_restore_wins_over_parking(user: User) -> None:
     await _wait_for(lambda: db.get_jobs()[0]["applied"] == 1)
 
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
     await user.should_see("Silent Lead")
     assert db.job_status(db.get_jobs()[0]) == "applied"
     assert db.get_jobs()[0]["outdated"] == 0
@@ -1320,10 +1329,16 @@ async def test_dashboard_lists_status_tabs(user: User) -> None:
     await user.open("/")
 
     await user.should_see("No unapplied positions yet.")
+    user.find(marker="status-tab-applied").click()
     await user.should_see("No applied positions yet.")
+    user.find(marker="status-tab-interview").click()
     await user.should_see("No interview positions yet.")
-    await user.should_not_see("No rejected positions yet.")
-    await user.should_not_see("No outdated positions yet.")
+    user.find(marker="status-tab-offer").click()
+    await user.should_see("No offer positions yet.")
+    await _show_secondary_stage(user, "rejected")
+    await user.should_see("No rejected positions yet.")
+    await _show_secondary_stage(user, "outdated")
+    await user.should_see("No outdated positions yet.")
 
 
 async def test_more_menu_is_anchored_to_the_button(user: User) -> None:
@@ -1408,9 +1423,10 @@ async def test_dashboard_shows_parked_position(user: User) -> None:
     db.set_job_status(job_id, "outdated")
 
     await user.open("/")
+    await user.should_see("No unapplied positions yet.")
+    await _show_secondary_stage(user, "outdated")
 
     await user.should_see("Senior Engineer")
-    await user.should_see("No unapplied positions yet.")
 
 
 async def test_company_search_filters_cards(user: User) -> None:
@@ -1456,6 +1472,7 @@ async def test_search_is_across_statuses(user: User) -> None:
 
     user.find("Search company").clear()
     await asyncio.sleep(0.4)
+    await _show_secondary_stage(user, "rejected")
     await user.should_see("Paysend")
 
 
@@ -1463,6 +1480,7 @@ async def test_card_comment_box_for_current_stage(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "applied")
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
 
     user.find("Applied comment").clear().type("Referred by a friend")
     user.find("Save comment").click()
@@ -1512,6 +1530,7 @@ async def test_statistics_tab_shows_counts(user: User) -> None:
     db.set_job_status(jobs[0]["id"], "applied")
     db.set_job_status(jobs[1]["id"], "rejected")
     await user.open("/")
+    user.find("Statistics").click()
 
     def stat(key: str) -> str:
         label = cast(ui.label, user.find(marker=f"stat-{key}").elements.pop())
@@ -1575,6 +1594,7 @@ async def test_statistics_status_pie(user: User) -> None:
     db.set_job_status(jobs[0]["id"], "applied")
     db.set_job_status(jobs[1]["id"], "rejected")
     await user.open("/")
+    user.find("Statistics").click()
 
     chart = cast(ui.echart, user.find(marker="status-chart").elements.pop())
     assert chart.options["series"][0]["data"] == [
@@ -1596,6 +1616,7 @@ async def test_statistics_funnel(user: User) -> None:
     db.set_job_status(jobs[0]["id"], "applied")
     db.set_job_status(jobs[1]["id"], "rejected")
     await user.open("/")
+    user.find("Statistics").click()
 
     chart = cast(ui.echart, user.find(marker="funnel-chart").elements.pop())
     assert chart.options["series"][0]["data"] == [
@@ -1621,6 +1642,7 @@ async def test_statistics_timeline_chart(user: User) -> None:
         )
         conn.commit()
     await user.open("/")
+    user.find("Statistics").click()
 
     chart = cast(ui.echart, user.find(marker="timeline-chart").elements.pop())
     labels = chart.options["xAxis"]["data"]
@@ -1635,6 +1657,7 @@ async def test_statistics_timeline_chart(user: User) -> None:
 async def test_statistics_charts_hidden_without_positions(user: User) -> None:
     db.init_db()
     await user.open("/")
+    user.find("Statistics").click()
 
     await user.should_see("No positions yet to display charts.")
     await user.should_not_see(marker="status-chart")
@@ -1645,6 +1668,7 @@ async def test_statistics_charts_hidden_without_positions(user: User) -> None:
 async def test_statistics_timeline_hint_without_applications(user: User) -> None:
     _seed_job()
     await user.open("/")
+    user.find("Statistics").click()
 
     await user.should_see("No applications recorded yet.")
     await user.should_see(marker="status-chart")
@@ -1655,6 +1679,7 @@ async def test_statistics_timeline_hint_without_applications(user: User) -> None
 async def test_statistics_charts_use_dark_theme(user: User) -> None:
     _seed_job()
     await user.open("/")
+    user.find("Statistics").click()
 
     chart = cast(ui.echart, user.find(marker="status-chart").elements.pop())
     assert chart.props["theme"] is None
@@ -2000,6 +2025,7 @@ async def test_card_shows_days_since_applied(user: User) -> None:
     job_id = _seed_job()
     db.set_job_status(job_id, "applied")
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
 
     badge = cast(ui.label, user.find(marker="days-since-applied").elements.pop())
     assert str(badge.text) == "Applied 0 days ago"
@@ -3048,3 +3074,75 @@ def test_global_css_makes_app_header_thin() -> None:
     assert ".ct-app-header { padding: 0 16px; }" in css
     assert ".ct-app-header .ct-app-brand" in css
     assert ".ct-header-link" in css
+
+
+async def test_tab_and_view_switch_reuse_cached_jobs(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_job()
+    await user.open("/")
+
+    calls = {"count": 0}
+    original = db.search_jobs
+
+    def counting(*args: object, **kwargs: object) -> list[db.Job]:
+        calls["count"] += 1
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(db, "search_jobs", counting)
+
+    user.find(marker="status-tab-applied").click()
+    await asyncio.sleep(0.1)
+    assert calls["count"] == 0
+
+    user.find(marker="view-board").click()
+    await asyncio.sleep(0.1)
+    assert calls["count"] == 0
+
+
+async def test_statistics_render_lazily(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_job()
+    calls = {"count": 0}
+    original = statistics._render_statistics
+
+    def counting(dark: bool) -> None:
+        calls["count"] += 1
+        original(dark)
+
+    monkeypatch.setattr(dashboard, "_render_statistics", counting)
+
+    await user.open("/")
+    assert calls["count"] == 0
+
+    user.find("Statistics").click()
+    await user.should_see(marker="stat-total")
+    assert calls["count"] == 1
+
+    user.find("Dashboard").click()
+    await asyncio.sleep(0.1)
+    user.find("Statistics").click()
+    await asyncio.sleep(0.1)
+    assert calls["count"] == 1
+
+
+async def test_attention_settings_are_read_once_per_render(
+    user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_stale_applied_job(25)
+    reads = {"count": 0}
+    original = db.get_setting
+
+    def counting(key: str, default: str | None = None, *, user_id: int | None = None) -> str | None:
+        if key == state.ATTENTION_NOTICE_KEY:
+            reads["count"] += 1
+        return original(key, default, user_id=user_id)
+
+    monkeypatch.setattr(db, "get_setting", counting)
+
+    await user.open("/")
+    initial = reads["count"]
+    assert initial <= 2
+
+    user.find(marker="status-tab-applied").click()
+    await asyncio.sleep(0.1)
+    assert reads["count"] == initial
