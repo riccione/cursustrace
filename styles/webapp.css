@@ -23,6 +23,14 @@ body { font-size: 22px; }
 }
 .header-tabs .q-tabs__content { overflow-x: auto; scrollbar-width: thin; }
 @media (max-width: 999px) { .header-tabs { flex: 1 1 0%; } }
+.ct-app-header { padding: 0 16px; }
+.ct-app-header .ct-app-brand { font-size: 1rem; line-height: 36px; }
+.ct-app-header .q-tab { padding: 0 10px; }
+.ct-app-header .q-tab__content { padding: 0; }
+.ct-app-header .q-btn { padding: 4px 8px; }
+.ct-header-links { overflow-x: auto; scrollbar-width: thin; min-width: 0; }
+.ct-header-link { height: 36px; padding: 0 10px; color: var(--text-secondary); }
+.ct-header-link:hover { color: var(--text-primary); }
 
 /* Design system: semantic color tokens for light and dark themes. */
 :root {
