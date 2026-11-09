@@ -3010,6 +3010,24 @@ async def test_header_is_dense_and_slim(user: User) -> None:
     assert "dense" in tabs_element.props
 
 
+async def test_detail_page_shows_main_nav(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    for label in ("Dashboard", "Statistics", "Profile & CV Editor", "Discover"):
+        assert user.find(label).elements
+    assert user.find(marker="settings-button").elements
+
+
+async def test_detail_nav_opens_statistics(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    user.find("Statistics").click()
+
+    await user.should_see(marker="status-chart")
+
+
 async def test_tab_query_opens_discover(user: User) -> None:
     await user.open("/?tab=discover")
 
