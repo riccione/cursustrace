@@ -73,6 +73,7 @@ async def test_tracker_marks_done_current_and_future_stages(user: User) -> None:
     db.set_job_status(job_id, "interview")
 
     await user.open("/")
+    user.find(marker="status-tab-interview").click()
 
     tracker = user.find(marker="job-card-tracker").elements.pop()
     steps = [
@@ -120,6 +121,7 @@ async def test_offer_card_shows_the_offer_badge(user: User) -> None:
     db.set_job_status(job_id, "offer")
 
     await user.open("/")
+    user.find(marker="status-tab-offer").click()
 
     assert _texts(user, "job-card-badge") == {"Offer"}
     assert any("ct-badge--offer" in classes for classes in _classes(user, "job-card-badge"))
@@ -130,6 +132,7 @@ async def test_card_body_keeps_the_position_details(user: User) -> None:
     db.set_job_status(job_id, "applied")
 
     await user.open("/")
+    user.find(marker="status-tab-applied").click()
 
     expansion = user.find(kind=ui.expansion).elements.pop()
     assert expansion.value is False
