@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from cursustrace import attention, db
 from cursustrace.web.session import current_user_id
 from cursustrace.web.state import _attention_notice_enabled, _attention_thresholds
@@ -11,11 +13,25 @@ def _job_label(job: db.Job) -> str:
     return f"{job['title'] or 'Untitled position'} — {job['company'] or 'Unknown company'}"
 
 
-def attention_reasons(job: db.Job) -> list[str]:
+@dataclass(frozen=True)
+class AttentionRules:
+    """Resolved attention toggle and thresholds, reusable for one render."""
+
+    enabled: bool
+    thresholds: attention.Thresholds
+
+
+def current_rules() -> AttentionRules:
+    """Read the attention setting and thresholds once."""
+    return AttentionRules(_attention_notice_enabled(), _attention_thresholds())
+
+
+def attention_reasons(job: db.Job, rules: AttentionRules | None = None) -> list[str]:
     """Reasons this position needs attention; empty when it is fine or disabled."""
-    if not _attention_notice_enabled():
+    active = rules or current_rules()
+    if not active.enabled:
         return []
-    return attention.reasons_for(job, _attention_thresholds())
+    return attention.reasons_for(job, active.thresholds)
 
 
 def most_urgent(reasons: list[str]) -> str:
@@ -26,27 +42,30 @@ def most_urgent(reasons: list[str]) -> str:
     return reasons[0]
 
 
-def attention_first(jobs: list[db.Job]) -> list[db.Job]:
+def attention_first(jobs: list[db.Job], rules: AttentionRules | None = None) -> list[db.Job]:
     """Put the positions needing attention first, keeping the order of each group."""
+    active = rules or current_rules()
+    if not active.enabled:
+        return list(jobs)
     flagged: list[db.Job] = []
     rest: list[db.Job] = []
     for job in jobs:
-        (flagged if attention_reasons(job) else rest).append(job)
+        (flagged if attention.reasons_for(job, active.thresholds) else rest).append(job)
     return flagged + rest
 
 
-def attention_counts() -> dict[db.JobStatus, int]:
+def attention_counts(rules: AttentionRules | None = None) -> dict[db.JobStatus, int]:
     """Count the positions needing attention in each pipeline stage.
 
     Only unapplied and applied positions can qualify, so the other stages are
     never present in the result.
     """
-    if not _attention_notice_enabled():
+    active = rules or current_rules()
+    if not active.enabled:
         return {}
-    thresholds = _attention_thresholds()
     counts: dict[db.JobStatus, int] = {}
     for job in db.get_jobs(user_id=current_user_id()):
-        if not attention.reasons_for(job, thresholds):
+        if not attention.reasons_for(job, active.thresholds):
             continue
         status = db.job_status(job)
         counts[status] = counts.get(status, 0) + 1
