@@ -10,6 +10,7 @@ from cursustrace import db, salary
 from cursustrace.web.attention_ui import attention_reasons
 from cursustrace.web.constants import APP_TITLE, STATUS_CHECKBOXES
 from cursustrace.web.dialogs import _confirm_delete_dialog, _delete_job_from_detail
+from cursustrace.web.header import app_header
 from cursustrace.web.job_card import _deadline_text
 from cursustrace.web.job_form import _job_form_dialog, _update_job_fields
 from cursustrace.web.nav import app_footer, scroll_to_top_button
@@ -30,7 +31,7 @@ def _fact(icon: str, label: str, value: str) -> None:
 
 def job_detail_page(job_id: int) -> None:
     ui.page_title(APP_TITLE)
-    _apply_dark_mode()
+    dark = _apply_dark_mode()
     with ui.column().classes("w-full max-w-4xl mx-auto p-4 gap-2"):
 
         @ui.refreshable
@@ -129,4 +130,5 @@ def job_detail_page(job_id: int) -> None:
         render_detail()
         scroll_to_top_button()
 
+    app_header(refresh_detail, dark, tabs=False)
     app_footer()

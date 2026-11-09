@@ -9,10 +9,8 @@ from starlette.requests import Request
 
 from cursustrace import db, salary
 from cursustrace.web.attention_ui import _park_stale_positions, attention_counts, attention_first
-from cursustrace.web.auth_pages import _change_password_dialog, _multi_user_enabled, logout
 from cursustrace.web.board import render_board
 from cursustrace.web.constants import (
-    APP_NAME,
     APP_TITLE,
     PRIMARY_STATUSES,
     SECONDARY_STATUSES,
@@ -20,13 +18,13 @@ from cursustrace.web.constants import (
     STATUS_TABS,
 )
 from cursustrace.web.discover import _render_discover
+from cursustrace.web.header import SECTION_SLUGS, app_header
 from cursustrace.web.job_card import _render_job_card
 from cursustrace.web.job_form import _add_job_manually, _job_form_dialog
 from cursustrace.web.nav import app_footer, scroll_to_top_button
 from cursustrace.web.profile import _render_profile_editor
 from cursustrace.web.scan import _add_job_dialog
-from cursustrace.web.session import current_email, current_user_id
-from cursustrace.web.settings_drawer import _render_settings
+from cursustrace.web.session import current_user_id
 from cursustrace.web.state import _apply_dark_mode
 from cursustrace.web.statistics import _render_statistics
 
@@ -271,37 +269,8 @@ def dashboard_page(request: Request) -> None:
             badge.props["title"] = f"{count} need attention"
             badge.set_visibility(count > 0)
 
-    with ui.header().classes("items-center flex-nowrap"):
-        ui.label(APP_NAME).classes("text-h6 flex-1 truncate min-w-0")
-        with ui.tabs().classes("header-tabs") as main_tabs:
-            dashboard_tab = ui.tab("Dashboard", icon="assignment").props("no-caps")
-            stats_tab = ui.tab("Statistics", icon="bar_chart").props("no-caps")
-            profile_tab = ui.tab("Profile & CV Editor", icon="person").props("no-caps")
-            discover_tab = ui.tab("Discover", icon="search").props("no-caps")
-        with ui.element("div").classes("flex-1 flex justify-end min-w-0 items-center gap-2"):
-            if _multi_user_enabled():
-                email = current_email()
-                if email:
-                    ui.label(email).classes(
-                        "text-caption ct-text-secondary truncate max-w-48"
-                    ).mark("header-email")
-                change_password_dialog = _change_password_dialog()
-                ui.button("Change password", on_click=change_password_dialog.open).props(
-                    "flat"
-                ).classes("ct-ghost-btn").mark("change-password-button")
-                ui.button("Logout", on_click=logout).props("flat").classes("ct-ghost-btn").mark(
-                    "logout-button"
-                )
-            settings_button = (
-                ui.button(icon="settings")
-                .props("flat")
-                .classes("ct-ghost-btn")
-                .mark("settings-button")
-            )
-
-    with ui.right_drawer(value=False).props("width=480") as drawer:
-        settings_button.on_click(lambda: drawer.toggle())
-        _render_settings(refresh, dark)
+    main_tabs = app_header(refresh, dark)
+    assert main_tabs is not None
 
     with ui.left_drawer(value=False).props("width=360") as filters_drawer:
         filters_drawer.mark("filters-drawer")
@@ -377,7 +346,7 @@ def dashboard_page(request: Request) -> None:
             .mark("page-size")
         )
 
-    dashboard_name = str(dashboard_tab.props["name"])
+    dashboard_name = SECTION_SLUGS["dashboard"]
     main_tabs.on_value_change(
         lambda event: filters_drawer.set_value(False) if event.value != dashboard_name else None
     )
@@ -426,8 +395,8 @@ def dashboard_page(request: Request) -> None:
     add_job_dialog = _add_job_dialog(refresh, add_dialog)
 
     with ui.column().classes("w-full max-w-6xl mx-auto p-4 gap-4"):
-        with ui.tab_panels(main_tabs, value=dashboard_tab).classes("w-full"):
-            with ui.tab_panel(dashboard_tab):
+        with ui.tab_panels(main_tabs, value=SECTION_SLUGS["dashboard"]).classes("w-full"):
+            with ui.tab_panel(SECTION_SLUGS["dashboard"]):
                 with (
                     ui.row()
                     .classes("w-full items-center gap-3")
@@ -557,12 +526,17 @@ def dashboard_page(request: Request) -> None:
                 board_container = ui.column().classes("w-full")
                 board_container.set_visibility(False)
                 board_container.mark("board-container")
-            with ui.tab_panel(stats_tab):
+            with ui.tab_panel(SECTION_SLUGS["statistics"]):
                 stats_container = ui.column().classes("w-full")
-            with ui.tab_panel(profile_tab):
+            with ui.tab_panel(SECTION_SLUGS["profile"]):
                 _render_profile_editor()
-            with ui.tab_panel(discover_tab):
+            with ui.tab_panel(SECTION_SLUGS["discover"]):
                 _render_discover(refresh)
+
+        requested_tab = (request.query_params.get("tab") or "").strip().lower()
+        tab_name = SECTION_SLUGS.get(requested_tab)
+        if tab_name is not None:
+            main_tabs.value = tab_name
 
         scroll_to_top_button()
 

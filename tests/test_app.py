@@ -2997,3 +2997,54 @@ async def test_filters_drawer_closes_when_leaving_dashboard(user: User) -> None:
 
     drawer = cast(ui.left_drawer, user.find(marker="filters-drawer").elements.pop())
     assert drawer.value is False
+
+
+async def test_header_is_dense_and_slim(user: User) -> None:
+    await user.open("/")
+
+    header = user.find(kind=ui.header).elements.pop()
+    assert "ct-app-header" in header.classes
+    tabs_element = next(
+        element for element in user.find(kind=ui.tabs).elements if "header-tabs" in element.classes
+    )
+    assert "dense" in tabs_element.props
+
+
+async def test_detail_page_shows_main_nav(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    for label in ("Dashboard", "Statistics", "Profile & CV Editor", "Discover"):
+        assert user.find(label).elements
+    assert user.find(marker="settings-button").elements
+
+
+async def test_detail_nav_opens_statistics(user: User) -> None:
+    job_id = _seed_job()
+    await user.open(f"/job/{job_id}")
+
+    user.find("Statistics").click()
+
+    await user.should_see(marker="status-chart")
+
+
+async def test_tab_query_opens_discover(user: User) -> None:
+    await user.open("/?tab=discover")
+
+    await user.should_see(marker="discover-run")
+    await user.should_not_see(marker="search-toolbar")
+
+
+async def test_tab_query_opens_statistics(user: User) -> None:
+    _seed_job()
+    await user.open("/?tab=statistics")
+
+    await user.should_see(marker="status-chart")
+
+
+def test_global_css_makes_app_header_thin() -> None:
+    css = constants.load_webapp_css()
+
+    assert ".ct-app-header { padding: 0 16px; }" in css
+    assert ".ct-app-header .ct-app-brand" in css
+    assert ".ct-header-link" in css
