@@ -30,6 +30,21 @@ def _attach_copy_button(field: _FieldT, label: str, marker: str) -> _FieldT:
     return field
 
 
+def _preferred_profile_id(profiles: list[db.Profile]) -> int | None:
+    """Return the Default profile id, falling back to the oldest profile."""
+    default = next(
+        (
+            profile["id"]
+            for profile in profiles
+            if profile["name"].casefold() == db.DEFAULT_PROFILE_NAME.casefold()
+        ),
+        None,
+    )
+    if default is not None:
+        return default
+    return min((profile["id"] for profile in profiles), default=None)
+
+
 def _render_profile_editor() -> None:
     with ui.row().classes("items-center gap-2"):
         ui.icon("person").classes("ct-heading-icon")
@@ -40,7 +55,7 @@ def _render_profile_editor() -> None:
     stored = db.get_setting(SELECTED_PROFILE_KEY, user_id=current_user_id())
     stored_id = int(stored) if stored is not None and stored.isdigit() else None
     selected: dict[str, int | None] = {
-        "id": stored_id if stored_id in known_ids else (min(known_ids) if known_ids else None)
+        "id": stored_id if stored_id in known_ids else _preferred_profile_id(profiles)
     }
 
     with ui.dialog() as add_dialog, ui.card().classes("w-full max-w-md"):
@@ -91,7 +106,7 @@ def _render_profile_editor() -> None:
         current_profiles = db.list_profiles(user_id=current_user_id())
         ids = {profile["id"] for profile in current_profiles}
         if selected["id"] not in ids:
-            selected["id"] = min(ids) if ids else None
+            selected["id"] = _preferred_profile_id(current_profiles)
         topbar.clear()
         with topbar:
             if len(current_profiles) >= 2:
@@ -161,7 +176,7 @@ def _render_profile_editor() -> None:
         db.delete_profile(selected["id"])
         delete_dialog.close()
         remaining = db.list_profiles(user_id=current_user_id())
-        selected["id"] = min((profile["id"] for profile in remaining), default=None)
+        selected["id"] = _preferred_profile_id(remaining)
         if selected["id"] is not None:
             persist_selection()
         rerender_all()
@@ -173,7 +188,7 @@ def _render_profile_editor() -> None:
             profiles_now = db.list_profiles(user_id=current_user_id())
             ids = {profile["id"] for profile in profiles_now}
             if selected["id"] not in ids:
-                selected["id"] = min(ids) if ids else None
+                selected["id"] = _preferred_profile_id(profiles_now)
             if selected["id"] is None:
                 ui.label("No profiles yet. Add a profile to create your CV.").mark("no-profiles")
                 return
@@ -297,7 +312,7 @@ def _render_profile_summary(job: db.Job) -> None:
     if selected_id is None:
         stored = db.get_setting(SELECTED_PROFILE_KEY, user_id=current_user_id())
         global_id = int(stored) if stored is not None and stored.isdigit() else None
-        selected_id = global_id if global_id in known_ids else min(known_ids)
+        selected_id = global_id if global_id in known_ids else _preferred_profile_id(profiles)
 
     with ui.column().classes("w-full gap-2").mark("profile-summary"):
         ui.label("Your profile").classes("text-h6")
