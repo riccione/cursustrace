@@ -128,9 +128,11 @@ async def _handle_scan(
         ui.notify("Please enter at least one job URL.", type="warning")
         return
 
+    urls_input.value = ""
     failed_urls = await run_scan(urls, refresh, status_label, button)
-    urls_input.value = "\n".join(failed_urls) if failed_urls else ""
-    if not failed_urls:
+    if failed_urls:
+        urls_input.value = "\n".join(failed_urls)
+    else:
         dialog.close()
 
 

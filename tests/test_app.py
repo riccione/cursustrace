@@ -303,6 +303,19 @@ async def test_add_job_panel_resets_url_box_on_reopen(user: User) -> None:
     assert cast(ui.textarea, user.find(marker="scan-urls").elements.pop()).value == ""
 
 
+async def test_add_job_panel_resets_url_box_after_scan(user: User) -> None:
+    await user.open("/")
+    await _open_add_job(user)
+    user.find(marker="scan-urls").clear().type("https://example.com/jobs/1")
+    await asyncio.sleep(0.05)
+    user.find("Scan & Save Positions").click()
+
+    await _wait_for(lambda: len(db.get_jobs()) == 1)
+    await _open_add_job(user)
+
+    assert cast(ui.textarea, user.find(marker="scan-urls").elements.pop()).value == ""
+
+
 async def test_scrape_error_shows_error(user: User, monkeypatch: pytest.MonkeyPatch) -> None:
     def raise_scrape(url: str) -> scraper.ScrapedJob:
         raise ScrapeError(f"boom: {url}")
