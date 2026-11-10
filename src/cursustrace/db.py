@@ -20,6 +20,8 @@ FUZZY_CANDIDATE_LIMIT = 50
 COMPANY_SEARCH_THRESHOLD = 70
 SIMILAR_LIMIT = 3
 
+DEFAULT_PROFILE_NAME = "Default"
+
 FINGERPRINT_SCHEME_VERSION = 2
 
 # Column definitions shared by CREATE_JOBS_TABLE and the jobs table rebuild.
@@ -1410,14 +1412,17 @@ def get_profile(profile_id: int | None = None, *, user_id: int | None = None) ->
 
 
 def list_profiles(*, user_id: int | None = None) -> list[Profile]:
-    """Return all profiles ordered by name for the selection dropdown."""
+    """Return all profiles with the Default profile first, then ordered by name."""
+    order = "CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END, name COLLATE NOCASE, id"
     with closing(get_connection()) as conn:
         if user_id is None:
-            rows = conn.execute("SELECT * FROM profile ORDER BY name COLLATE NOCASE, id").fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM profile ORDER BY {order}", (DEFAULT_PROFILE_NAME,)
+            ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM profile WHERE user_id = ? ORDER BY name COLLATE NOCASE, id",
-                (user_id,),
+                f"SELECT * FROM profile WHERE user_id = ? ORDER BY {order}",
+                (user_id, DEFAULT_PROFILE_NAME),
             ).fetchall()
     return [_row_to_profile(row) for row in rows]
 

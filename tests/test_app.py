@@ -2306,6 +2306,36 @@ async def test_profile_dropdown_switches_between_profiles(user: User) -> None:
     assert db.get_profile(second)["full_name"] == "Beta Edited"
 
 
+async def test_profile_select_keeps_default_first_and_selected(user: User) -> None:
+    db.init_db()
+    db.create_profile("Alpha CV")
+    default = db.create_profile("Default")
+    db.create_profile("Zulu CV")
+    assert default is not None
+
+    await user.open("/")
+    select = _profile_select(user)
+
+    options = cast(dict[int, str], select.options)
+    assert next(iter(options.values())) == "Default"
+    assert select.value == default
+
+
+async def test_detail_profile_select_keeps_default_first(user: User) -> None:
+    db.init_db()
+    db.create_profile("Alpha CV")
+    default = db.create_profile("Default")
+    assert default is not None
+    job_id = _seed_job()
+
+    await user.open(f"/job/{job_id}")
+
+    select = cast(ui.select, user.find(marker="profile-used-select").elements.pop())
+    options = cast(dict[int, str], select.options)
+    assert next(iter(options.values())) == "Default"
+    assert select.value == default
+
+
 async def test_profile_add_dialog_creates_and_selects_profile(user: User) -> None:
     db.init_db()
     default = db.create_profile("Default")

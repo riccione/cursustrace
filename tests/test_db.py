@@ -1502,6 +1502,27 @@ def test_list_profiles_orders_by_name(db_path: Path) -> None:
     assert [profile["name"] for profile in db.list_profiles()] == ["Alpha", "beta", "gamma"]
 
 
+def test_list_profiles_keeps_default_first(db_path: Path) -> None:
+    db.init_db()
+    db.create_profile("Alpha")
+    db.create_profile("Zulu")
+    db.create_profile("Default")
+
+    assert [profile["name"] for profile in db.list_profiles()] == [
+        "Default",
+        "Alpha",
+        "Zulu",
+    ]
+
+
+def test_list_profiles_matches_default_case_insensitively(db_path: Path) -> None:
+    db.init_db()
+    db.create_profile("Alpha")
+    db.create_profile("default")
+
+    assert db.list_profiles()[0]["name"] == "default"
+
+
 def test_get_profile_by_id_and_missing(db_path: Path) -> None:
     db.init_db()
     first = db.create_profile("First")
