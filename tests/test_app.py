@@ -2195,6 +2195,23 @@ async def test_profile_export_downloads_pdf(user: User) -> None:
     assert response.content.startswith(b"%PDF")
 
 
+async def test_profile_export_saves_current_fields_first(user: User) -> None:
+    db.init_db()
+    db.save_profile(_profile_payload(full_name="Old Name"))
+    await user.open("/")
+
+    user.find("Full Name").clear().type("New Name")
+    await asyncio.sleep(0.1)
+    user.find("Export to PDF").click()
+
+    response = await user.download.next()
+    assert response.content.startswith(b"%PDF")
+    assert db.get_profile()["full_name"] == "New Name"
+    reader = PdfReader(BytesIO(response.content))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "New Name" in text
+
+
 def _profile_select(user: User) -> ui.select:
     return cast(ui.select, user.find(marker="profile-select").elements.pop())
 
