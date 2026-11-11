@@ -268,7 +268,7 @@ pipeline no matter how old its dates look.
 Use the `Profile & CV Editor` tab to set your contact details and edit
 your CV in Markdown as four sections: Summary, Work History, Education, and
 Skills. A live preview combines them in export order. Your profile and CV are
-stored only in the SQLite database, and `Export to PDF` first saves the profile
+stored only in the SQLite database, and `Export to PDF & Save` first saves the profile
 you are editing, then downloads a formatted document combining your contact
 header with the sections in that order. When you keep more than one CV (e.g. per role or seniority), a dropdown
 at the top of the tab switches between named profiles: its `Add Profile`
@@ -478,7 +478,7 @@ every part of the app uses it, so a demo run never reaches the personal file.
 </details>
 
 `cv_style` / `--css` points at the PDF stylesheet used by the
-`Export to PDF` button in the profile tab. On start the dashboard prints
+`Export to PDF & Save` button in the profile tab. On start the dashboard prints
 which source it resolved from: `Config: using config file cursustrace.toml`
 or `Config: no config file found, using hardcoded default values`.
 

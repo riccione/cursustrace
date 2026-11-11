@@ -294,7 +294,7 @@ def _render_profile_editor() -> None:
                 media_type="application/pdf",
             )
 
-        ui.button("Export to PDF", icon="picture_as_pdf", on_click=export)
+        ui.button("Export to PDF & Save", icon="picture_as_pdf", on_click=export)
 
     rerender_all()
 

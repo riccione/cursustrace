@@ -2181,7 +2181,7 @@ async def test_profile_export_button_renders(user: User) -> None:
     db.create_profile("Default")
     await user.open("/")
 
-    await user.should_see("Export to PDF")
+    await user.should_see("Export to PDF & Save")
 
 
 async def test_profile_export_downloads_pdf(user: User) -> None:
@@ -2189,7 +2189,7 @@ async def test_profile_export_downloads_pdf(user: User) -> None:
     db.save_profile(_profile_payload())
     await user.open("/")
 
-    user.find("Export to PDF").click()
+    user.find("Export to PDF & Save").click()
 
     response = await user.download.next()
     assert response.content.startswith(b"%PDF")
@@ -2202,7 +2202,7 @@ async def test_profile_export_saves_current_fields_first(user: User) -> None:
 
     user.find("Full Name").clear().type("New Name")
     await asyncio.sleep(0.1)
-    user.find("Export to PDF").click()
+    user.find("Export to PDF & Save").click()
 
     response = await user.download.next()
     assert response.content.startswith(b"%PDF")
@@ -2529,7 +2529,7 @@ async def test_profile_export_uses_selected_profile(user: User) -> None:
 
     _profile_select(user).set_value(second)
     await asyncio.sleep(0.1)
-    user.find("Export to PDF").click()
+    user.find("Export to PDF & Save").click()
 
     response = await user.download.next()
     assert response.content.startswith(b"%PDF")
