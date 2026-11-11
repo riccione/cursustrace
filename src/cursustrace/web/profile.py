@@ -251,25 +251,29 @@ def _render_profile_editor() -> None:
         for section in (summary, work_history, education, skills):
             section.on_value_change(update_preview)
 
+        def profile_payload() -> db.Profile:
+            return {
+                "id": profile["id"],
+                "name": profile["name"],
+                "full_name": name.value or "",
+                "location": location.value or "",
+                "phone": phone.value or "",
+                "email": email.value or "",
+                "linkedin_url": linkedin.value or "",
+                "github_url": github.value or "",
+                "summary": summary.value or "",
+                "work_history": work_history.value or "",
+                "education": education.value or "",
+                "skills": skills.value or "",
+                "date_updated": None,
+                "user_id": profile["user_id"],
+            }
+
+        def persist() -> None:
+            db.save_profile(profile_payload())
+
         def save() -> None:
-            db.save_profile(
-                {
-                    "id": profile["id"],
-                    "name": profile["name"],
-                    "full_name": name.value or "",
-                    "location": location.value or "",
-                    "phone": phone.value or "",
-                    "email": email.value or "",
-                    "linkedin_url": linkedin.value or "",
-                    "github_url": github.value or "",
-                    "summary": summary.value or "",
-                    "work_history": work_history.value or "",
-                    "education": education.value or "",
-                    "skills": skills.value or "",
-                    "date_updated": None,
-                    "user_id": profile["user_id"],
-                }
-            )
+            persist()
             ui.notify("Profile and CV saved successfully!", type="positive")
 
         ui.button("Save Profile & CV", icon="save", on_click=save).props("color=primary")
@@ -277,6 +281,7 @@ def _render_profile_editor() -> None:
         ui.separator()
 
         def export() -> None:
+            persist()
             current = db.get_profile(profile["id"])
             try:
                 pdf_bytes = generate_cv_pdf(current, load_cv_styles(_cv_style_path()))
@@ -289,7 +294,7 @@ def _render_profile_editor() -> None:
                 media_type="application/pdf",
             )
 
-        ui.button("Export to PDF", icon="picture_as_pdf", on_click=export)
+        ui.button("Export to PDF & Save", icon="picture_as_pdf", on_click=export)
 
     rerender_all()
 
