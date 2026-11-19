@@ -148,6 +148,17 @@ def test_generate_cv_pdf_contains_sections_in_order() -> None:
     assert positions == sorted(positions)
 
 
+def test_long_contact_link_moves_to_its_own_line() -> None:
+    long_url = (
+        "https://www.linkedin.com/in/jane-doe-very-long-profile-slug-with-many-segments-1234567890"
+    )
+    pdf = generate_cv_pdf(_profile(linkedin_url=long_url))
+
+    reader = PdfReader(io.BytesIO(pdf))
+    lines = [line for page in reader.pages for line in (page.extract_text() or "").splitlines()]
+    assert any(long_url in line for line in lines)
+
+
 def test_generate_cv_pdf_returns_pdf_bytes() -> None:
     data = _profile(
         summary="# Jane Doe\n\n## Skills\n\n- Python\n\n| A | B |\n|---|---|\n| 1 | 2 |"

@@ -42,6 +42,7 @@ h1 + p {
 h1 + p a {
     color: #2563eb;
     text-decoration: none;
+    white-space: nowrap;
 }
 
 h2 {
