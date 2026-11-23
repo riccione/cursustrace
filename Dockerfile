@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- builder -------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.21 /uv /uvx /bin/
 
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 # --- runtime -------------------------------------------------------------
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 # WeasyPrint needs Pango, Cairo and GDK-Pixbuf for the PDF export; the fonts
 # keep the generated document readable.
